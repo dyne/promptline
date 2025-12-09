@@ -33,13 +33,13 @@ func NewSession(cfg *config.Config) *Session {
 		// For DashScope, we might need to set a custom HTTP client
 		clientConfig.HTTPClient = &http.Client{}
 	}
-	
+
 	client := openai.NewClientWithConfig(clientConfig)
 
 	// Initialize readline instance
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          "User: ",
-		HistoryFile:     "/tmp/batchat_history",
+		HistoryFile:     ".batchat_history",
 		AutoComplete:    readline.NewPrefixCompleter(),
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
@@ -52,7 +52,7 @@ func NewSession(cfg *config.Config) *Session {
 	messages := make([]openai.ChatCompletionMessage, 0)
 	messages = append(messages, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleSystem,
-		Content: "You are an expert AI assistant helping developers create batch processing jobs using the openbatch Python library. Your role is to help users define their batch tasks, then generate Python code that uses openbatch to efficiently process large datasets at 50% cost. When users want to generate code, provide complete, runnable Python scripts that follow openbatch best practices. Include proper imports, error handling, and comments explaining the code.",
+		Content: "You are an expert AI assistant to help software development. You will use bd (beads) for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods. Do not mark tasks as completed without user confirmation.",
 	})
 
 	return &Session{
@@ -202,13 +202,13 @@ func (s *Session) GetStreamingResponseWithContext(ctx context.Context, prompt st
 func (s *Session) GeneratePythonCode() error {
 	fmt.Println("Generating Python code for your batch task...")
 	fmt.Println("Please describe what kind of batch processing you need:")
-	
+
 	// Get specific input for code generation
 	input, err := s.GetInput()
 	if err != nil {
 		return err
 	}
-	
+
 	// Add a specific prompt to guide the AI to generate Python code
 	codePrompt := fmt.Sprintf("Generate a complete Python script using the openbatch library for the following task: %s\n\n"+
 		"Requirements:\n"+
@@ -219,7 +219,7 @@ func (s *Session) GeneratePythonCode() error {
 		"5. Make it runnable as a standalone script\n"+
 		"6. Assume openbatch is installed (pip install openbatch)\n"+
 		"7. Output the code in a single Python file with no additional text", input)
-	
+
 	// Add user message to history
 	s.AddMessage(openai.ChatMessageRoleUser, codePrompt)
 
@@ -233,7 +233,7 @@ func (s *Session) GeneratePythonCode() error {
 	if s.Config.Temperature != nil {
 		req.Temperature = *s.Config.Temperature
 	}
-	
+
 	if s.Config.MaxTokens != nil {
 		req.MaxTokens = *s.Config.MaxTokens
 	} else {
@@ -258,7 +258,7 @@ func (s *Session) GeneratePythonCode() error {
 	fmt.Println("Save this code to a .py file and run it with Python after installing openbatch:")
 	fmt.Println("pip install openbatch")
 	fmt.Println("python your_script.py")
-	
+
 	return nil
 }
 

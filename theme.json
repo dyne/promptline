@@ -6,5 +6,7 @@
   "chat_success_color": "#a6e3a1",
   "progress_indicator_color": "#fab387",
   "input_label_color": "#cdd6f4",
+  "input_text_color": "#cdd6f4",
+  "input_background_color": "#1e1e2e",
   "border_color": "#6c7086"
 }

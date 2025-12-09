@@ -104,10 +104,11 @@ func runTUIMode() {
 		SetTextColor(tcell.GetColor(tuiTheme.ProgressIndicatorColor)).
 		SetDynamicColors(true)
 
-	inputField := tview.NewInputField().
-		SetLabel("User: ").
-		SetFieldWidth(0). // Full width
-		SetLabelColor(tcell.GetColor(tuiTheme.InputLabelColor))
+	inputField := tview.NewInputField()
+	inputField.SetLabel("User: ")
+	inputField.SetFieldWidth(0) // Full width
+	inputField.SetLabelColor(tcell.GetColor(tuiTheme.InputLabelColor))
+	inputField.SetBackgroundColor(tcell.GetColor(tuiTheme.InputBackgroundColor))
 
 	// Create layout
 	flex := tview.NewFlex().
