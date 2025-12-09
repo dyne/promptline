@@ -74,7 +74,7 @@ func (s *Session) AddMessage(role, content string) {
 }
 
 // GetResponse gets a response from the OpenAI API
-func (s *Session) GetResponse(prompt string) (string, error) {
+func (s *Session) GetResponseWithContext(ctx context.Context, prompt string) (string, error) {
 	// Add user message to history
 	s.AddMessage(openai.ChatMessageRoleUser, prompt)
 
@@ -88,13 +88,13 @@ func (s *Session) GetResponse(prompt string) (string, error) {
 	if s.Config.Temperature != nil {
 		req.Temperature = *s.Config.Temperature
 	}
-	
+
 	if s.Config.MaxTokens != nil {
 		req.MaxTokens = *s.Config.MaxTokens
 	}
 
 	// Get response from OpenAI
-	resp, err := s.Client.CreateChatCompletion(context.Background(), req)
+	resp, err := s.Client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		return "", err
 	}
@@ -106,8 +106,16 @@ func (s *Session) GetResponse(prompt string) (string, error) {
 	return responseText, nil
 }
 
-// GetStreamingResponse gets a streaming response from the OpenAI API
-func (s *Session) GetStreamingResponse(prompt string) error {
+// GetResponse gets a response from the OpenAI API
+func (s *Session) GetResponse(prompt string) (string, error) {
+	return s.GetResponseWithContext(context.Background(), prompt)
+}
+
+// StreamResponseWithContext gets a streaming response from the OpenAI API and sends it through channels
+func (s *Session) StreamResponseWithContext(ctx context.Context, prompt string, responseChan chan<- string, errorChan chan<- error) {
+	defer close(responseChan)
+	defer close(errorChan)
+
 	// Add user message to history
 	s.AddMessage(openai.ChatMessageRoleUser, prompt)
 
@@ -122,42 +130,72 @@ func (s *Session) GetStreamingResponse(prompt string) error {
 	if s.Config.Temperature != nil {
 		req.Temperature = *s.Config.Temperature
 	}
-	
+
 	if s.Config.MaxTokens != nil {
 		req.MaxTokens = *s.Config.MaxTokens
 	}
 
 	// Get streaming response from OpenAI
-	stream, err := s.Client.CreateChatCompletionStream(context.Background(), req)
+	stream, err := s.Client.CreateChatCompletionStream(ctx, req)
 	if err != nil {
-		return err
+		errorChan <- err
+		return
 	}
 	defer stream.Close()
 
 	// Process the stream
 	fullResponse := ""
+	for {
+		select {
+		case <-ctx.Done():
+			errorChan <- ctx.Err()
+			return
+		default:
+			response, err := stream.Recv()
+			if err != nil {
+				if err == io.EOF {
+					// Add assistant response to history
+					s.AddMessage(openai.ChatMessageRoleAssistant, fullResponse)
+					return
+				}
+				errorChan <- err
+				return
+			}
+
+			if len(response.Choices) > 0 && response.Choices[0].Delta.Content != "" {
+				content := response.Choices[0].Delta.Content
+				responseChan <- content
+				fullResponse += content
+			}
+		}
+	}
+}
+
+// GetStreamingResponseWithContext gets a streaming response from the OpenAI API
+func (s *Session) GetStreamingResponseWithContext(ctx context.Context, prompt string) error {
+	// For backward compatibility, we'll print to stdout as before
+	responseChan := make(chan string)
+	errorChan := make(chan error)
+
+	go s.StreamResponseWithContext(ctx, prompt, responseChan, errorChan)
+
 	fmt.Print("Assistant: ")
 	for {
-		response, err := stream.Recv()
-		if err != nil {
-			if err == io.EOF {
-				break
+		select {
+		case content, ok := <-responseChan:
+			if !ok {
+				fmt.Println() // New line after response
+				return nil
+			}
+			fmt.Print(content)
+		case err, ok := <-errorChan:
+			if !ok {
+				fmt.Println() // New line after response
+				return nil
 			}
 			return err
 		}
-
-		if len(response.Choices) > 0 && response.Choices[0].Delta.Content != "" {
-			content := response.Choices[0].Delta.Content
-			fmt.Print(content)
-			fullResponse += content
-		}
 	}
-	fmt.Println() // New line after response
-
-	// Add assistant response to history
-	s.AddMessage(openai.ChatMessageRoleAssistant, fullResponse)
-	
-	return nil
 }
 
 // GeneratePythonCode generates Python code for batch processing using openbatch

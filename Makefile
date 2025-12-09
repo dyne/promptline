@@ -14,11 +14,11 @@ help:
 
 # Build the application
 build:
-	go build -o batchat cmd/batchat/main.go
+	go build -o batchat ./cmd/batchat
 
 # Install the application globally
 install:
-	go install cmd/batchat/main.go
+	go install ./cmd/batchat
 
 # Clean build artifacts
 clean:

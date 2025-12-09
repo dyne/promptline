@@ -85,17 +85,15 @@ Run the application:
 ./batchat
 ```
 
-During the chat, you can:
-- Describe your batch processing needs
-- Ask for help with structuring your data
-- Request Python code generation for your batch tasks
-- Get explanations about the openbatch library
+The application features a terminal-based user interface (TUI) with the following controls:
+- Type your message and press Enter to send
+- Press Ctrl+C to exit the application
+- Press Ctrl+G to generate Python code for your batch task
 
-Special commands:
+Special commands (type and press Enter):
 - `quit` or `exit`: Exit the application
 - `clear`: Clear conversation history
 - `history`: Display conversation history
-- `generate`: Generate Python code for your batch task (when ready)
 
 ## Example Workflow
 
@@ -117,7 +115,7 @@ Assistant: Here's your Python code for batch processing customer reviews:
 batchat/
 ├── cmd/
 │   └── batchat/
-│       └── main.go          # Main entry point
+│       └── main.go          # Main entry point with TUI implementation
 ├── internal/
 │   ├── config/
 │   │   └── config.go        # Configuration management
