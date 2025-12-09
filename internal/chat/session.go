@@ -20,7 +20,7 @@ type Session struct {
 	Config    *config.Config
 	Messages  []openai.ChatCompletionMessage
 	Scanner   *bufio.Scanner
-	rl        *readline.Instance
+	RL        *readline.Instance
 	history   []string
 }
 
@@ -60,7 +60,7 @@ func NewSession(cfg *config.Config) *Session {
 		Config:   cfg,
 		Messages: messages,
 		Scanner:  bufio.NewScanner(os.Stdin),
-		rl:       rl,
+		RL:       rl,
 		history:  make([]string, 0),
 	}
 }
@@ -271,7 +271,7 @@ func (s *Session) ClearHistory() {
 
 // GetInput gets input from the user
 func (s *Session) GetInput() (string, error) {
-	line, err := s.rl.Readline()
+	line, err := s.RL.Readline()
 	if err != nil {
 		if err == readline.ErrInterrupt {
 			return "", err
@@ -285,7 +285,7 @@ func (s *Session) GetInput() (string, error) {
 	line = strings.TrimSpace(line)
 	if line != "" {
 		s.history = append(s.history, line)
-		s.rl.SaveHistory(line)
+		s.RL.SaveHistory(line)
 	}
 
 	return line, nil
@@ -311,8 +311,8 @@ func (s *Session) PrintHistory() {
 
 // Close closes the readline instance
 func (s *Session) Close() error {
-	if s.rl != nil {
-		return s.rl.Close()
+	if s.RL != nil {
+		return s.RL.Close()
 	}
 	return nil
 }
