@@ -96,7 +96,7 @@ func runTUIMode() {
 		SetDynamicColors(true).
 		SetScrollable(true).
 		SetWrap(true)
-	chatView.SetBorder(true).SetTitle("Chat").SetBorderColor(tcell.GetColor(tuiTheme.BorderColor))
+	chatView.SetBorder(false)
 
 	// Progress indicator
 	progressIndicator := tview.NewTextView().
@@ -104,10 +104,27 @@ func runTUIMode() {
 		SetTextColor(tcell.GetColor(tuiTheme.ProgressIndicatorColor)).
 		SetDynamicColors(true)
 
+	// Horizontal separator
+	separator := tview.NewTextView().
+		SetDynamicColors(true).
+		SetTextColor(tcell.GetColor(tuiTheme.BorderColor))
+	separator.SetBackgroundColor(tcell.ColorBlack)
+	
+	// Update separator width on draw
+	separator.SetDrawFunc(func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
+		separator.SetText(strings.Repeat("─", width))
+		return x, y, width, height
+	})
+
 	inputField := tview.NewInputField()
-	inputField.SetLabel("User: ")
+	inputField.SetLabel("> ")
 	inputField.SetFieldWidth(0) // Full width
-	inputField.SetLabelColor(tcell.GetColor(tuiTheme.InputLabelColor))
+	inputField.SetLabelColor(tcell.GetColor(tuiTheme.InputTextColor))
+	inputField.SetFieldTextColor(tcell.GetColor(tuiTheme.InputTextColor))
+	inputField.SetFieldBackgroundColor(tcell.GetColor(tuiTheme.InputBackgroundColor))
+	inputField.SetLabelStyle(tcell.StyleDefault.
+		Foreground(tcell.GetColor(tuiTheme.InputTextColor)).
+		Background(tcell.GetColor(tuiTheme.InputBackgroundColor)))
 	inputField.SetBackgroundColor(tcell.GetColor(tuiTheme.InputBackgroundColor))
 
 	// Create layout
@@ -116,6 +133,7 @@ func runTUIMode() {
 		AddItem(header, 2, 1, false).
 		AddItem(chatView, 0, 1, false).
 		AddItem(progressIndicator, 1, 1, false).
+		AddItem(separator, 1, 1, false).
 		AddItem(inputField, 3, 1, true)
 
 	// Focus management
