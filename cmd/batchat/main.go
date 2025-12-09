@@ -2,7 +2,11 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 
 	"batchat/internal/chat"
 	"batchat/internal/config"
@@ -12,44 +16,54 @@ func main() {
 	// Load configuration
 	cfg, err := config.LoadConfig("config.json")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		log.Printf("Error loading config: %v, using defaults", err)
+		cfg = config.DefaultConfig()
 	}
 
-	// Check if API key is set
-	if cfg.APIKey == "" {
-		// Try to get from environment variable
-		apiKey := os.Getenv("OPENAI_API_KEY")
-		if apiKey == "" {
-			fmt.Fprintln(os.Stderr, "No API key found. Please set OPENAI_API_KEY environment variable or add it to config.json")
-			os.Exit(1)
-		}
+	// Check for API key
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("DASHSCOPE_API_KEY")
+	}
+	
+	if apiKey == "" && cfg.APIKey == "" {
+		log.Fatal("No API key found. Please set OPENAI_API_KEY, DASHSCOPE_API_KEY environment variable or api_key in config.json")
+	}
+	
+	if apiKey != "" {
 		cfg.APIKey = apiKey
 	}
 
 	// Create chat session
 	session := chat.NewSession(cfg)
+	
+	// Handle graceful shutdown
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		fmt.Println("\nReceived interrupt signal, shutting down...")
+		session.Close()
+		os.Exit(0)
+	}()
+	
+	// Close session when main function exits
+	defer session.Close()
 
-	// Show welcome message
-	fmt.Println("AI Chat CLI for Coders - Batch Job Assistant")
-	fmt.Println("This tool helps you define batch processing tasks and generates Python code using the openbatch library.")
-	fmt.Println("Type 'quit' or 'exit' to end the conversation")
-	fmt.Println("Type 'clear' to clear conversation history")
-	fmt.Println("Type 'history' to see conversation history")
-	fmt.Println("Type 'generate' when you're ready to generate Python code for your batch task")
-	fmt.Println("---")
+	fmt.Println("Welcome to Batchat - AI Chat CLI for Coders!")
+	fmt.Println("Type 'help' for available commands or 'quit' to exit.")
+	fmt.Println()
 
-	// Main conversation loop
+	// Main chat loop
 	for {
-		// Get user input
 		input, err := session.GetInput()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+			log.Printf("Error reading input: %v", err)
 			continue
 		}
 
 		// Handle special commands
-		switch input {
+		switch strings.ToLower(input) {
 		case "quit", "exit":
 			fmt.Println("Goodbye!")
 			return
@@ -60,26 +74,31 @@ func main() {
 		case "history":
 			session.PrintHistory()
 			continue
-		case "":
-			// Empty input, just show prompt again
+		case "help":
+			fmt.Println("Available commands:")
+			fmt.Println("  quit/exit - Exit the application")
+			fmt.Println("  clear     - Clear conversation history")
+			fmt.Println("  history   - Display conversation history")
+			fmt.Println("  generate  - Generate Python code for your batch task")
+			fmt.Println("  help      - Show this help message")
 			continue
 		case "generate":
-			// Special handling for code generation
-			if err := session.GeneratePythonCode(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error generating code: %v\n", err)
+			err := session.GeneratePythonCode()
+			if err != nil {
+				log.Printf("Error generating code: %v", err)
 			}
+			continue
+		case "":
+			// Empty input, just prompt again
 			continue
 		}
 
 		// Get response from AI
 		fmt.Print("Assistant: ")
-		response, err := session.GetResponse(input)
+		err = session.GetStreamingResponse(input)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting response: %v\n", err)
-			continue
+			log.Printf("Error getting response: %v", err)
 		}
-		
-		fmt.Println(response)
 		fmt.Println()
 	}
 }

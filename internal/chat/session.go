@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/chzyer/readline"
 	"github.com/sashabaranov/go-openai"
 	"batchat/internal/config"
 )
@@ -19,6 +20,8 @@ type Session struct {
 	Config    *config.Config
 	Messages  []openai.ChatCompletionMessage
 	Scanner   *bufio.Scanner
+	rl        *readline.Instance
+	history   []string
 }
 
 // NewSession creates a new chat session
@@ -32,19 +35,33 @@ func NewSession(cfg *config.Config) *Session {
 	}
 	
 	client := openai.NewClientWithConfig(clientConfig)
-	
+
+	// Initialize readline instance
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          "User: ",
+		HistoryFile:     "/tmp/batchat_history",
+		AutoComplete:    readline.NewPrefixCompleter(),
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
+	if err != nil {
+		panic(err)
+	}
+
 	// Initialize with system message
 	messages := make([]openai.ChatCompletionMessage, 0)
 	messages = append(messages, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleSystem,
 		Content: "You are an expert AI assistant helping developers create batch processing jobs using the openbatch Python library. Your role is to help users define their batch tasks, then generate Python code that uses openbatch to efficiently process large datasets at 50% cost. When users want to generate code, provide complete, runnable Python scripts that follow openbatch best practices. Include proper imports, error handling, and comments explaining the code.",
 	})
-	
+
 	return &Session{
 		Client:   client,
 		Config:   cfg,
 		Messages: messages,
 		Scanner:  bufio.NewScanner(os.Stdin),
+		rl:       rl,
+		history:  make([]string, 0),
 	}
 }
 
@@ -216,11 +233,24 @@ func (s *Session) ClearHistory() {
 
 // GetInput gets input from the user
 func (s *Session) GetInput() (string, error) {
-	fmt.Print("User: ")
-	if !s.Scanner.Scan() {
-		return "", s.Scanner.Err()
+	line, err := s.rl.Readline()
+	if err != nil {
+		if err == readline.ErrInterrupt {
+			return "", err
+		} else if err == io.EOF {
+			return "exit", nil
+		}
+		return "", err
 	}
-	return strings.TrimSpace(s.Scanner.Text()), nil
+
+	// Add to history if not empty
+	line = strings.TrimSpace(line)
+	if line != "" {
+		s.history = append(s.history, line)
+		s.rl.SaveHistory(line)
+	}
+
+	return line, nil
 }
 
 // PrintHistory prints the conversation history
@@ -239,4 +269,12 @@ func (s *Session) PrintHistory() {
 		fmt.Printf("%s: %s\n", role, msg.Content)
 	}
 	fmt.Println("--- End History ---")
+}
+
+// Close closes the readline instance
+func (s *Session) Close() error {
+	if s.rl != nil {
+		return s.rl.Close()
+	}
+	return nil
 }
