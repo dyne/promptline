@@ -22,8 +22,9 @@ type Command struct {
 
 // Registry holds all available commands
 type Registry struct {
-	commands  map[string]*Command
-	DebugMode *bool // Pointer to global debug mode flag
+	commands        map[string]*Command
+	DebugMode       *bool // Pointer to global debug mode flag
+	showPermissions Handler
 }
 
 // NewRegistry creates a new command registry
@@ -40,6 +41,7 @@ func NewRegistry(debugMode *bool) *Registry {
 	r.Register("history", "Display conversation history", handleHistory)
 	r.Register("help", "Show available commands", r.handleHelp)
 	r.Register("debug", "Toggle debug mode", r.handleDebug)
+	r.Register("permissions", "Show and adjust tool permissions", r.handlePermissions)
 
 	return r
 }
@@ -78,6 +80,11 @@ func (r *Registry) Execute(input string, session *chat.Session, chatView *tview.
 // GetCommands returns all registered commands
 func (r *Registry) GetCommands() map[string]*Command {
 	return r.commands
+}
+
+// SetPermissionsHandler allows main UI code to inject a rich permissions view.
+func (r *Registry) SetPermissionsHandler(handler Handler) {
+	r.showPermissions = handler
 }
 
 // Command handlers
@@ -151,6 +158,15 @@ func (r *Registry) handleDebug(session *chat.Session, chatView *tview.TextView, 
 		}
 		appendToChat(chatView, fmt.Sprintf("[%s]Debug mode %s[-]", tuiTheme.ChatSuccessColor, status))
 	}
+	chatView.ScrollToEnd()
+	return true
+}
+
+func (r *Registry) handlePermissions(session *chat.Session, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
+	if r.showPermissions != nil {
+		return r.showPermissions(session, chatView, tuiTheme, app)
+	}
+	appendToChat(chatView, fmt.Sprintf("[%s]/permissions UI not available in this mode[-]", tuiTheme.ChatErrorColor))
 	chatView.ScrollToEnd()
 	return true
 }

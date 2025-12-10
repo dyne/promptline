@@ -4,15 +4,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"promptline/internal/tools"
 )
 
 // Config represents the application configuration
 type Config struct {
-	APIKey      string   `json:"api_key"`
-	APIURL      string   `json:"api_url,omitempty"`
-	Model       string   `json:"model"`
-	Temperature *float32 `json:"temperature,omitempty"`
-	MaxTokens   *int     `json:"max_tokens,omitempty"`
+	APIKey      string       `json:"api_key"`
+	APIURL      string       `json:"api_url,omitempty"`
+	Model       string       `json:"model"`
+	Temperature *float32     `json:"temperature,omitempty"`
+	MaxTokens   *int         `json:"max_tokens,omitempty"`
+	Tools       ToolSettings `json:"tools,omitempty"`
+}
+
+// ToolSettings describes tool allow/confirm lists.
+type ToolSettings struct {
+	Allow               []string `json:"allow"`
+	RequireConfirmation []string `json:"require_confirmation"`
 }
 
 // DefaultConfig returns a config with default values
@@ -66,4 +74,24 @@ func LoadConfig(filepath string) (*Config, error) {
 	}
 
 	return config, nil
+}
+
+// ToolPolicy converts config settings into a tool policy.
+func (c *Config) ToolPolicy() tools.Policy {
+	policy := tools.Policy{}
+	if c.Tools.Allow != nil {
+		allow := make(map[string]bool, len(c.Tools.Allow))
+		for _, name := range c.Tools.Allow {
+			allow[name] = true
+		}
+		policy.Allowed = allow
+	}
+	if c.Tools.RequireConfirmation != nil {
+		confirm := make(map[string]bool, len(c.Tools.RequireConfirmation))
+		for _, name := range c.Tools.RequireConfirmation {
+			confirm[name] = true
+		}
+		policy.RequireConfirmation = confirm
+	}
+	return policy
 }

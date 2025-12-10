@@ -6,7 +6,7 @@ Promptline is a free and open source terminal UI for AI chat built at dyne.org. 
 
 - Terminal-native chat: keyboard-first TUI with multiline input, cancel (`Ctrl+C`), quit (`Ctrl+Q`), and history navigation (`Ctrl+↑/↓`).
 - OpenAI-compatible: point at any base URL via `api_url`/`OPENAI_API_URL`; set keys with `api_key` or `OPENAI_API_KEY`.
-- Tool calling with TOON output: built-in tools (`ls`, `read_file`, `write_file`, `execute_shell_command`, `get_current_datetime`) and structured tool results embedded in the chat.
+- Tool calling with TOON output and consent prompts: built-in tools (`ls`, `read_file`, `write_file`, `execute_shell_command`, `get_current_datetime`) with a default read-only allowlist and user approval for writes/exec.
 - Batch mode: run `promptline -` to read one line from stdin and print the assistant response to stdout.
 - Theming & persistence: configurable colors in `theme.json`, readline history stored in `.promptline_history`.
 
@@ -39,13 +39,19 @@ Promptline reads `config.json` next to the binary. Environment variables take pr
   "api_url": "https://api.openai.com/v1",
   "model": "gpt-4o-mini",
   "temperature": 0.7,
-  "max_tokens": 1500
+  "max_tokens": 1500,
+  "tools": {
+    "allow": ["get_current_datetime", "read_file", "ls"],
+    "require_confirmation": ["write_file", "execute_shell_command"]
+  }
 }
 ```
 
 - `api_key` / `OPENAI_API_KEY` (required)
 - `api_url` / `OPENAI_API_URL` (optional; set for self-hosted or proxy)
 - `model`, `temperature`, `max_tokens` (optional tuning)
+- `tools.allow` overrides the tool allowlist (defaults to read-only tools if unset)
+- `tools.require_confirmation` forces a confirmation prompt per tool; writes/exec require confirmation by default
 
 The app exits early if no API key is provided.
 
@@ -59,6 +65,12 @@ Batch mode:
 ```bash
 echo "Say hello" | ./promptline -
 ```
+
+## Tool permissions
+
+- Default allowlist: `get_current_datetime`, `read_file`, and `ls` run without prompting; `write_file` and `execute_shell_command` are blocked until you approve them.
+- The TUI shows a modal before running any blocked/confirmation-required tool so you can allow once, always allow, or deny.
+- Denied tools surface back to the model as errors; adjust the allow/confirm lists in `config.json` if you want a different default policy.
 
 ## Project Structure
 

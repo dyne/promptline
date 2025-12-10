@@ -109,6 +109,66 @@ func TestAccumulateToolCallMissingNameDefaults(t *testing.T) {
 	}
 }
 
+func TestFinalizeToolCallsEnsuresNameAndJSONArgs(t *testing.T) {
+	toolCalls := map[string]*openai.ToolCall{}
+	argBuilders := map[string]*strings.Builder{}
+
+	// Empty name and args should be discarded.
+	entry := accumulateToolCall(toolCalls, argBuilders, openai.ToolCall{
+		ID:   "1",
+		Type: openai.ToolTypeFunction,
+		Function: openai.FunctionCall{
+			Name:      "",
+			Arguments: "",
+		},
+	})
+	toolCalls["1"] = entry
+
+	// Another call with args but missing name should be kept and normalized.
+	entry2 := accumulateToolCall(toolCalls, argBuilders, openai.ToolCall{
+		ID:   "2",
+		Type: openai.ToolTypeFunction,
+		Function: openai.FunctionCall{
+			Name:      "",
+			Arguments: `{"x":1}`,
+		},
+	})
+	toolCalls["2"] = entry2
+
+	final := finalizeToolCalls(toolCalls, argBuilders)
+	if len(final) != 1 {
+		t.Fatalf("expected 1 call kept, got %d", len(final))
+	}
+	call := final[0]
+	if call.Function.Name != "unknown_tool" {
+		t.Fatalf("expected unknown_tool fallback, got %s", call.Function.Name)
+	}
+	if call.Function.Arguments != `{"x":1}` {
+		t.Fatalf("expected args to preserve JSON, got %q", call.Function.Arguments)
+	}
+
+	// When name exists but args are empty, default to {} for JSON validity.
+	entry3 := accumulateToolCall(toolCalls, argBuilders, openai.ToolCall{
+		ID:   "3",
+		Type: openai.ToolTypeFunction,
+		Function: openai.FunctionCall{
+			Name:      "ls",
+			Arguments: "",
+		},
+	})
+	toolCalls["3"] = entry3
+	final = finalizeToolCalls(toolCalls, argBuilders)
+	foundEmpty := false
+	for _, c := range final {
+		if c.Function.Name == "ls" && c.Function.Arguments == "{}" {
+			foundEmpty = true
+		}
+	}
+	if !foundEmpty {
+		t.Fatalf("expected ls call with empty args coerced to {}")
+	}
+}
+
 func TestAddToolResultMessageIncludesError(t *testing.T) {
 	s := &Session{
 		ToolRegistry: tools.NewRegistry(),

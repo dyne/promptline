@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,13 +110,41 @@ func TestExecuteGetCurrentDatetime(t *testing.T) {
 	}
 }
 
-func TestExecuteShellCommand(t *testing.T) {
+func TestExecuteShellCommandBlockedByDefault(t *testing.T) {
 	registry := NewRegistry()
 	result := registry.Execute("execute_shell_command", map[string]interface{}{
 		"command": "printf 'hello'",
 	})
+	if !errors.Is(result.Error, ErrToolNotAllowed) {
+		t.Fatalf("expected ErrToolNotAllowed, got: %v", result.Error)
+	}
+}
+
+func TestExecuteShellCommandRequiresConfirmation(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"execute_shell_command": true,
+		},
+	})
+	result := registry.Execute("execute_shell_command", map[string]interface{}{
+		"command": "printf 'hello'",
+	})
+	if !errors.Is(result.Error, ErrToolRequiresConfirmation) {
+		t.Fatalf("expected ErrToolRequiresConfirmation, got: %v", result.Error)
+	}
+}
+
+func TestExecuteShellCommandWithForce(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"execute_shell_command": true,
+		},
+	})
+	result := registry.ExecuteWithOptions("execute_shell_command", map[string]interface{}{
+		"command": "printf 'hello'",
+	}, ExecuteOptions{Force: true})
 	if result.Error != nil {
-		t.Fatalf("expected no error, got: %v", result.Error)
+		t.Fatalf("expected no error when forced, got: %v", result.Error)
 	}
 	if strings.TrimSpace(result.Result) != "hello" {
 		t.Fatalf("expected output 'hello', got %q", result.Result)
@@ -123,7 +152,15 @@ func TestExecuteShellCommand(t *testing.T) {
 }
 
 func TestExecuteWriteAndReadFile(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"write_file": true,
+			"read_file":  true,
+		},
+		RequireConfirmation: map[string]bool{
+			"write_file": false,
+		},
+	})
 	tempDir := t.TempDir()
 	filePath := filepath.Join(tempDir, "sample.txt")
 

@@ -148,6 +148,8 @@ Consider adding:
 - Rate limiting
 - User confirmation for dangerous operations
 
+Promptline blocks new tools by default and asks for confirmation unless you explicitly allow them via the `tools.allow`/`tools.require_confirmation` settings in `config.json`. Keep that in mind when testing new additions.
+
 ### 4. Documentation
 
 Write clear descriptions:

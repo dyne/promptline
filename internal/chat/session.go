@@ -55,10 +55,11 @@ func NewSession(cfg *config.Config) *Session {
 	}
 
 	// Initialize tool registry
-	toolRegistry := tools.NewRegistry()
+	toolRegistry := tools.NewRegistryWithPolicy(cfg.ToolPolicy())
 
-	systemPrompt := "You are an expert AI assistant to help software development. You will use bd (beads) for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods. Use available tools via function calls when they are relevant.\n"
-	systemPrompt += "Tool outputs must be formatted using TOON (Token-Oriented Object Notation). Return concise TOON blocks for tool results/errors. Keep function.arguments strictly valid JSON when requesting tools. Do not wrap TOON in markdown fences.\n"
+	systemPrompt := "You are an expert AI assistant to help software development. You will use bd (beads) for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.\n"
+	systemPrompt += "Tool usage requires explicit user permission. Default allowlist: get_current_datetime, read_file, ls. Tools that write or execute (e.g., write_file, execute_shell_command) are blocked unless the user opts in; ask for consent before proposing them and respect permission denials.\n"
+	systemPrompt += "When requesting a tool, keep function.arguments as strict JSON (a valid object string). Tool outputs returned to you are formatted as TOON (Token-Oriented Object Notation); do not wrap TOON in markdown fences.\n"
 
 	// Initialize with system message
 	messages := []openai.ChatCompletionMessage{
@@ -236,17 +237,7 @@ func (s *Session) StreamResponseWithContext(ctx context.Context, prompt string, 
 			if err != nil {
 				if err == io.EOF {
 					// Persist assistant message (with tool calls if any)
-					finalCalls := make([]openai.ToolCall, 0, len(toolCalls))
-					for _, call := range toolCalls {
-						// ensure final arguments are up to date from builder map
-						if builder, ok := argBuilders[call.ID]; ok {
-							call.Function.Arguments = builder.String()
-						}
-						if call.Function.Name == "" {
-							call.Function.Name = "unknown_tool"
-						}
-						finalCalls = append(finalCalls, *call)
-					}
+					finalCalls := finalizeToolCalls(toolCalls, argBuilders)
 					s.AddAssistantMessage(contentBuilder.String(), finalCalls)
 
 					// Emit tool calls so the caller can execute them
@@ -306,6 +297,36 @@ func accumulateToolCall(toolCalls map[string]*openai.ToolCall, argBuilders map[s
 	entry.Function.Arguments = builder.String()
 
 	return entry
+}
+
+// finalizeToolCalls ensures tool calls have names and JSON arguments.
+func finalizeToolCalls(toolCalls map[string]*openai.ToolCall, argBuilders map[string]*strings.Builder) []openai.ToolCall {
+	finalCalls := make([]openai.ToolCall, 0, len(toolCalls))
+	for _, call := range toolCalls {
+		rawArgs := ""
+		if builder, ok := argBuilders[call.ID]; ok {
+			rawArgs = builder.String()
+		}
+		trimmed := strings.TrimSpace(rawArgs)
+
+		// Drop nameless + empty-arg tool calls (often stray/unsolicited).
+		if call.Function.Name == "" && trimmed == "" {
+			continue
+		}
+
+		args := rawArgs
+		if trimmed == "" {
+			args = "{}"
+		} else if !json.Valid([]byte(args)) {
+			args = "{}"
+		}
+		call.Function.Arguments = args
+		if call.Function.Name == "" {
+			call.Function.Name = "unknown_tool"
+		}
+		finalCalls = append(finalCalls, *call)
+	}
+	return finalCalls
 }
 
 // GetStreamingResponseWithContext gets a streaming response from the OpenAI API and prints it.
