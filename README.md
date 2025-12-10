@@ -53,7 +53,7 @@ For DashScope (Qwen models):
 ```json
 {
   "api_key": "your-dashscope-api-key",
-  "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+  "api_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
   "model": "qwen3",
   "temperature": 0.7,
   "max_tokens": 1500
@@ -64,7 +64,7 @@ For OpenAI:
 ```json
 {
   "api_key": "your-openai-api-key",
-  "base_url": "https://api.openai.com/v1",
+  "api_url": "https://api.openai.com/v1",
   "model": "gpt-4o-mini",
   "temperature": 0.7,
   "max_tokens": 1500
@@ -73,7 +73,7 @@ For OpenAI:
 
 Alternatively, you can set your API key using environment variables:
 - For OpenAI: `OPENAI_API_KEY`
-- For DashScope: `DASHSCOPE_API_KEY`
+- For OpenAI-compatible URL: `OPENAI_API_URL`
 
 If both are provided, the environment variable takes precedence over the config file.
 

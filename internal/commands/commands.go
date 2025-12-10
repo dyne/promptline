@@ -5,13 +5,13 @@ import (
 	"strings"
 
 	"github.com/rivo/tview"
-	"github.com/sashabaranov/go-openai"
 
+	"batchat/internal/chat"
 	"batchat/internal/theme"
 )
 
 // Handler represents a command handler function
-type Handler func(messages *[]openai.ChatCompletionMessage, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool
+type Handler func(session *chat.Session, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool
 
 // Command represents a TUI command
 type Command struct {
@@ -22,23 +22,25 @@ type Command struct {
 
 // Registry holds all available commands
 type Registry struct {
-	commands map[string]*Command
+	commands  map[string]*Command
+	DebugMode *bool // Pointer to global debug mode flag
 }
 
 // NewRegistry creates a new command registry
-func NewRegistry() *Registry {
+func NewRegistry(debugMode *bool) *Registry {
 	r := &Registry{
-		commands: make(map[string]*Command),
+		commands:  make(map[string]*Command),
+		DebugMode: debugMode,
 	}
-	
+
 	// Register built-in commands
 	r.Register("quit", "Exit the application", handleQuit)
 	r.Register("exit", "Exit the application", handleQuit)
 	r.Register("clear", "Clear conversation history", handleClear)
 	r.Register("history", "Display conversation history", handleHistory)
-	r.Register("generate", "Generate Python code for batch processing", handleGenerate)
-	r.Register("help", "Show available commands", handleHelp)
-	
+	r.Register("help", "Show available commands", r.handleHelp)
+	r.Register("debug", "Toggle debug mode", r.handleDebug)
+
 	return r
 }
 
@@ -52,25 +54,25 @@ func (r *Registry) Register(name, description string, handler Handler) {
 }
 
 // Execute runs a command if it exists
-func (r *Registry) Execute(input string, messages *[]openai.ChatCompletionMessage, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
+func (r *Registry) Execute(input string, session *chat.Session, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
 	// Check if input starts with /
 	if !strings.HasPrefix(input, "/") {
 		return false
 	}
-	
+
 	// Extract command name
 	cmdName := strings.TrimPrefix(input, "/")
 	cmdName = strings.ToLower(strings.TrimSpace(cmdName))
-	
+
 	// Look up command
 	cmd, exists := r.commands[cmdName]
 	if !exists {
 		appendToChat(chatView, fmt.Sprintf("[%s]Unknown command: /%s (type /help for available commands)[-]", tuiTheme.ChatErrorColor, cmdName))
 		return true
 	}
-	
+
 	// Execute command
-	return cmd.Handler(messages, chatView, tuiTheme, app)
+	return cmd.Handler(session, chatView, tuiTheme, app)
 }
 
 // GetCommands returns all registered commands
@@ -80,25 +82,21 @@ func (r *Registry) GetCommands() map[string]*Command {
 
 // Command handlers
 
-func handleQuit(messages *[]openai.ChatCompletionMessage, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
+func handleQuit(session *chat.Session, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
 	app.Stop()
 	return true
 }
 
-func handleClear(messages *[]openai.ChatCompletionMessage, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
+func handleClear(session *chat.Session, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
 	chatView.Clear()
-	// Keep the system message but clear the rest
-	if len(*messages) > 0 {
-		systemMsg := (*messages)[0]
-		*messages = []openai.ChatCompletionMessage{systemMsg}
-	}
+	session.ClearHistory()
 	chatView.SetText(fmt.Sprintf("[%s]Chat history cleared[-]", tuiTheme.ChatSuccessColor))
 	return true
 }
 
-func handleHistory(messages *[]openai.ChatCompletionMessage, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
+func handleHistory(session *chat.Session, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
 	historyText := fmt.Sprintf("[%s]--- Conversation History ---[-]\n", tuiTheme.ChatSuccessColor)
-	for _, msg := range *messages {
+	for _, msg := range session.MessagesSnapshot() {
 		role := "Unknown"
 		color := tuiTheme.ChatAssistantColor
 		switch msg.Role {
@@ -111,6 +109,9 @@ func handleHistory(messages *[]openai.ChatCompletionMessage, chatView *tview.Tex
 		case "assistant":
 			role = "Assistant"
 			color = tuiTheme.ChatAssistantColor
+		case "tool":
+			role = "Tool"
+			color = tuiTheme.ProgressIndicatorColor
 		}
 		historyText += fmt.Sprintf("[%s]%s:[-] %s\n", color, role, msg.Content)
 	}
@@ -120,28 +121,36 @@ func handleHistory(messages *[]openai.ChatCompletionMessage, chatView *tview.Tex
 	return true
 }
 
-func handleGenerate(messages *[]openai.ChatCompletionMessage, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
-	appendToChat(chatView, fmt.Sprintf("[%s]Code generation feature coming soon - ask the AI to generate Python code using openbatch[-]", tuiTheme.ProgressIndicatorColor))
-	return true
-}
-
-func handleHelp(messages *[]openai.ChatCompletionMessage, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
+func (r *Registry) handleHelp(session *chat.Session, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
 	helpText := fmt.Sprintf("[%s]Available Commands:[-]\n", tuiTheme.ChatSuccessColor)
-	
-	// Get all commands and display them
-	commands := []string{"help", "history", "clear", "generate", "quit", "exit"}
-	registry := NewRegistry()
-	for _, cmdName := range commands {
-		if cmd, exists := registry.commands[cmdName]; exists {
-			helpText += fmt.Sprintf("  [%s]/%s[-] - %s\n", tuiTheme.ChatUserColor, cmd.Name, cmd.Description)
-		}
+
+	for _, cmd := range r.commands {
+		helpText += fmt.Sprintf("  [%s]/%s[-] - %s\n", tuiTheme.ChatUserColor, cmd.Name, cmd.Description)
 	}
-	
+
 	helpText += fmt.Sprintf("\n[%s]Keyboard Shortcuts:[-]\n", tuiTheme.ChatSuccessColor)
 	helpText += fmt.Sprintf("  [%s]Ctrl+Q[-] - Quit application\n", tuiTheme.ChatUserColor)
 	helpText += fmt.Sprintf("  [%s]Enter[-] - Send message\n", tuiTheme.ChatUserColor)
-	
+
 	appendToChat(chatView, helpText)
+	chatView.ScrollToEnd()
+	return true
+}
+
+func (r *Registry) handleDebug(session *chat.Session, chatView *tview.TextView, tuiTheme *theme.Theme, app *tview.Application) bool {
+	if r.DebugMode != nil {
+		*r.DebugMode = !*r.DebugMode
+		status := "disabled"
+		if *r.DebugMode {
+			status = "enabled"
+			// Show system prompt in debug mode
+			msgs := session.MessagesSnapshot()
+			if len(msgs) > 0 {
+				appendToChat(chatView, fmt.Sprintf("[%s]System Prompt:[-]\n%s", tuiTheme.ProgressIndicatorColor, msgs[0].Content))
+			}
+		}
+		appendToChat(chatView, fmt.Sprintf("[%s]Debug mode %s[-]", tuiTheme.ChatSuccessColor, status))
+	}
 	chatView.ScrollToEnd()
 	return true
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/sashabaranov/go-openai"
 
 	"batchat/internal/chat"
 	"batchat/internal/commands"
@@ -22,14 +23,14 @@ import (
 // loadHistoryFromFile loads command history from readline history file
 func loadHistoryFromFile(filepath string) []string {
 	history := make([]string, 0)
-	
+
 	file, err := os.Open(filepath)
 	if err != nil {
 		// File doesn't exist yet, return empty history
 		return history
 	}
 	defer file.Close()
-	
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -37,7 +38,7 @@ func loadHistoryFromFile(filepath string) []string {
 			history = append(history, line)
 		}
 	}
-	
+
 	return history
 }
 
@@ -100,25 +101,26 @@ func runTUIMode() {
 	session := chat.NewSession(cfg)
 	defer session.Close()
 
-	// Create command registry
-	cmdRegistry := commands.NewRegistry()
-
-	// Create TUI application
-	app := tview.NewApplication()
-
 	// State variables
 	var isProcessing bool
 	var processingMutex sync.Mutex
 	var cancelFunc context.CancelFunc
 	var ctx context.Context
-	
+	var debugMode bool = false
+
+	// Create command registry with debug mode reference
+	cmdRegistry := commands.NewRegistry(&debugMode)
+
+	// Create TUI application
+	app := tview.NewApplication()
+
 	// Input history navigation - load from readline history file
 	inputHistory := loadHistoryFromFile(".batchat_history")
 	historyIndex := -1
 
 	// Create UI components
 	header := tview.NewTextView().
-		SetText("Batchat - AI Chat for Batch Processing Jobs\nPress Ctrl+C or Ctrl+Q to quit\n").
+		SetText("Batchat - AI Chat for Batch Processing Jobs\nCtrl+C: Cancel | Ctrl+Q: Quit\n").
 		SetTextColor(tcell.GetColor(tuiTheme.HeaderTextColor)).
 		SetDynamicColors(true)
 
@@ -139,7 +141,7 @@ func runTUIMode() {
 		SetDynamicColors(true).
 		SetTextColor(tcell.GetColor(tuiTheme.BorderColor))
 	separator.SetBackgroundColor(tcell.ColorBlack)
-	
+
 	// Update separator width on draw and add Ctrl+Enter hint
 	separator.SetDrawFunc(func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
 		hint := " Ctrl+Enter to send "
@@ -152,7 +154,7 @@ func runTUIMode() {
 		return x, y, width, height
 	})
 
-	// Multiline input area
+	// Multiline input area with elastic height
 	inputArea := tview.NewTextArea().
 		SetPlaceholder("Type your message... (Ctrl+Enter to send)")
 	inputArea.SetBackgroundColor(tcell.GetColor(tuiTheme.InputBackgroundColor))
@@ -164,6 +166,11 @@ func runTUIMode() {
 		Background(tcell.GetColor(tuiTheme.InputBackgroundColor)))
 	inputArea.SetBorder(false)
 
+	// Input area elastic height management
+	const minInputHeight = 5
+	const maxInputHeight = 15
+	currentInputHeight := minInputHeight
+
 	// Create layout
 	flex := tview.NewFlex().
 		SetDirection(tview.FlexRow).
@@ -171,7 +178,39 @@ func runTUIMode() {
 		AddItem(chatView, 0, 1, false).
 		AddItem(progressIndicator, 1, 1, false).
 		AddItem(separator, 1, 1, false).
-		AddItem(inputArea, 5, 1, true)
+		AddItem(inputArea, currentInputHeight, 1, true)
+
+	// Elastic height monitoring (runs in background)
+	go func() {
+		lastLineCount := 0
+		for {
+			time.Sleep(100 * time.Millisecond)
+
+			text := inputArea.GetText()
+			lineCount := strings.Count(text, "\n") + 1
+
+			// Only update if line count changed
+			if lineCount != lastLineCount {
+				lastLineCount = lineCount
+
+				var newHeight int
+				if lineCount <= minInputHeight {
+					newHeight = minInputHeight
+				} else if lineCount <= minInputHeight*2 {
+					newHeight = minInputHeight * 2
+				} else {
+					newHeight = maxInputHeight
+				}
+
+				if newHeight != currentInputHeight {
+					currentInputHeight = newHeight
+					app.QueueUpdateDraw(func() {
+						flex.ResizeItem(inputArea, currentInputHeight, 1)
+					})
+				}
+			}
+		}
+	}()
 
 	// Focus management
 	app.SetFocus(inputArea)
@@ -206,7 +245,7 @@ func runTUIMode() {
 
 		// Clear input area
 		inputArea.SetText("", true)
-		
+
 		// Add to input history for arrow key navigation
 		inputHistory = append(inputHistory, text)
 		historyIndex = -1 // Reset history navigation
@@ -217,7 +256,7 @@ func runTUIMode() {
 		}
 
 		// Check if it's a command
-		if cmdRegistry.Execute(text, &session.Messages, chatView, tuiTheme, app) {
+		if cmdRegistry.Execute(text, session, chatView, tuiTheme, app) {
 			return
 		}
 
@@ -243,57 +282,95 @@ func runTUIMode() {
 				processingMutex.Unlock()
 			}()
 
-			// Create channels for streaming response
-			responseChan := make(chan string)
-			errorChan := make(chan error)
+			// Loop to handle tool calls - AI may need multiple turns
+			includeUserMessage := true
+			prompt := text
 
-			// Start streaming response
-			go session.StreamResponseWithContext(ctx, text, responseChan, errorChan)
-
-			// Process the streaming response
 			for {
-				select {
-				case content, ok := <-responseChan:
-					if !ok {
-						// Streaming finished
-						app.QueueUpdateDraw(func() {
-							chatView.ScrollToEnd()
-						})
-						return
-					}
-					// Update chat view
-					app.QueueUpdateDraw(func() {
-						currentText := chatView.GetText(false)
-						newText := currentText + content
-						chatView.SetText(newText)
-						chatView.ScrollToEnd()
-					})
-				case err, ok := <-errorChan:
-					if !ok {
-						// Streaming finished normally
-						app.QueueUpdateDraw(func() {
-							chatView.ScrollToEnd()
-						})
-						return
-					}
-					// Handle error
-					if err == context.Canceled {
+				events := make(chan chat.StreamEvent)
+				go session.StreamResponseWithContext(ctx, prompt, includeUserMessage, events)
+
+				fullResponse := ""
+				assistantPrefixShown := false
+				var toolCalls []openai.ToolCall
+
+				for event := range events {
+					switch event.Type {
+					case chat.StreamEventContent:
+						content := event.Content
+						fullResponse += content
+						if !assistantPrefixShown {
+							app.QueueUpdateDraw(func() {
+								currentText := chatView.GetText(false)
+								newText := currentText + fmt.Sprintf("\n[%s]Assistant:[-] ", tuiTheme.ChatAssistantColor)
+								chatView.SetText(newText)
+							})
+							assistantPrefixShown = true
+						}
 						app.QueueUpdateDraw(func() {
 							currentText := chatView.GetText(false)
-							newText := currentText + fmt.Sprintf("\n[%s]Request cancelled[-]", tuiTheme.ChatErrorColor)
+							newText := currentText + content
 							chatView.SetText(newText)
 							chatView.ScrollToEnd()
 						})
-					} else {
+					case chat.StreamEventToolCall:
+						if event.ToolCall != nil {
+							toolCalls = append(toolCalls, *event.ToolCall)
+						}
+					case chat.StreamEventError:
+						err := event.Err
+						if err == context.Canceled {
+							app.QueueUpdateDraw(func() {
+								currentText := chatView.GetText(false)
+								newText := currentText + fmt.Sprintf("\n[%s]Request cancelled[-]", tuiTheme.ChatErrorColor)
+								chatView.SetText(newText)
+								chatView.ScrollToEnd()
+							})
+						} else {
+							app.QueueUpdateDraw(func() {
+								currentText := chatView.GetText(false)
+								newText := currentText + fmt.Sprintf("\n[%s]Error: %v[-]", tuiTheme.ChatErrorColor, err)
+								chatView.SetText(newText)
+								chatView.ScrollToEnd()
+							})
+						}
+						return
+					}
+				}
+
+				// If no tool calls were made, we're done
+				if len(toolCalls) == 0 {
+					if debugMode && fullResponse != "" {
 						app.QueueUpdateDraw(func() {
 							currentText := chatView.GetText(false)
-							newText := currentText + fmt.Sprintf("\n[%s]Error: %v[-]", tuiTheme.ChatErrorColor, err)
-							chatView.SetText(newText)
+							currentText += fmt.Sprintf("\n[%s]DEBUG - Full Response:[-]\n%s\n", tuiTheme.ChatErrorColor, fullResponse)
+							chatView.SetText(currentText)
 							chatView.ScrollToEnd()
 						})
 					}
 					return
 				}
+
+				// Execute tool calls and display results
+				for _, tc := range toolCalls {
+					result := session.ToolRegistry.ExecuteOpenAIToolCall(tc)
+					session.AddToolResultMessage(tc, result)
+
+					toolCallInfo := session.FormatToolCallDisplay(tc, result)
+					app.QueueUpdateDraw(func() {
+						currentText := chatView.GetText(false)
+						currentText += fmt.Sprintf("\n[%s]%s[-]", tuiTheme.ProgressIndicatorColor, toolCallInfo)
+						if debugMode {
+							currentText += fmt.Sprintf("\n[%s]DEBUG - Tool Args:[-]\n%s\n", tuiTheme.ChatErrorColor, tc.Function.Arguments)
+						}
+						chatView.SetText(currentText)
+						chatView.ScrollToEnd()
+					})
+				}
+
+				// Request a follow-up without adding another user message
+				includeUserMessage = false
+				prompt = ""
 			}
 		}()
 	}
@@ -302,25 +379,38 @@ func runTUIMode() {
 	inputArea.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		// Ctrl+Enter to submit (check multiple ways this might be sent)
 		if (event.Key() == tcell.KeyEnter && event.Modifiers()&tcell.ModCtrl != 0) ||
-		   (event.Key() == tcell.KeyCtrlJ) ||
-		   (event.Rune() == '\n' && event.Modifiers()&tcell.ModCtrl != 0) {
+			(event.Key() == tcell.KeyCtrlJ) ||
+			(event.Rune() == '\n' && event.Modifiers()&tcell.ModCtrl != 0) {
 			handleSubmit()
 			return nil
 		}
-		
+
 		switch event.Key() {
+		case tcell.KeyCtrlC:
+			// Ctrl+C: Cancel current operation (break signal)
+			processingMutex.Lock()
+			if isProcessing && cancelFunc != nil {
+				cancelFunc()
+				app.QueueUpdateDraw(func() {
+					currentText := chatView.GetText(false)
+					newText := currentText + fmt.Sprintf("\n[%s]⚠ Operation cancelled by user[-]", tuiTheme.ChatErrorColor)
+					chatView.SetText(newText)
+					chatView.ScrollToEnd()
+				})
+			}
+			processingMutex.Unlock()
+			return nil
+
 		case tcell.KeyCtrlQ:
-			// Check if we're processing and cancel if needed
+			// Ctrl+Q: Quit the application
 			processingMutex.Lock()
 			if isProcessing && cancelFunc != nil {
 				cancelFunc()
 			}
 			processingMutex.Unlock()
-
-			// Quit the application
 			app.Stop()
 			return nil
-		
+
 		case tcell.KeyUp:
 			// Navigate backward through history (only when Ctrl is pressed)
 			if event.Modifiers()&tcell.ModCtrl != 0 && len(inputHistory) > 0 {
@@ -334,7 +424,7 @@ func runTUIMode() {
 				}
 				return nil
 			}
-		
+
 		case tcell.KeyDown:
 			// Navigate forward through history (only when Ctrl is pressed)
 			if event.Modifiers()&tcell.ModCtrl != 0 && len(inputHistory) > 0 && historyIndex != -1 {
