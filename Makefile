@@ -1,10 +1,10 @@
-# Makefile for batchat
+# Makefile for promptline
 
 .PHONY: build install clean test help
 
 # Default target
 help:
-	@echo "batchat Makefile"
+	@echo "promptline Makefile"
 	@echo "Usage:"
 	@echo "  make build     - Build the application"
 	@echo "  make install   - Install the application globally"
@@ -14,15 +14,15 @@ help:
 
 # Build the application
 build:
-	go build -o batchat ./cmd/batchat
+	go build -o promptline ./cmd/promptline
 
 # Install the application globally
 install:
-	go install ./cmd/batchat
+	go install ./cmd/promptline
 
 # Clean build artifacts
 clean:
-	rm -f batchat
+	rm -f promptline
 
 # Run tests
 test:

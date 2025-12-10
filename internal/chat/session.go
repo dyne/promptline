@@ -11,11 +11,11 @@ import (
 	"strings"
 	"sync"
 
-	"batchat/internal/config"
-	"batchat/internal/tools"
 	"github.com/alpkeskin/gotoon"
 	"github.com/chzyer/readline"
 	"github.com/sashabaranov/go-openai"
+	"promptline/internal/config"
+	"promptline/internal/tools"
 )
 
 // Session represents a chat session with context
@@ -45,7 +45,7 @@ func NewSession(cfg *config.Config) *Session {
 	// Initialize readline instance
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          "User: ",
-		HistoryFile:     ".batchat_history",
+		HistoryFile:     ".promptline_history",
 		AutoComplete:    readline.NewPrefixCompleter(),
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",

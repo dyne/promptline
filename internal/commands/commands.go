@@ -6,8 +6,8 @@ import (
 
 	"github.com/rivo/tview"
 
-	"batchat/internal/chat"
-	"batchat/internal/theme"
+	"promptline/internal/chat"
+	"promptline/internal/theme"
 )
 
 // Handler represents a command handler function

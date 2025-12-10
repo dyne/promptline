@@ -1,4 +1,4 @@
-module batchat
+module promptline
 
 go 1.22.2
 

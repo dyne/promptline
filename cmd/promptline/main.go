@@ -14,10 +14,10 @@ import (
 	"github.com/rivo/tview"
 	"github.com/sashabaranov/go-openai"
 
-	"batchat/internal/chat"
-	"batchat/internal/commands"
-	"batchat/internal/config"
-	"batchat/internal/theme"
+	"promptline/internal/chat"
+	"promptline/internal/commands"
+	"promptline/internal/config"
+	"promptline/internal/theme"
 )
 
 // loadHistoryFromFile loads command history from readline history file
@@ -115,12 +115,12 @@ func runTUIMode() {
 	app := tview.NewApplication()
 
 	// Input history navigation - load from readline history file
-	inputHistory := loadHistoryFromFile(".batchat_history")
+	inputHistory := loadHistoryFromFile(".promptline_history")
 	historyIndex := -1
 
 	// Create UI components
 	header := tview.NewTextView().
-		SetText("Batchat - AI Chat for Batch Processing Jobs\nCtrl+C: Cancel | Ctrl+Q: Quit\n").
+		SetText("Promptline - TUI AI chat from dyne.org\nCtrl+C: Cancel | Ctrl+Q: Quit\n").
 		SetTextColor(tcell.GetColor(tuiTheme.HeaderTextColor)).
 		SetDynamicColors(true)
 

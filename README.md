@@ -1,69 +1,41 @@
-# Batchat - AI Chat CLI for Coders
+# Promptline - TUI AI chat by dyne.org
 
-A minimalist command-line interface for interacting with OpenAI's API to assist with coding tasks and **batch job creation using the openbatch Python library**.
-
-## Purpose
-
-Batchat is designed to help developers create and manage batch processing jobs for AI APIs. Rather than executing API calls directly, Batchat guides users through defining batch tasks and then **generates Python code** that uses the [openbatch](https://github.com/daniel-gomm/openbatch) library to efficiently process large datasets at 50% of the cost.
+Promptline is a free and open source terminal UI for AI chat built at dyne.org. It's written in Go, easy to customize, and works with any OpenAI-compatible API whether hosted in the cloud or on-premises.
 
 ## Features
 
-- **Code-Focused AI Interactions**: Designed specifically for developers and coding tasks
-- **Batch Job Planning**: Interactive guidance for defining batch processing tasks
-- **Python Code Generation**: Automatically generates Python code using the openbatch library
-- **Conversation Context**: Maintains conversation history for contextual responses
-- **Configuration Driven**: Reads settings from a JSON configuration file
-- **Custom Endpoints**: Supports OpenAI-compatible APIs like DashScope
-- **Minimalist Design**: Clean, efficient interface without unnecessary complexity
+- Terminal-native chat: keyboard-first TUI with multiline input, cancel (`Ctrl+C`), quit (`Ctrl+Q`), and history navigation (`Ctrl+↑/↓`).
+- OpenAI-compatible: point at any base URL via `api_url`/`OPENAI_API_URL`; set keys with `api_key` or `OPENAI_API_KEY`.
+- Tool calling with TOON output: built-in tools (`ls`, `read_file`, `write_file`, `execute_shell_command`, `get_current_datetime`) and structured tool results embedded in the chat.
+- Batch mode: run `promptline -` to read one line from stdin and print the assistant response to stdout.
+- Theming & persistence: configurable colors in `theme.json`, readline history stored in `.promptline_history`.
 
-## How It Works
+## Quickstart
 
-1. **Chat with AI**: Describe your batch processing needs to the AI assistant
-2. **Define Task**: Work with the AI to specify your input data, processing logic, and desired outputs
-3. **Generate Code**: Batchat produces ready-to-run Python code using openbatch
-4. **Run Batch**: Execute the generated Python script to process your data efficiently
-
-## Installation
-
-### Prerequisites
-
-- Go 1.19+
-- Python 3.8+
-- API key for OpenAI or compatible service (like DashScope)
-
-### Building from Source
+Prerequisites: Go 1.22+, an API key for an OpenAI-compatible endpoint.
 
 ```bash
-# Clone the repository
 git clone <repository-url>
-cd batchat
-
-# Build the application
-go build -o batchat cmd/batchat/main.go
-
-# Or install it globally
-go install cmd/batchat/main.go
+cd promptline
+go build -o promptline ./cmd/promptline
+./promptline
 ```
+
+Set your credentials with environment variables:
+```bash
+export OPENAI_API_KEY=sk-...
+export OPENAI_API_URL=https://api.openai.com/v1   # optional for self-hosted endpoints
+```
+
+You can also use `make build`, `make install`, and `make test`.
 
 ## Configuration
 
-Create a `config.json` file in the same directory as the executable:
+Promptline reads `config.json` next to the binary. Environment variables take precedence over file values.
 
-For DashScope (Qwen models):
 ```json
 {
-  "api_key": "your-dashscope-api-key",
-  "api_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-  "model": "qwen3",
-  "temperature": 0.7,
-  "max_tokens": 1500
-}
-```
-
-For OpenAI:
-```json
-{
-  "api_key": "your-openai-api-key",
+  "api_key": "your-api-key",
   "api_url": "https://api.openai.com/v1",
   "model": "gpt-4o-mini",
   "temperature": 0.7,
@@ -71,59 +43,39 @@ For OpenAI:
 }
 ```
 
-Alternatively, you can set your API key using environment variables:
-- For OpenAI: `OPENAI_API_KEY`
-- For OpenAI-compatible URL: `OPENAI_API_URL`
+- `api_key` / `OPENAI_API_KEY` (required)
+- `api_url` / `OPENAI_API_URL` (optional; set for self-hosted or proxy)
+- `model`, `temperature`, `max_tokens` (optional tuning)
 
-If both are provided, the environment variable takes precedence over the config file.
+The app exits early if no API key is provided.
 
 ## Usage
 
-Run the application:
+- Type in the input area and press `Ctrl+Enter` to send; use `Ctrl+C` to cancel a running request and `Ctrl+Q` to quit.
+- Commands: `/help`, `/clear`, `/history`, `/debug`.
+- Tool calls: the assistant can call registered tools; results are returned in TOON format inside the chat transcript.
 
+Batch mode:
 ```bash
-./batchat
-```
-
-The application features a terminal-based user interface (TUI) with the following controls:
-- Type your message and press Enter to send
-- Press Ctrl+C to exit the application
-- Press Ctrl+G to generate Python code for your batch task
-
-Special commands (type and press Enter):
-- `quit` or `exit`: Exit the application
-- `clear`: Clear conversation history
-- `history`: Display conversation history
-
-## Example Workflow
-
-```
-User: I need to process customer reviews to extract sentiment
-Assistant: I can help you create a batch job for sentiment analysis. What format is your data in?
-User: It's in a CSV file with columns "id" and "text"
-Assistant: Great! I'll help you create a batch job that processes each review and classifies sentiment as positive, neutral, or negative.
-User: Yes, that sounds right
-Assistant: I'll generate Python code using the openbatch library for this task.
-User: generate
-Assistant: Here's your Python code for batch processing customer reviews:
-[Generates Python code]
+echo "Say hello" | ./promptline -
 ```
 
 ## Project Structure
 
 ```
-batchat/
+promptline/
 ├── cmd/
-│   └── batchat/
-│       └── main.go          # Main entry point with TUI implementation
+│   └── promptline/main.go     # TUI entry point
 ├── internal/
-│   ├── config/
-│   │   └── config.go        # Configuration management
-│   └── chat/
-│       └── session.go       # Chat session logic
-├── config.json.example      # Example configuration file
-├── go.mod                   # Go module definition
-└── go.sum                   # Go module checksums
+│   ├── chat/                  # Session + tool-call handling
+│   ├── commands/              # Slash commands for the TUI
+│   ├── config/                # Config loader and env override
+│   └── tools/                 # Tool registry and implementations
+├── docs/                      # Developer docs
+├── config.json.example        # Sample config
+├── theme.json                 # Sample theme
+├── Makefile                   # Build/test helpers
+└── .github/workflows/ci.yml   # CI pipeline
 ```
 
 ## License

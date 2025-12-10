@@ -1,4 +1,4 @@
-name: CI
+name: Promptline CI
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
         run: go mod download
 
       - name: Build
-        run: go build ./cmd/batchat
+        run: go build ./cmd/promptline
 
       - name: Test
         run: make test

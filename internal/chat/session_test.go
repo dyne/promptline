@@ -6,8 +6,7 @@ import (
 	"testing"
 
 	"github.com/sashabaranov/go-openai"
-
-	"batchat/internal/tools"
+	"promptline/internal/tools"
 )
 
 func TestAddToolResultMessageStoresTOON(t *testing.T) {
