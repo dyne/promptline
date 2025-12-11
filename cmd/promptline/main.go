@@ -130,8 +130,14 @@ func runTUIMode(logger zerolog.Logger) {
 	session := chat.NewSession(cfg)
 	defer session.Close()
 
-	// Initialize readline with special prompt character
-	rl, err := readline.New(colors.User.Sprint("❯ "))
+	// Initialize readline with dynamic command completion
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          colors.User.Sprint("❯ "),
+		HistoryFile:     ".promptline_history",
+		AutoComplete:    getCommandCompleter(),
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize readline")
 	}
@@ -174,6 +180,35 @@ func runTUIMode(logger zerolog.Logger) {
 	logger.Info().Msg("Session ended")
 }
 
+// Command represents a slash command
+type Command struct {
+	Name        string
+	Description string
+}
+
+// getAvailableCommands returns the list of all slash commands
+func getAvailableCommands() []Command {
+	return []Command{
+		{Name: "help", Description: "Show available commands"},
+		{Name: "clear", Description: "Clear conversation history"},
+		{Name: "history", Description: "Display conversation history"},
+		{Name: "debug", Description: "Toggle debug mode"},
+		{Name: "permissions", Description: "Show and adjust tool permissions"},
+		{Name: "quit", Description: "Exit the application"},
+		{Name: "exit", Description: "Exit the application"},
+	}
+}
+
+// getCommandCompleter builds a readline completer from available commands
+func getCommandCompleter() *readline.PrefixCompleter {
+	commands := getAvailableCommands()
+	items := make([]readline.PrefixCompleterInterface, len(commands))
+	for i, cmd := range commands {
+		items[i] = readline.PcItem("/" + cmd.Name)
+	}
+	return readline.NewPrefixCompleter(items...)
+}
+
 // handleCommand processes slash commands, returns true if should quit
 func handleCommand(input string, session *chat.Session, colors *theme.ColorScheme, logger zerolog.Logger) bool {
 	cmdName := strings.TrimPrefix(input, "/")
@@ -181,16 +216,30 @@ func handleCommand(input string, session *chat.Session, colors *theme.ColorSchem
 
 	logger.Debug().Str("command", cmdName).Msg("Executing command")
 
+	// Execute command based on name
 	switch cmdName {
-	case "quit", "exit":
-		return true
 	case "help":
-		showHelp(colors)
+		colors.Header.Println("\nAvailable Commands:")
+		seen := make(map[string]bool)
+		for _, cmd := range getAvailableCommands() {
+			if seen[cmd.Name] {
+				continue
+			}
+			seen[cmd.Name] = true
+			fmt.Printf("  /%-12s - %s\n", cmd.Name, cmd.Description)
+		}
+		fmt.Println()
+		return false
+		
 	case "clear":
 		session.ClearHistory()
 		colors.Success.Println("✓ Conversation history cleared")
+		return false
+		
 	case "history":
 		showHistory(session, colors)
+		return false
+		
 	case "debug":
 		*debugMode = !*debugMode
 		if *debugMode {
@@ -198,24 +247,19 @@ func handleCommand(input string, session *chat.Session, colors *theme.ColorSchem
 		} else {
 			colors.Success.Println("✓ Debug mode disabled")
 		}
+		return false
+		
 	case "permissions":
 		showPermissions(session, colors)
+		return false
+		
+	case "quit", "exit":
+		return true
+		
 	default:
 		colors.Error.Printf("✗ Unknown command: /%s (type /help for available commands)\n", cmdName)
+		return false
 	}
-
-	return false
-}
-
-func showHelp(colors *theme.ColorScheme) {
-	colors.Header.Println("\nAvailable Commands:")
-	fmt.Println("  /help        - Show this help message")
-	fmt.Println("  /clear       - Clear conversation history")
-	fmt.Println("  /history     - Display conversation history")
-	fmt.Println("  /debug       - Toggle debug mode")
-	fmt.Println("  /permissions - Show and adjust tool permissions")
-	fmt.Println("  /quit        - Exit the application")
-	fmt.Println()
 }
 
 func showHistory(session *chat.Session, colors *theme.ColorScheme) {
