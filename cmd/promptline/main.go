@@ -21,7 +21,7 @@ import (
 
 var (
 	debugMode = flag.Bool("d", false, "Enable debug mode")
-	logFile   = flag.String("log-file", "", "Log file path (default: stderr)")
+	logFile   = flag.String("log-file", "", "Log file path (logs disabled by default)")
 )
 
 func main() {
@@ -130,8 +130,8 @@ func runTUIMode(logger zerolog.Logger) {
 	session := chat.NewSession(cfg)
 	defer session.Close()
 
-	// Initialize readline
-	rl, err := readline.New(colors.User.Sprint("> "))
+	// Initialize readline with special prompt character
+	rl, err := readline.New(colors.User.Sprint("❯ "))
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize readline")
 	}
@@ -226,14 +226,16 @@ func showHistory(session *chat.Session, colors *theme.ColorScheme) {
 	}
 
 	colors.Header.Println("\nConversation History:")
-	for i, msg := range messages {
+	for _, msg := range messages {
 		switch msg.Role {
 		case "user":
-			colors.User.Printf("[%d] User: %s\n", i+1, msg.Content)
+			colors.User.Print("❯ ")
+			fmt.Printf("%s\n", msg.Content)
 		case "assistant":
-			colors.Assistant.Printf("[%d] Assistant: %s\n", i+1, msg.Content)
+			colors.Assistant.Print("⟫ ")
+			fmt.Printf("%s\n", msg.Content)
 		case "system":
-			fmt.Printf("[%d] System: %s\n", i+1, msg.Content)
+			fmt.Printf("[System] %s\n", msg.Content)
 		}
 	}
 	fmt.Println()
@@ -270,7 +272,8 @@ func showPermissions(session *chat.Session, colors *theme.ColorScheme) {
 
 // handleConversation sends user message and streams AI response
 func handleConversation(input string, session *chat.Session, colors *theme.ColorScheme, logger zerolog.Logger) {
-	colors.User.Printf("You: %s\n", input)
+	// Log user input (already echoed by readline, don't print again)
+	logger.Info().Str("user_input", input).Msg("User input received")
 
 	// Create streaming events channel
 	events := make(chan chat.StreamEvent, 10)
@@ -279,8 +282,8 @@ func handleConversation(input string, session *chat.Session, colors *theme.Color
 	// Start streaming in goroutine
 	go session.StreamResponseWithContext(ctx, input, true, events)
 
-	// Display assistant prefix
-	colors.Assistant.Print("Assistant: ")
+	// Display assistant prefix with special character
+	colors.Assistant.Print("⟫ ")
 
 	start := time.Now()
 	var responseBuilder strings.Builder

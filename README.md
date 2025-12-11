@@ -68,7 +68,8 @@ The app exits early if no API key is provided.
 ```
 
 **Controls:**
-- Type your message and press `Enter` to send
+- Type your message at the `❯` prompt and press `Enter` to send
+- Assistant responses are prefixed with `⟫`
 - Press `Ctrl+C` or type `/quit` to exit
 - Use `Ctrl+↑/↓` to navigate command history
 - Scroll up in your terminal to see full conversation history
