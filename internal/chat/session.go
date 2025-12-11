@@ -20,14 +20,15 @@ import (
 
 // Session represents a chat session with context
 type Session struct {
-	Client       *openai.Client
-	Config       *config.Config
-	Messages     []openai.ChatCompletionMessage
-	Scanner      *bufio.Scanner
-	RL           *readline.Instance
-	history      []string
-	ToolRegistry *tools.Registry
-	mu           sync.Mutex
+	Client             *openai.Client
+	Config             *config.Config
+	Messages           []openai.ChatCompletionMessage
+	Scanner            *bufio.Scanner
+	RL                 *readline.Instance
+	history            []string
+	ToolRegistry       *tools.Registry
+	mu                 sync.Mutex
+	lastSavedMsgCount  int // Track how many messages were last saved
 }
 
 // NewSession creates a new chat session
@@ -441,6 +442,79 @@ func (s *Session) GetHistory() []openai.ChatCompletionMessage {
 		return []openai.ChatCompletionMessage{}
 	}
 	return s.Messages[1:]
+}
+
+// SaveConversationHistory appends new messages to the history file
+func (s *Session) SaveConversationHistory(filepath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Only save non-system messages
+	history := s.Messages[1:]
+	
+	// Check if there are new messages to save
+	if len(history) <= s.lastSavedMsgCount {
+		return nil // Nothing new to save
+	}
+
+	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	// Only save messages we haven't saved yet
+	for i := s.lastSavedMsgCount; i < len(history); i++ {
+		if err := encoder.Encode(history[i]); err != nil {
+			return err
+		}
+	}
+
+	s.lastSavedMsgCount = len(history)
+	return nil
+}
+
+// LoadConversationHistory loads conversation history from a file with a line limit
+func (s *Session) LoadConversationHistory(filepath string, maxLines int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	file, err := os.Open(filepath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No history file is okay
+		}
+		return err
+	}
+	defer file.Close()
+
+	// Read all lines
+	var messages []openai.ChatCompletionMessage
+	decoder := json.NewDecoder(file)
+	for {
+		var msg openai.ChatCompletionMessage
+		if err := decoder.Decode(&msg); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		messages = append(messages, msg)
+	}
+
+	// Apply limit - keep only the last N messages
+	if maxLines > 0 && len(messages) > maxLines {
+		messages = messages[len(messages)-maxLines:]
+	}
+
+	// Append to session (after system message)
+	s.Messages = append(s.Messages, messages...)
+	
+	// Update saved message count since we loaded them
+	s.lastSavedMsgCount = len(messages)
+
+	return nil
 }
 
 // GetInput gets input from the user

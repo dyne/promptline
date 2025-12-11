@@ -43,6 +43,8 @@ Promptline reads `config.json` next to the binary. Environment variables take pr
   "model": "gpt-4o-mini",
   "temperature": 0.7,
   "max_tokens": 1500,
+  "history_file": ".promptline_conversation_history",
+  "history_max_messages": 100,
   "tools": {
     "allow": ["get_current_datetime", "read_file", "ls"],
     "require_confirmation": ["write_file", "execute_shell_command"]
@@ -53,6 +55,8 @@ Promptline reads `config.json` next to the binary. Environment variables take pr
 - `api_key` / `OPENAI_API_KEY` (required)
 - `api_url` / `OPENAI_API_URL` (optional; set for self-hosted or proxy)
 - `model`, `temperature`, `max_tokens` (optional tuning)
+- `history_file` - Path to save conversation history (default: `.promptline_conversation_history`)
+- `history_max_messages` - Maximum messages to load from history (default: 100)
 - `tools.allow` overrides the tool allowlist (defaults to read-only tools if unset)
 - `tools.require_confirmation` forces a confirmation prompt per tool; writes/exec require confirmation by default
 

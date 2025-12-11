@@ -9,12 +9,14 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	APIKey      string       `json:"api_key"`
-	APIURL      string       `json:"api_url,omitempty"`
-	Model       string       `json:"model"`
-	Temperature *float32     `json:"temperature,omitempty"`
-	MaxTokens   *int         `json:"max_tokens,omitempty"`
-	Tools       ToolSettings `json:"tools,omitempty"`
+	APIKey             string       `json:"api_key"`
+	APIURL             string       `json:"api_url,omitempty"`
+	Model              string       `json:"model"`
+	Temperature        *float32     `json:"temperature,omitempty"`
+	MaxTokens          *int         `json:"max_tokens,omitempty"`
+	Tools              ToolSettings `json:"tools,omitempty"`
+	HistoryFile        string       `json:"history_file,omitempty"`
+	HistoryMaxMessages int          `json:"history_max_messages,omitempty"`
 }
 
 // ToolSettings describes tool allow/confirm lists.
@@ -27,9 +29,13 @@ type ToolSettings struct {
 func DefaultConfig() *Config {
 	defaultModel := "gpt-4o-mini"
 	defaultAPIURL := "https://api.openai.com/v1"
+	defaultHistoryFile := ".promptline_conversation_history"
+	defaultHistoryMax := 100
 	return &Config{
-		Model:  defaultModel,
-		APIURL: defaultAPIURL,
+		Model:              defaultModel,
+		APIURL:             defaultAPIURL,
+		HistoryFile:        defaultHistoryFile,
+		HistoryMaxMessages: defaultHistoryMax,
 	}
 }
 
