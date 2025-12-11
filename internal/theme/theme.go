@@ -3,35 +3,48 @@ package theme
 import (
 	"encoding/json"
 	"os"
+
+	"github.com/fatih/color"
+	"github.com/pterm/pterm"
 )
 
-// Theme represents the color theme for the TUI
+// Theme represents the color theme for the streaming console
 type Theme struct {
-	HeaderTextColor      string `json:"header_text_color"`
-	ChatUserColor        string `json:"chat_user_color"`
-	ChatAssistantColor   string `json:"chat_assistant_color"`
-	ChatErrorColor       string `json:"chat_error_color"`
-	ChatSuccessColor     string `json:"chat_success_color"`
+	HeaderTextColor        string `json:"header_text_color"`
+	ChatUserColor          string `json:"chat_user_color"`
+	ChatAssistantColor     string `json:"chat_assistant_color"`
+	ChatErrorColor         string `json:"chat_error_color"`
+	ChatSuccessColor       string `json:"chat_success_color"`
 	ProgressIndicatorColor string `json:"progress_indicator_color"`
-	InputLabelColor      string `json:"input_label_color"`
-	InputTextColor       string `json:"input_text_color"`
-	InputBackgroundColor string `json:"input_background_color"`
-	BorderColor          string `json:"border_color"`
+	InputLabelColor        string `json:"input_label_color"`
+	InputTextColor         string `json:"input_text_color"`
+	InputBackgroundColor   string `json:"input_background_color"`
+	BorderColor            string `json:"border_color"`
+}
+
+// ColorScheme provides pterm and color styles based on theme
+type ColorScheme struct {
+	Header             *pterm.Style
+	User               *color.Color
+	Assistant          *color.Color
+	Error              *color.Color
+	Success            *color.Color
+	ProgressIndicator  *pterm.Style
 }
 
 // DefaultTheme returns a theme with default values
 func DefaultTheme() *Theme {
 	return &Theme{
-		HeaderTextColor:      "#cba6f7",
-		ChatUserColor:        "#89b4fa",
-		ChatAssistantColor:   "#a6e3a1",
-		ChatErrorColor:       "#f38ba8",
-		ChatSuccessColor:     "#a6e3a1",
+		HeaderTextColor:        "#cba6f7",
+		ChatUserColor:          "#89b4fa",
+		ChatAssistantColor:     "#a6e3a1",
+		ChatErrorColor:         "#f38ba8",
+		ChatSuccessColor:       "#a6e3a1",
 		ProgressIndicatorColor: "#fab387",
-		InputLabelColor:      "#cdd6f4",
-		InputTextColor:       "#cdd6f4",
-		InputBackgroundColor: "#1e1e2e",
-		BorderColor:          "#6c7086",
+		InputLabelColor:        "#cdd6f4",
+		InputTextColor:         "#cdd6f4",
+		InputBackgroundColor:   "#1e1e2e",
+		BorderColor:            "#6c7086",
 	}
 }
 
@@ -54,4 +67,28 @@ func LoadTheme(filepath string) (*Theme, error) {
 	}
 
 	return theme, nil
+}
+
+// ToColorScheme converts theme to pterm/color styles
+func (t *Theme) ToColorScheme() *ColorScheme {
+	return &ColorScheme{
+		Header:            pterm.NewStyle(pterm.FgLightMagenta),
+		User:              color.New(color.FgCyan),
+		Assistant:         color.New(color.FgGreen),
+		Error:             color.New(color.FgRed),
+		Success:           color.New(color.FgGreen),
+		ProgressIndicator: pterm.NewStyle(pterm.FgYellow),
+	}
+}
+
+// DefaultColorScheme returns a simple color scheme using pterm defaults
+func DefaultColorScheme() *ColorScheme {
+	return &ColorScheme{
+		Header:            pterm.NewStyle(pterm.FgCyan, pterm.Bold),
+		User:              color.New(color.FgBlue),
+		Assistant:         color.New(color.FgGreen),
+		Error:             color.New(color.FgRed, color.Bold),
+		Success:           color.New(color.FgGreen),
+		ProgressIndicator: pterm.NewStyle(pterm.FgYellow),
+	}
 }

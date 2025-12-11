@@ -1,14 +1,17 @@
-# Promptline - TUI AI chat by dyne.org
+# Promptline - Interactive AI Chat Console by dyne.org
 
-Promptline is a free and open source terminal UI for AI chat built at dyne.org. It's written in Go, easy to customize, and works with any OpenAI-compatible API whether hosted in the cloud or on-premises.
+Promptline is a free and open source streaming console for AI chat built at dyne.org. It's written in Go, easy to customize, and works with any OpenAI-compatible API whether hosted in the cloud or on-premises.
 
 ## Features
 
-- Terminal-native chat: keyboard-first TUI with multiline input, cancel (`Ctrl+C`), quit (`Ctrl+Q`), and history navigation (`Ctrl+↑/↓`).
-- OpenAI-compatible: point at any base URL via `api_url`/`OPENAI_API_URL`; set keys with `api_key` or `OPENAI_API_KEY`.
-- Tool calling with TOON output and consent prompts: built-in tools (`ls`, `read_file`, `write_file`, `execute_shell_command`, `get_current_datetime`) with a default read-only allowlist and user approval for writes/exec.
-- Batch mode: run `promptline -` to read one line from stdin and print the assistant response to stdout.
-- Theming & persistence: configurable colors in `theme.json`, readline history stored in `.promptline_history`.
+- **Streaming console**: Real-time AI responses with full terminal scrollback history
+- **Simple controls**: Press `Enter` to send, `Ctrl+C` to quit, `Ctrl+↑/↓` for history navigation
+- **SSH-friendly**: Works seamlessly over remote connections with no special terminal requirements
+- **OpenAI-compatible**: Point at any base URL via `api_url`/`OPENAI_API_URL`; set keys with `api_key` or `OPENAI_API_KEY`
+- **Tool calling**: Built-in tools (`ls`, `read_file`, `write_file`, `execute_shell_command`, `get_current_datetime`) with configurable permissions
+- **Batch mode**: Run `promptline -` to read one line from stdin and print the assistant response to stdout
+- **Logging**: Structured logs with `--log-file` flag and debug mode with `-d`
+- **Theming**: Configurable colors in `theme.json`, readline history stored in `.promptline_history`
 
 ## Quickstart
 
@@ -57,9 +60,28 @@ The app exits early if no API key is provided.
 
 ## Usage
 
-- Type in the input area and press `Ctrl+Enter` to send; use `Ctrl+C` to cancel a running request and `Ctrl+Q` to quit.
-- Commands: `/help`, `/clear`, `/history`, `/debug`.
-- Tool calls: the assistant can call registered tools; results are returned in TOON format inside the chat transcript.
+**Interactive Mode:**
+```bash
+./promptline              # Start interactive console
+./promptline -d           # Enable debug logging
+./promptline --log-file session.log  # Save logs to file
+```
+
+**Controls:**
+- Type your message and press `Enter` to send
+- Press `Ctrl+C` or type `/quit` to exit
+- Use `Ctrl+↑/↓` to navigate command history
+- Scroll up in your terminal to see full conversation history
+
+**Slash Commands:**
+- `/help` - Show available commands
+- `/clear` - Clear conversation history
+- `/history` - Display conversation history
+- `/debug` - Toggle debug mode
+- `/permissions` - Show tool permissions
+- `/quit` - Exit the application
+
+**Tool calls:** The assistant can call registered tools; results are streamed back in real-time.
 
 Batch mode:
 ```bash
@@ -68,16 +90,17 @@ echo "Say hello" | ./promptline -
 
 ## Tool permissions
 
-- Default allowlist: `get_current_datetime`, `read_file`, and `ls` run without prompting; `write_file` and `execute_shell_command` are blocked until you approve them.
-- The TUI shows a modal before running any blocked/confirmation-required tool so you can allow once, always allow, or deny.
-- Denied tools surface back to the model as errors; adjust the allow/confirm lists in `config.json` if you want a different default policy.
+- Default allowlist: `get_current_datetime`, `read_file`, and `ls` run without prompting; `write_file` and `execute_shell_command` are blocked until you approve them
+- View current permissions with `/permissions` command
+- Adjust the allow/confirm lists in `config.json` to set your preferred default policy
+- Denied tools surface back to the model as errors
 
 ## Project Structure
 
 ```
 promptline/
 ├── cmd/
-│   └── promptline/main.go     # TUI entry point
+│   └── promptline/main.go     # Console entry point
 ├── internal/
 │   ├── chat/                  # Session + tool-call handling
 │   ├── commands/              # Slash commands for the TUI

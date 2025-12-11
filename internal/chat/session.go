@@ -433,6 +433,16 @@ func (s *Session) ClearHistory() {
 	s.Messages = []openai.ChatCompletionMessage{systemMsg}
 }
 
+// GetHistory returns the conversation history excluding system message
+func (s *Session) GetHistory() []openai.ChatCompletionMessage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Messages) <= 1 {
+		return []openai.ChatCompletionMessage{}
+	}
+	return s.Messages[1:]
+}
+
 // GetInput gets input from the user
 func (s *Session) GetInput() (string, error) {
 	line, err := s.RL.Readline()
