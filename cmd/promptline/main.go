@@ -80,6 +80,18 @@ func runBatchMode(logger zerolog.Logger) {
 	session := chat.NewSession(cfg)
 	defer session.Close()
 
+	// Load conversation history
+	if cfg.HistoryFile != "" {
+		if err := session.LoadConversationHistory(cfg.HistoryFile, cfg.HistoryMaxMessages); err != nil {
+			logger.Warn().Err(err).Msg("Failed to load conversation history")
+		} else {
+			historyCount := len(session.GetHistory())
+			if historyCount > 0 {
+				logger.Debug().Int("messages", historyCount).Msg("Loaded conversation history")
+			}
+		}
+	}
+
 	// Read input from stdin
 	scanner := bufio.NewScanner(os.Stdin)
 	if scanner.Scan() {
@@ -103,6 +115,13 @@ func runBatchMode(logger zerolog.Logger) {
 
 		// Output response
 		fmt.Println(response)
+		
+		// Save conversation history
+		if cfg.HistoryFile != "" {
+			if err := session.SaveConversationHistory(cfg.HistoryFile); err != nil {
+				logger.Warn().Err(err).Msg("Failed to save conversation history")
+			}
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
