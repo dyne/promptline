@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -49,15 +50,17 @@ func initLogger(debug bool, logFilePath string) zerolog.Logger {
 	}
 
 	// Configure output
-	var output *os.File
+	var output io.Writer
 	if logFilePath != "" {
-		var err error
-		output, err = os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		// Log to file only
+		file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			log.Fatalf("Failed to open log file: %v", err)
 		}
+		output = file
 	} else {
-		output = os.Stderr
+		// No logging to console by default - use io.Discard
+		output = io.Discard
 	}
 
 	// Create logger with timestamp
