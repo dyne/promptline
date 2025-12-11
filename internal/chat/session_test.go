@@ -203,3 +203,132 @@ func TestAddToolResultMessageIncludesError(t *testing.T) {
 		t.Fatalf("expected TOON content with error, got %q", msg.Content)
 	}
 }
+
+func TestGetHistoryEmpty(t *testing.T) {
+	s := &Session{
+		Messages: []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleSystem, Content: "system prompt"},
+		},
+	}
+
+	history := s.GetHistory()
+	if len(history) != 0 {
+		t.Fatalf("expected empty history (system message excluded), got %d messages", len(history))
+	}
+}
+
+func TestGetHistoryWithMessages(t *testing.T) {
+	s := &Session{
+		Messages: []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleSystem, Content: "system prompt"},
+			{Role: openai.ChatMessageRoleUser, Content: "hello"},
+			{Role: openai.ChatMessageRoleAssistant, Content: "hi there"},
+		},
+	}
+
+	history := s.GetHistory()
+	if len(history) != 2 {
+		t.Fatalf("expected 2 messages in history, got %d", len(history))
+	}
+	if history[0].Role != openai.ChatMessageRoleUser {
+		t.Errorf("expected first message to be user, got %s", history[0].Role)
+	}
+	if history[1].Role != openai.ChatMessageRoleAssistant {
+		t.Errorf("expected second message to be assistant, got %s", history[1].Role)
+	}
+}
+
+func TestClearHistoryKeepsSystemMessage(t *testing.T) {
+	s := &Session{
+		Messages: []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleSystem, Content: "system prompt"},
+			{Role: openai.ChatMessageRoleUser, Content: "hello"},
+			{Role: openai.ChatMessageRoleAssistant, Content: "hi there"},
+		},
+	}
+
+	s.ClearHistory()
+
+	if len(s.Messages) != 1 {
+		t.Fatalf("expected 1 message after clear (system), got %d", len(s.Messages))
+	}
+	if s.Messages[0].Role != openai.ChatMessageRoleSystem {
+		t.Errorf("expected system message to remain, got %s", s.Messages[0].Role)
+	}
+}
+
+func TestAddMessage(t *testing.T) {
+	s := &Session{
+		Messages: []openai.ChatCompletionMessage{},
+	}
+
+	s.AddMessage(openai.ChatMessageRoleUser, "test message")
+
+	if len(s.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(s.Messages))
+	}
+	if s.Messages[0].Role != openai.ChatMessageRoleUser {
+		t.Errorf("expected user role, got %s", s.Messages[0].Role)
+	}
+	if s.Messages[0].Content != "test message" {
+		t.Errorf("expected content 'test message', got %s", s.Messages[0].Content)
+	}
+}
+
+func TestAddAssistantMessage(t *testing.T) {
+	s := &Session{
+		Messages: []openai.ChatCompletionMessage{},
+	}
+
+	toolCalls := []openai.ToolCall{
+		{
+			ID:   "call-1",
+			Type: openai.ToolTypeFunction,
+			Function: openai.FunctionCall{
+				Name:      "ls",
+				Arguments: `{"path": "."}`,
+			},
+		},
+	}
+
+	s.AddAssistantMessage("response text", toolCalls)
+
+	if len(s.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(s.Messages))
+	}
+	msg := s.Messages[0]
+	if msg.Role != openai.ChatMessageRoleAssistant {
+		t.Errorf("expected assistant role, got %s", msg.Role)
+	}
+	if msg.Content != "response text" {
+		t.Errorf("expected content 'response text', got %s", msg.Content)
+	}
+	if len(msg.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(msg.ToolCalls))
+	}
+	if msg.ToolCalls[0].Function.Name != "ls" {
+		t.Errorf("expected tool call name 'ls', got %s", msg.ToolCalls[0].Function.Name)
+	}
+}
+
+func TestMessagesSnapshotIsCopy(t *testing.T) {
+	s := &Session{
+		Messages: []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleSystem, Content: "system"},
+			{Role: openai.ChatMessageRoleUser, Content: "user"},
+		},
+	}
+
+	snapshot := s.MessagesSnapshot()
+
+	// Modify snapshot
+	snapshot[1].Content = "modified"
+
+	// Original should be unchanged
+	if s.Messages[1].Content == "modified" {
+		t.Error("MessagesSnapshot should return a copy, not reference to original")
+	}
+	if s.Messages[1].Content != "user" {
+		t.Errorf("expected original content 'user', got %s", s.Messages[1].Content)
+	}
+}

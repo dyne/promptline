@@ -182,3 +182,218 @@ func TestExecuteWriteAndReadFile(t *testing.T) {
 		t.Fatalf("expected content 'sample content', got %q", readResult.Result)
 	}
 }
+
+func TestGetToolNames(t *testing.T) {
+	registry := NewRegistry()
+	names := registry.GetToolNames()
+
+	if len(names) == 0 {
+		t.Fatal("expected tools to be registered")
+	}
+
+	// Check for expected tools
+	expectedTools := []string{"ls", "read_file", "write_file", "execute_shell_command", "get_current_datetime"}
+	for _, expected := range expectedTools {
+		found := false
+		for _, name := range names {
+			if name == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected tool %s to be registered", expected)
+		}
+	}
+}
+
+func TestGetPermission(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"read_file": true,
+		},
+		RequireConfirmation: map[string]bool{
+			"write_file": true,
+		},
+	})
+
+	// Allowed tool
+	perm := registry.GetPermission("read_file")
+	if !perm.Allowed {
+		t.Error("expected read_file to be allowed")
+	}
+
+	// Tool with confirmation
+	perm = registry.GetPermission("write_file")
+	if !perm.RequireConfirmation {
+		t.Error("expected write_file to require confirmation")
+	}
+
+	// Unknown tool
+	perm = registry.GetPermission("unknown_tool")
+	if perm.Allowed {
+		t.Error("expected unknown tool to not be allowed")
+	}
+}
+
+func TestAllowTool(t *testing.T) {
+	registry := NewRegistry()
+
+	// Initially blocked
+	result := registry.Execute("execute_shell_command", map[string]interface{}{
+		"command": "echo test",
+	})
+	if !errors.Is(result.Error, ErrToolNotAllowed) {
+		t.Fatalf("expected ErrToolNotAllowed, got: %v", result.Error)
+	}
+
+	// Allow the tool without confirmation
+	registry.AllowTool("execute_shell_command", false)
+
+	// Now should work
+	result = registry.Execute("execute_shell_command", map[string]interface{}{
+		"command": "printf 'hello'",
+	})
+	if result.Error != nil {
+		t.Fatalf("expected success after allowing tool, got: %v", result.Error)
+	}
+	if !strings.Contains(result.Result, "hello") {
+		t.Errorf("expected output to contain 'hello', got: %s", result.Result)
+	}
+}
+
+func TestSetAllowedAndSetRequireConfirmation(t *testing.T) {
+	registry := NewRegistry()
+
+	// Block a normally allowed tool
+	registry.SetAllowed("read_file", false)
+	result := registry.Execute("read_file", map[string]interface{}{
+		"path": "test.txt",
+	})
+	if !errors.Is(result.Error, ErrToolNotAllowed) {
+		t.Fatalf("expected ErrToolNotAllowed after blocking, got: %v", result.Error)
+	}
+
+	// Re-enable it
+	registry.SetAllowed("read_file", true)
+	
+	// Add confirmation requirement
+	registry.SetRequireConfirmation("read_file", true)
+	result = registry.Execute("read_file", map[string]interface{}{
+		"path": "test.txt",
+	})
+	if !errors.Is(result.Error, ErrToolRequiresConfirmation) {
+		t.Fatalf("expected ErrToolRequiresConfirmation, got: %v", result.Error)
+	}
+}
+
+func TestOpenAITools(t *testing.T) {
+	registry := NewRegistry()
+	tools := registry.OpenAITools()
+
+	if len(tools) == 0 {
+		t.Fatal("expected OpenAI tool definitions to be returned")
+	}
+
+	// Check that tools have required fields
+	for _, tool := range tools {
+		if tool.Type != openai.ToolTypeFunction {
+			t.Errorf("expected tool type to be function, got: %s", tool.Type)
+		}
+		if tool.Function.Name == "" {
+			t.Error("expected tool to have a name")
+		}
+		if tool.Function.Description == "" {
+			t.Error("expected tool to have a description")
+		}
+	}
+}
+
+func TestReadFileNonExistent(t *testing.T) {
+	registry := NewRegistry()
+	result := registry.Execute("read_file", map[string]interface{}{
+		"path": "/nonexistent/file.txt",
+	})
+
+	if result.Error == nil {
+		t.Fatal("expected error for non-existent file")
+	}
+}
+
+func TestWriteFileInvalidPath(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"write_file": true,
+		},
+		RequireConfirmation: map[string]bool{
+			"write_file": false,
+		},
+	})
+
+	result := registry.Execute("write_file", map[string]interface{}{
+		"path":    "/nonexistent/dir/file.txt",
+		"content": "test",
+	})
+
+	if result.Error == nil {
+		t.Fatal("expected error for invalid path")
+	}
+}
+
+func TestExecuteShellCommandOutput(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"execute_shell_command": true,
+		},
+		RequireConfirmation: map[string]bool{
+			"execute_shell_command": false,
+		},
+	})
+
+	result := registry.Execute("execute_shell_command", map[string]interface{}{
+		"command": "echo -n test123",
+	})
+
+	if result.Error != nil {
+		t.Fatalf("expected success, got: %v", result.Error)
+	}
+	if strings.TrimSpace(result.Result) != "test123" {
+		t.Errorf("expected output 'test123', got: %s", result.Result)
+	}
+}
+
+func TestExecuteShellCommandError(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"execute_shell_command": true,
+		},
+		RequireConfirmation: map[string]bool{
+			"execute_shell_command": false,
+		},
+	})
+
+	result := registry.Execute("execute_shell_command", map[string]interface{}{
+		"command": "exit 1",
+	})
+
+	if result.Error == nil {
+		t.Fatal("expected error for failed command")
+	}
+}
+
+func TestListDirectoryEmpty(t *testing.T) {
+	registry := NewRegistry()
+	tempDir := t.TempDir()
+
+	result := registry.Execute("ls", map[string]interface{}{
+		"path": tempDir,
+	})
+
+	if result.Error != nil {
+		t.Fatalf("expected success, got: %v", result.Error)
+	}
+	// Empty directory should return empty result or message
+	if result.Result == "" {
+		t.Error("expected some output even for empty directory")
+	}
+}
