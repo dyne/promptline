@@ -14,6 +14,7 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/rs/zerolog"
+	"github.com/sashabaranov/go-openai"
 	"promptline/internal/chat"
 	"promptline/internal/config"
 	"promptline/internal/theme"
@@ -357,18 +358,27 @@ func handleConversation(input string, session *chat.Session, colors *theme.Color
 	// Log user input (already echoed by readline, don't print again)
 	logger.Info().Str("user_input", input).Msg("User input received")
 
+	// Stream the conversation, handling tool calls recursively
+	streamConversation(session, input, true, colors, logger)
+}
+
+// streamConversation handles streaming with tool execution
+func streamConversation(session *chat.Session, input string, includeUserMessage bool, colors *theme.ColorScheme, logger zerolog.Logger) {
 	// Create streaming events channel
 	events := make(chan chat.StreamEvent, 10)
 	ctx := context.Background()
 
 	// Start streaming in goroutine
-	go session.StreamResponseWithContext(ctx, input, true, events)
+	go session.StreamResponseWithContext(ctx, input, includeUserMessage, events)
 
-	// Display assistant prefix with special character
-	colors.Assistant.Print("⟫ ")
+	// Display assistant prefix with special character (only for new conversations)
+	if includeUserMessage {
+		colors.Assistant.Print("⟫ ")
+	}
 
 	start := time.Now()
 	var responseBuilder strings.Builder
+	var toolCallsToExecute []*chat.StreamEvent
 
 	// Process streaming events
 	for event := range events {
@@ -379,22 +389,10 @@ func handleConversation(input string, session *chat.Session, colors *theme.Color
 			responseBuilder.WriteString(event.Content)
 
 		case chat.StreamEventToolCall:
-			// Show tool call
+			// Collect tool calls for execution after stream completes
 			if event.ToolCall != nil {
-				toolName := event.ToolCall.Function.Name
-				toolArgs := event.ToolCall.Function.Arguments
-				
-				fmt.Println()
-				colors.ProgressIndicator.Printf("[Tool Call] %s", toolName)
-				fmt.Println()
-				
-				logger.Debug().
-					Str("tool_name", toolName).
-					Str("tool_args", toolArgs).
-					Msg("Tool call requested")
-				
-				// Execute tool (simplified for now)
-				fmt.Printf("  Arguments: %s\n", toolArgs)
+				eventCopy := event
+				toolCallsToExecute = append(toolCallsToExecute, &eventCopy)
 			}
 
 		case chat.StreamEventError:
@@ -405,11 +403,71 @@ func handleConversation(input string, session *chat.Session, colors *theme.Color
 	}
 
 	duration := time.Since(start)
-	fmt.Println() // newline after response
-	fmt.Println()
-
+	
+	// Log the response
 	logger.Info().
 		Str("model_response", responseBuilder.String()).
 		Dur("duration_ms", duration).
+		Int("tool_calls", len(toolCallsToExecute)).
 		Msg("AI response received")
+
+	// Execute any tool calls and continue conversation
+	if len(toolCallsToExecute) > 0 {
+		fmt.Println() // newline before tool execution
+		
+		for _, event := range toolCallsToExecute {
+			executeToolCall(session, event.ToolCall, colors, logger)
+		}
+		
+		// Continue conversation with tool results (recursive call)
+		fmt.Println()
+		colors.Assistant.Print("⟫ ")
+		streamConversation(session, "", false, colors, logger)
+	} else {
+		// No tool calls, conversation complete
+		fmt.Println() // newline after response
+		fmt.Println()
+	}
+}
+
+// executeToolCall executes a single tool call and adds result to session
+func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *theme.ColorScheme, logger zerolog.Logger) {
+	toolName := toolCall.Function.Name
+	toolArgs := toolCall.Function.Arguments
+	
+	// Show what tool is being called
+	colors.ProgressIndicator.Printf("🔧 [%s]", toolName)
+	fmt.Println()
+	
+	logger.Debug().
+		Str("tool_name", toolName).
+		Str("tool_args", toolArgs).
+		Msg("Executing tool")
+	
+	// Execute the tool
+	result := session.ToolRegistry.ExecuteOpenAIToolCall(*toolCall)
+	
+	// Add result to conversation history
+	session.AddToolResultMessage(*toolCall, result)
+	
+	// Display result to user
+	if result.Error != nil {
+		colors.Error.Printf("   ✗ Error: %v\n", result.Error)
+		logger.Error().
+			Str("tool_name", toolName).
+			Err(result.Error).
+			Msg("Tool execution failed")
+	} else {
+		// Truncate long results for display
+		displayResult := result.Result
+		if len(displayResult) > 200 {
+			displayResult = displayResult[:200] + "..."
+		}
+		fmt.Printf("   ✓ Result: %s\n", displayResult)
+		
+		logger.Debug().
+			Str("tool_name", toolName).
+			Int("result_length", len(result.Result)).
+			Msg("Tool executed successfully")
+	}
 }

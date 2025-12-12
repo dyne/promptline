@@ -143,32 +143,48 @@ func (s *Session) MessagesSnapshot() []openai.ChatCompletionMessage {
 	return msgs
 }
 
-// GetResponse gets a response from the OpenAI API
+// GetResponseWithContext gets a response from the OpenAI API
+// Handles tool calls recursively until a final text response is received
 func (s *Session) GetResponseWithContext(ctx context.Context, prompt string) (string, error) {
 	s.AddMessage(openai.ChatMessageRoleUser, prompt)
 
-	req := openai.ChatCompletionRequest{
-		Model:    s.Config.Model,
-		Messages: s.MessagesSnapshot(),
-		Tools:    s.ToolRegistry.OpenAITools(),
-	}
+	// Loop to handle tool calls
+	for {
+		req := openai.ChatCompletionRequest{
+			Model:    s.Config.Model,
+			Messages: s.MessagesSnapshot(),
+			Tools:    s.ToolRegistry.OpenAITools(),
+		}
 
-	if s.Config.Temperature != nil {
-		req.Temperature = *s.Config.Temperature
-	}
+		if s.Config.Temperature != nil {
+			req.Temperature = *s.Config.Temperature
+		}
 
-	if s.Config.MaxTokens != nil {
-		req.MaxTokens = *s.Config.MaxTokens
-	}
+		if s.Config.MaxTokens != nil {
+			req.MaxTokens = *s.Config.MaxTokens
+		}
 
-	resp, err := s.Client.CreateChatCompletion(ctx, req)
-	if err != nil {
-		return "", err
-	}
+		resp, err := s.Client.CreateChatCompletion(ctx, req)
+		if err != nil {
+			return "", err
+		}
 
-	response := resp.Choices[0].Message
-	s.AddAssistantMessage(response.Content, response.ToolCalls)
-	return response.Content, nil
+		response := resp.Choices[0].Message
+		s.AddAssistantMessage(response.Content, response.ToolCalls)
+
+		// If no tool calls, return the response
+		if len(response.ToolCalls) == 0 {
+			return response.Content, nil
+		}
+
+		// Execute all tool calls
+		for _, toolCall := range response.ToolCalls {
+			result := s.ToolRegistry.ExecuteOpenAIToolCall(toolCall)
+			s.AddToolResultMessage(toolCall, result)
+		}
+
+		// Loop continues to get next response with tool results
+	}
 }
 
 // GetResponse gets a response from the OpenAI API
