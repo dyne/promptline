@@ -244,3 +244,25 @@ func TestOpenAPIURLEnvOverridesDashScopeDefault(t *testing.T) {
 		t.Fatalf("expected OPENAI_API_URL to override, got %s", cfg.APIURL)
 	}
 }
+
+func TestCommandHistoryFileDefault(t *testing.T) {
+	path := writeTempConfig(t, `{"api_key":"test-key"}`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.CommandHistoryFile != ".promptline_history" {
+		t.Fatalf("expected default command_history_file, got %s", cfg.CommandHistoryFile)
+	}
+}
+
+func TestCommandHistoryFileCustom(t *testing.T) {
+	path := writeTempConfig(t, `{"api_key":"test-key","command_history_file":"/tmp/custom_history"}`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.CommandHistoryFile != "/tmp/custom_history" {
+		t.Fatalf("expected custom command_history_file, got %s", cfg.CommandHistoryFile)
+	}
+}

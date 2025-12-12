@@ -16,6 +16,7 @@ type Config struct {
 	MaxTokens          *int         `json:"max_tokens,omitempty"`
 	Tools              ToolSettings `json:"tools,omitempty"`
 	HistoryFile        string       `json:"history_file,omitempty"`
+	CommandHistoryFile string       `json:"command_history_file,omitempty"`
 	HistoryMaxMessages int          `json:"history_max_messages,omitempty"`
 }
 
@@ -30,11 +31,13 @@ func DefaultConfig() *Config {
 	defaultModel := "gpt-4o-mini"
 	defaultAPIURL := "https://api.openai.com/v1"
 	defaultHistoryFile := ".promptline_conversation_history"
+	defaultCommandHistoryFile := ".promptline_history"
 	defaultHistoryMax := 100
 	return &Config{
 		Model:              defaultModel,
 		APIURL:             defaultAPIURL,
 		HistoryFile:        defaultHistoryFile,
+		CommandHistoryFile: defaultCommandHistoryFile,
 		HistoryMaxMessages: defaultHistoryMax,
 	}
 }
