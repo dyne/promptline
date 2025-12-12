@@ -79,8 +79,9 @@ func TestAccumulateToolCall(t *testing.T) {
 	if call.Function.Name != "ls" {
 		t.Fatalf("expected function name ls, got %s", call.Function.Name)
 	}
-	if call.Function.Arguments != `{"path":"."}` {
-		t.Fatalf("expected merged arguments JSON, got %s", call.Function.Arguments)
+	// Arguments are accumulated in builder, check builder instead
+	if argBuilders["1"].String() != `{"path":"."}` {
+		t.Fatalf("expected merged arguments JSON in builder, got %s", argBuilders["1"].String())
 	}
 }
 
@@ -105,8 +106,9 @@ func TestAccumulateToolCallMissingNameDefaults(t *testing.T) {
 	if call.Function.Name != "" {
 		t.Fatalf("expected empty name to remain until finalization, got %s", call.Function.Name)
 	}
-	if call.Function.Arguments != `{"x":1}` {
-		t.Fatalf("expected arguments copied, got %s", call.Function.Arguments)
+	// Arguments are accumulated in builder, not set on toolCall until finalization (performance optimization)
+	if argBuilders["1"].String() != `{"x":1}` {
+		t.Fatalf("expected arguments in builder, got %s", argBuilders["1"].String())
 	}
 }
 

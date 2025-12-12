@@ -328,7 +328,7 @@ func accumulateToolCall(toolCalls map[string]*openai.ToolCall, argBuilders map[s
 		argBuilders[tc.ID] = builder
 	}
 	builder.WriteString(tc.Function.Arguments)
-	entry.Function.Arguments = builder.String()
+	// Don't update Arguments here - wait for finalization to avoid repeated string allocations
 
 	return entry
 }

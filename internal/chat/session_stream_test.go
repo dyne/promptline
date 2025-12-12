@@ -118,8 +118,13 @@ func TestAccumulateToolCallMultipleTimes(t *testing.T) {
 
 	result := accumulateToolCall(toolCalls, argBuilders, tc2)
 
-	if result.Function.Arguments != "part1_part2" {
-		t.Errorf("Expected 'part1_part2', got %s", result.Function.Arguments)
+	// Arguments are accumulated in builder, not in the toolCall struct (performance optimization)
+	if argBuilders["call_123"].String() != "part1_part2" {
+		t.Errorf("Expected 'part1_part2', got %s", argBuilders["call_123"].String())
+	}
+	// Result pointer should be the same entry
+	if result == nil {
+		t.Error("Expected result to be returned")
 	}
 }
 
