@@ -43,24 +43,30 @@ func DefaultConfig() *Config {
 func LoadConfig(filepath string) (*Config, error) {
 	config := DefaultConfig()
 
-	// If config file doesn't exist, return default config
-	if _, err := os.Stat(filepath); os.IsNotExist(err) {
-		return config, nil
+	// If config file exists, load it
+	if _, err := os.Stat(filepath); err == nil {
+		data, err := os.ReadFile(filepath)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := json.Unmarshal(data, config); err != nil {
+			return nil, err
+		}
 	}
 
-	data, err := os.ReadFile(filepath)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := json.Unmarshal(data, config); err != nil {
-		return nil, err
-	}
-
-	// Env overrides
+	// Env overrides (apply regardless of whether config file exists)
+	// Check OPENAI_API_KEY first, then DASHSCOPE_API_KEY
 	if val := os.Getenv("OPENAI_API_KEY"); val != "" {
 		config.APIKey = val
+	} else if val := os.Getenv("DASHSCOPE_API_KEY"); val != "" {
+		config.APIKey = val
+		// For DashScope, set provider-specific defaults if not already set
+		if config.APIURL == "https://api.openai.com/v1" {
+			config.APIURL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+		}
 	}
+	
 	if val := os.Getenv("OPENAI_API_URL"); val != "" {
 		config.APIURL = val
 	}

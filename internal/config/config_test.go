@@ -151,8 +151,8 @@ func TestTemperatureAndMaxTokensSet(t *testing.T) {
 }
 
 func TestLoadConfigMissingFileReturnsDefault(t *testing.T) {
-	// Missing file returns default config immediately (without env override or validation)
-	// This is current behavior - returns early at line 42
+	// Missing file with env key should still work
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	cfg, err := LoadConfig("/nonexistent/config.json")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -160,11 +160,87 @@ func TestLoadConfigMissingFileReturnsDefault(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("expected default config to be returned")
 	}
-	// Default config has no API key, but validation is skipped for missing files
+	if cfg.APIKey != "test-key" {
+		t.Error("expected env API key to be applied even without config file")
+	}
 	if cfg.Model == "" {
 		t.Error("expected default model to be set")
 	}
 	if cfg.APIURL == "" {
 		t.Error("expected default API URL to be set")
+	}
+}
+
+func TestDashScopeAPIKeyEnvVar(t *testing.T) {
+	path := writeTempConfig(t, `{"model":"qwen3"}`)
+	t.Setenv("DASHSCOPE_API_KEY", "dashscope-key")
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.APIKey != "dashscope-key" {
+		t.Fatalf("expected DASHSCOPE_API_KEY to be used, got %s", cfg.APIKey)
+	}
+	// Should set DashScope default URL
+	if cfg.APIURL != "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" {
+		t.Fatalf("expected DashScope default URL, got %s", cfg.APIURL)
+	}
+}
+
+func TestOpenAIKeyTakesPrecedenceOverDashScope(t *testing.T) {
+	path := writeTempConfig(t, `{}`)
+	t.Setenv("OPENAI_API_KEY", "openai-key")
+	t.Setenv("DASHSCOPE_API_KEY", "dashscope-key")
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.APIKey != "openai-key" {
+		t.Fatalf("expected OPENAI_API_KEY to take precedence, got %s", cfg.APIKey)
+	}
+	// Should use OpenAI default URL, not DashScope
+	if cfg.APIURL != "https://api.openai.com/v1" {
+		t.Fatalf("expected OpenAI default URL, got %s", cfg.APIURL)
+	}
+}
+
+func TestDashScopeKeyWithCustomURL(t *testing.T) {
+	path := writeTempConfig(t, `{"api_url":"https://custom.example/v1"}`)
+	t.Setenv("DASHSCOPE_API_KEY", "dashscope-key")
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Custom URL from config should be preserved
+	if cfg.APIURL != "https://custom.example/v1" {
+		t.Fatalf("expected custom URL to be preserved, got %s", cfg.APIURL)
+	}
+}
+
+func TestMissingAPIKeyWithNoConfigFile(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("DASHSCOPE_API_KEY", "")
+
+	_, err := LoadConfig("/nonexistent/config.json")
+	if err == nil {
+		t.Fatal("expected error for missing API key even without config file")
+	}
+}
+
+func TestOpenAPIURLEnvOverridesDashScopeDefault(t *testing.T) {
+	path := writeTempConfig(t, `{}`)
+	t.Setenv("DASHSCOPE_API_KEY", "dashscope-key")
+	t.Setenv("OPENAI_API_URL", "https://override.example/v1")
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// OPENAI_API_URL should override even DashScope defaults
+	if cfg.APIURL != "https://override.example/v1" {
+		t.Fatalf("expected OPENAI_API_URL to override, got %s", cfg.APIURL)
 	}
 }
