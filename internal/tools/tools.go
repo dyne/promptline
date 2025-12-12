@@ -2,7 +2,6 @@ package tools
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -15,12 +14,6 @@ var (
 	DefaultAllowList   = []string{"get_current_datetime", "read_file", "ls"}
 	DefaultConfirmList = []string{"execute_shell_command", "write_file"}
 )
-
-// ErrToolNotAllowed indicates a tool is blocked by the current policy.
-var ErrToolNotAllowed = errors.New("tool blocked by policy")
-
-// ErrToolRequiresConfirmation indicates a tool requires confirmation before running.
-var ErrToolRequiresConfirmation = errors.New("tool requires confirmation")
 
 // ExecutorFunc is the function signature for tool implementations
 type ExecutorFunc func(args map[string]interface{}) (string, error)

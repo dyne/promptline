@@ -2,8 +2,8 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
-	"log"
 	"os"
 
 	"github.com/rs/zerolog"
@@ -18,7 +18,11 @@ func main() {
 	flag.Parse()
 
 	// Initialize logger
-	logger := initLogger(*debugMode, *logFile)
+	logger, err := initLogger(*debugMode, *logFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 	logger.Info().Msg("Promptline starting")
 
 	// Check if we're running in batch mode (with "-" argument)
@@ -32,7 +36,7 @@ func main() {
 	runTUIMode(logger)
 }
 
-func initLogger(debug bool, logFilePath string) zerolog.Logger {
+func initLogger(debug bool, logFilePath string) (zerolog.Logger, error) {
 	// Set log level
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	if debug {
@@ -45,7 +49,7 @@ func initLogger(debug bool, logFilePath string) zerolog.Logger {
 		// Log to file only
 		file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
-			log.Fatalf("Failed to open log file: %v", err)
+			return zerolog.Logger{}, fmt.Errorf("failed to open log file: %w", err)
 		}
 		output = file
 	} else {
@@ -54,5 +58,5 @@ func initLogger(debug bool, logFilePath string) zerolog.Logger {
 	}
 
 	// Create logger with timestamp
-	return zerolog.New(output).With().Timestamp().Logger()
+	return zerolog.New(output).With().Timestamp().Logger(), nil
 }

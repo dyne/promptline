@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	"github.com/sashabaranov/go-openai"
+	"promptline/internal/config"
 	"promptline/internal/tools"
 )
 
-func TestAddToolResultMessageStoresTOON(t *testing.T) {
+func TestAddToolResultMessageStoresPlainText(t *testing.T) {
 	s := &Session{
 		ToolRegistry: tools.NewRegistry(),
 	}
@@ -24,7 +25,7 @@ func TestAddToolResultMessageStoresTOON(t *testing.T) {
 	}
 	result := &tools.ToolResult{
 		Function: "ls",
-		Result:   "ok",
+		Result:   "file1.txt\nfile2.txt",
 	}
 
 	s.AddToolResultMessage(call, result)
@@ -41,8 +42,8 @@ func TestAddToolResultMessageStoresTOON(t *testing.T) {
 		t.Fatalf("expected tool_call_id %s, got %s", call.ID, msg.ToolCallID)
 	}
 
-	if !strings.Contains(msg.Content, "result") || !strings.Contains(msg.Content, "ok") {
-		t.Fatalf("expected TOON content to include result and value, got %q", msg.Content)
+	if msg.Content != result.Result {
+		t.Fatalf("expected content to be plain result, got %q", msg.Content)
 	}
 }
 
@@ -199,8 +200,8 @@ func TestAddToolResultMessageIncludesError(t *testing.T) {
 	if msg.Name == "" {
 		t.Fatalf("expected fallback name to be set")
 	}
-	if !strings.Contains(msg.Content, "error") || !strings.Contains(msg.Content, "boom") {
-		t.Fatalf("expected TOON content with error, got %q", msg.Content)
+	if !strings.Contains(msg.Content, "Error") || !strings.Contains(msg.Content, "boom") {
+		t.Fatalf("expected error message in content, got %q", msg.Content)
 	}
 }
 

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/alpkeskin/gotoon"
 	"github.com/sashabaranov/go-openai"
 	"promptline/internal/config"
 	"promptline/internal/tools"
@@ -95,18 +94,12 @@ func (s *Session) AddAssistantMessage(content string, toolCalls []openai.ToolCal
 func (s *Session) AddToolResultMessage(call openai.ToolCall, result *tools.ToolResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	payload := struct {
-		Result string `json:"result,omitempty"`
-		Error  string `json:"error,omitempty"`
-	}{
-		Result: result.Result,
-	}
-	if result.Error != nil {
-		payload.Error = result.Error.Error()
-	}
+	
+	// Use plain result as content. TOON encoding was causing issues with history serialization.
+	// The API accepts plain text for tool results.
 	content := result.Result
-	if encoded, err := gotoon.Encode(payload); err == nil {
-		content = encoded
+	if result.Error != nil {
+		content = fmt.Sprintf("Error: %v", result.Error)
 	}
 
 	name := call.Function.Name
@@ -153,7 +146,7 @@ func (s *Session) GetResponseWithContext(ctx context.Context, prompt string) (st
 
 		resp, err := s.Client.CreateChatCompletion(ctx, req)
 		if err != nil {
-			return "", err
+			return "", &APIError{Operation: "create_completion", Err: err}
 		}
 
 		response := resp.Choices[0].Message
@@ -207,7 +200,7 @@ func (s *Session) StreamResponseWithContext(ctx context.Context, prompt string, 
 
 	stream, err := s.createStream(ctx)
 	if err != nil {
-		events <- StreamEvent{Type: StreamEventError, Err: err}
+		events <- StreamEvent{Type: StreamEventError, Err: &StreamError{Operation: "create_stream", Err: err}}
 		return
 	}
 	defer stream.Close()
@@ -270,7 +263,7 @@ func (s *Session) handleStreamEnd(err error, contentBuilder *strings.Builder, to
 		s.emitToolCalls(finalCalls, events)
 		return
 	}
-	events <- StreamEvent{Type: StreamEventError, Err: err}
+	events <- StreamEvent{Type: StreamEventError, Err: &StreamError{Operation: "receive_chunk", Err: err}}
 }
 
 func (s *Session) handleStreamChunk(delta openai.ChatCompletionStreamChoiceDelta, contentBuilder *strings.Builder, toolCalls map[string]*openai.ToolCall, argBuilders map[string]*strings.Builder, events chan<- StreamEvent) {
@@ -331,6 +324,11 @@ func finalizeToolCalls(toolCalls map[string]*openai.ToolCall, argBuilders map[st
 		}
 		trimmed := strings.TrimSpace(rawArgs)
 
+		// Drop tool calls without IDs (malformed/incomplete)
+		if call.ID == "" {
+			continue
+		}
+		
 		// Drop nameless + empty-arg tool calls (often stray/unsolicited).
 		if call.Function.Name == "" && trimmed == "" {
 			continue
@@ -345,6 +343,10 @@ func finalizeToolCalls(toolCalls map[string]*openai.ToolCall, argBuilders map[st
 		call.Function.Arguments = args
 		if call.Function.Name == "" {
 			call.Function.Name = "unknown_tool"
+		}
+		// Ensure type is set to function if empty
+		if call.Type == "" {
+			call.Type = openai.ToolTypeFunction
 		}
 		finalCalls = append(finalCalls, *call)
 	}
@@ -416,7 +418,7 @@ func (s *Session) SaveConversationHistory(filepath string) error {
 
 	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		return err
+		return &HistoryError{Operation: "open", Filepath: filepath, Err: err}
 	}
 	defer file.Close()
 
@@ -424,7 +426,7 @@ func (s *Session) SaveConversationHistory(filepath string) error {
 	// Only save messages we haven't saved yet
 	for i := s.lastSavedMsgCount; i < len(history); i++ {
 		if err := encoder.Encode(history[i]); err != nil {
-			return err
+			return &HistoryError{Operation: "encode", Filepath: filepath, Err: err}
 		}
 	}
 
@@ -442,7 +444,7 @@ func (s *Session) LoadConversationHistory(filepath string, maxLines int) error {
 		if os.IsNotExist(err) {
 			return nil // No history file is okay
 		}
-		return err
+		return &HistoryError{Operation: "open", Filepath: filepath, Err: err}
 	}
 	defer file.Close()
 
@@ -455,7 +457,7 @@ func (s *Session) LoadConversationHistory(filepath string, maxLines int) error {
 			if err == io.EOF {
 				break
 			}
-			return err
+			return &HistoryError{Operation: "decode", Filepath: filepath, Err: err}
 		}
 		messages = append(messages, msg)
 	}

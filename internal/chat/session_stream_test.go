@@ -442,3 +442,32 @@ func TestEmitToolCalls(t *testing.T) {
 		t.Errorf("Expected 2 events, got %d", count)
 	}
 }
+
+func TestFinalizeToolCallsEnsuresTypeField(t *testing.T) {
+toolCalls := map[string]*openai.ToolCall{
+"call1": {
+ID:   "call1",
+Type: "", // Empty type should be set to function
+Function: openai.FunctionCall{
+Name: "test_tool",
+},
+},
+}
+argBuilders := map[string]*strings.Builder{
+"call1": func() *strings.Builder {
+b := &strings.Builder{}
+b.WriteString(`{"arg":"value"}`)
+return b
+}(),
+}
+
+result := finalizeToolCalls(toolCalls, argBuilders)
+
+if len(result) != 1 {
+t.Fatalf("Expected 1 tool call, got %d", len(result))
+}
+
+if result[0].Type != openai.ToolTypeFunction {
+t.Errorf("Expected Type to be %q, got %q", openai.ToolTypeFunction, result[0].Type)
+}
+}
