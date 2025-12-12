@@ -314,3 +314,131 @@ func TestStreamResponseWithContextCancellation(t *testing.T) {
 		t.Error("Timeout waiting for event")
 	}
 }
+
+func TestHandleStreamChunk(t *testing.T) {
+	cfg := &config.Config{
+		APIKey: "test-key",
+		Model:  "gpt-4o-mini",
+	}
+
+	session := NewSession(cfg)
+
+	tests := []struct {
+		name            string
+		delta           openai.ChatCompletionStreamChoiceDelta
+		wantContentLen  int
+		wantToolCallCnt int
+	}{
+		{
+			name: "content only",
+			delta: openai.ChatCompletionStreamChoiceDelta{
+				Content: "test content",
+			},
+			wantContentLen:  12,
+			wantToolCallCnt: 0,
+		},
+		{
+			name: "tool call only",
+			delta: openai.ChatCompletionStreamChoiceDelta{
+				ToolCalls: []openai.ToolCall{
+					{
+						ID:   "call_1",
+						Type: openai.ToolTypeFunction,
+						Function: openai.FunctionCall{
+							Name:      "test_func",
+							Arguments: "{}",
+						},
+					},
+				},
+			},
+			wantContentLen:  0,
+			wantToolCallCnt: 1,
+		},
+		{
+			name: "content and tool call",
+			delta: openai.ChatCompletionStreamChoiceDelta{
+				Content: "thinking...",
+				ToolCalls: []openai.ToolCall{
+					{
+						ID:   "call_2",
+						Type: openai.ToolTypeFunction,
+						Function: openai.FunctionCall{
+							Name:      "another_func",
+							Arguments: `{"key": "value"}`,
+						},
+					},
+				},
+			},
+			wantContentLen:  11,
+			wantToolCallCnt: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var contentBuilder strings.Builder
+			toolCalls := make(map[string]*openai.ToolCall)
+			argBuilders := make(map[string]*strings.Builder)
+			events := make(chan StreamEvent, 10)
+
+			session.handleStreamChunk(tt.delta, &contentBuilder, toolCalls, argBuilders, events)
+
+			if contentBuilder.Len() != tt.wantContentLen {
+				t.Errorf("Expected content length %d, got %d", tt.wantContentLen, contentBuilder.Len())
+			}
+
+			if len(toolCalls) != tt.wantToolCallCnt {
+				t.Errorf("Expected %d tool calls, got %d", tt.wantToolCallCnt, len(toolCalls))
+			}
+
+			close(events)
+		})
+	}
+}
+
+func TestEmitToolCalls(t *testing.T) {
+	cfg := &config.Config{
+		APIKey: "test-key",
+		Model:  "gpt-4o-mini",
+	}
+
+	session := NewSession(cfg)
+
+	finalCalls := []openai.ToolCall{
+		{
+			ID:   "call_1",
+			Type: openai.ToolTypeFunction,
+			Function: openai.FunctionCall{
+				Name:      "func1",
+				Arguments: "{}",
+			},
+		},
+		{
+			ID:   "call_2",
+			Type: openai.ToolTypeFunction,
+			Function: openai.FunctionCall{
+				Name:      "func2",
+				Arguments: `{"arg": "val"}`,
+			},
+		},
+	}
+
+	events := make(chan StreamEvent, 10)
+	session.emitToolCalls(finalCalls, events)
+	close(events)
+
+	count := 0
+	for event := range events {
+		if event.Type != StreamEventToolCall {
+			t.Errorf("Expected StreamEventToolCall, got %v", event.Type)
+		}
+		if event.ToolCall == nil {
+			t.Error("Expected non-nil ToolCall")
+		}
+		count++
+	}
+
+	if count != 2 {
+		t.Errorf("Expected 2 events, got %d", count)
+	}
+}

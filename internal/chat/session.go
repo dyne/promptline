@@ -198,6 +198,17 @@ func (s *Session) StreamResponseWithContext(ctx context.Context, prompt string, 
 		s.AddMessage(openai.ChatMessageRoleUser, prompt)
 	}
 
+	stream, err := s.createStream(ctx)
+	if err != nil {
+		events <- StreamEvent{Type: StreamEventError, Err: err}
+		return
+	}
+	defer stream.Close()
+
+	s.processStream(ctx, stream, events)
+}
+
+func (s *Session) createStream(ctx context.Context) (*openai.ChatCompletionStream, error) {
 	req := openai.ChatCompletionRequest{
 		Model:    s.Config.Model,
 		Messages: s.MessagesSnapshot(),
@@ -213,13 +224,10 @@ func (s *Session) StreamResponseWithContext(ctx context.Context, prompt string, 
 		req.MaxTokens = *s.Config.MaxTokens
 	}
 
-	stream, err := s.Client.CreateChatCompletionStream(ctx, req)
-	if err != nil {
-		events <- StreamEvent{Type: StreamEventError, Err: err}
-		return
-	}
-	defer stream.Close()
+	return s.Client.CreateChatCompletionStream(ctx, req)
+}
 
+func (s *Session) processStream(ctx context.Context, stream *openai.ChatCompletionStream, events chan<- StreamEvent) {
 	var contentBuilder strings.Builder
 	toolCalls := make(map[string]*openai.ToolCall)
 	argBuilders := make(map[string]*strings.Builder)
@@ -232,19 +240,7 @@ func (s *Session) StreamResponseWithContext(ctx context.Context, prompt string, 
 		default:
 			response, err := stream.Recv()
 			if err != nil {
-				if err == io.EOF {
-					// Persist assistant message (with tool calls if any)
-					finalCalls := finalizeToolCalls(toolCalls, argBuilders)
-					s.AddAssistantMessage(contentBuilder.String(), finalCalls)
-
-					// Emit tool calls so the caller can execute them
-					for _, call := range finalCalls {
-						callCopy := call
-						events <- StreamEvent{Type: StreamEventToolCall, ToolCall: &callCopy}
-					}
-					return
-				}
-				events <- StreamEvent{Type: StreamEventError, Err: err}
+				s.handleStreamEnd(err, &contentBuilder, toolCalls, argBuilders, events)
 				return
 			}
 
@@ -252,20 +248,39 @@ func (s *Session) StreamResponseWithContext(ctx context.Context, prompt string, 
 				continue
 			}
 
-			delta := response.Choices[0].Delta
-			if delta.Content != "" {
-				content := delta.Content
-				contentBuilder.WriteString(content)
-				events <- StreamEvent{Type: StreamEventContent, Content: content}
-			}
-
-			for _, tc := range delta.ToolCalls {
-				entry := accumulateToolCall(toolCalls, argBuilders, tc)
-				if entry != nil {
-					toolCalls[tc.ID] = entry
-				}
-			}
+			s.handleStreamChunk(response.Choices[0].Delta, &contentBuilder, toolCalls, argBuilders, events)
 		}
+	}
+}
+
+func (s *Session) handleStreamEnd(err error, contentBuilder *strings.Builder, toolCalls map[string]*openai.ToolCall, argBuilders map[string]*strings.Builder, events chan<- StreamEvent) {
+	if err == io.EOF {
+		finalCalls := finalizeToolCalls(toolCalls, argBuilders)
+		s.AddAssistantMessage(contentBuilder.String(), finalCalls)
+		s.emitToolCalls(finalCalls, events)
+		return
+	}
+	events <- StreamEvent{Type: StreamEventError, Err: err}
+}
+
+func (s *Session) handleStreamChunk(delta openai.ChatCompletionStreamChoiceDelta, contentBuilder *strings.Builder, toolCalls map[string]*openai.ToolCall, argBuilders map[string]*strings.Builder, events chan<- StreamEvent) {
+	if delta.Content != "" {
+		contentBuilder.WriteString(delta.Content)
+		events <- StreamEvent{Type: StreamEventContent, Content: delta.Content}
+	}
+
+	for _, tc := range delta.ToolCalls {
+		entry := accumulateToolCall(toolCalls, argBuilders, tc)
+		if entry != nil {
+			toolCalls[tc.ID] = entry
+		}
+	}
+}
+
+func (s *Session) emitToolCalls(finalCalls []openai.ToolCall, events chan<- StreamEvent) {
+	for _, call := range finalCalls {
+		callCopy := call
+		events <- StreamEvent{Type: StreamEventToolCall, ToolCall: &callCopy}
 	}
 }
 
