@@ -110,3 +110,78 @@ func (c *Config) ToolPolicy() tools.Policy {
 	}
 	return policy
 }
+
+// ValidationWarning represents a non-fatal configuration issue
+type ValidationWarning struct {
+	Field   string
+	Message string
+}
+
+// Validate checks the configuration for common issues and returns warnings
+func (c *Config) Validate(registry *tools.Registry) []ValidationWarning {
+	var warnings []ValidationWarning
+
+	// Validate temperature range (OpenAI expects 0-2)
+	if c.Temperature != nil {
+		temp := *c.Temperature
+		if temp < 0 || temp > 2 {
+			warnings = append(warnings, ValidationWarning{
+				Field:   "temperature",
+				Message: fmt.Sprintf("temperature %.2f is outside recommended range [0, 2]", temp),
+			})
+		}
+	}
+
+	// Validate max_tokens (OpenAI models have different limits)
+	if c.MaxTokens != nil {
+		tokens := *c.MaxTokens
+		if tokens <= 0 {
+			warnings = append(warnings, ValidationWarning{
+				Field:   "max_tokens",
+				Message: fmt.Sprintf("max_tokens %d must be positive", tokens),
+			})
+		}
+		if tokens > 128000 {
+			warnings = append(warnings, ValidationWarning{
+				Field:   "max_tokens",
+				Message: fmt.Sprintf("max_tokens %d exceeds typical model limits", tokens),
+			})
+		}
+	}
+
+	// Validate tool policy against registered tools
+	if registry != nil {
+		registeredTools := make(map[string]bool)
+		for _, tool := range registry.GetTools() {
+			registeredTools[tool.Name] = true
+		}
+
+		for _, toolName := range c.Tools.Allow {
+			if !registeredTools[toolName] {
+				warnings = append(warnings, ValidationWarning{
+					Field:   "tools.allow",
+					Message: fmt.Sprintf("tool %q in allow list is not registered", toolName),
+				})
+			}
+		}
+
+		for _, toolName := range c.Tools.RequireConfirmation {
+			if !registeredTools[toolName] {
+				warnings = append(warnings, ValidationWarning{
+					Field:   "tools.require_confirmation",
+					Message: fmt.Sprintf("tool %q in require_confirmation list is not registered", toolName),
+				})
+			}
+		}
+	}
+
+	// Validate history_max_messages
+	if c.HistoryMaxMessages <= 0 {
+		warnings = append(warnings, ValidationWarning{
+			Field:   "history_max_messages",
+			Message: fmt.Sprintf("history_max_messages %d should be positive, using default", c.HistoryMaxMessages),
+		})
+	}
+
+	return warnings
+}

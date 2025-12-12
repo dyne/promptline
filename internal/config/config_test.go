@@ -266,3 +266,157 @@ func TestCommandHistoryFileCustom(t *testing.T) {
 		t.Fatalf("expected custom command_history_file, got %s", cfg.CommandHistoryFile)
 	}
 }
+
+func TestValidateTemperatureRange(t *testing.T) {
+	tests := []struct {
+		name          string
+		temperature   *float32
+		expectWarning bool
+	}{
+		{
+			name:          "valid temperature",
+			temperature:   func() *float32 { v := float32(0.7); return &v }(),
+			expectWarning: false,
+		},
+		{
+			name:          "temperature too low",
+			temperature:   func() *float32 { v := float32(-0.1); return &v }(),
+			expectWarning: true,
+		},
+		{
+			name:          "temperature too high",
+			temperature:   func() *float32 { v := float32(2.5); return &v }(),
+			expectWarning: true,
+		},
+		{
+			name:          "temperature at lower bound",
+			temperature:   func() *float32 { v := float32(0); return &v }(),
+			expectWarning: false,
+		},
+		{
+			name:          "temperature at upper bound",
+			temperature:   func() *float32 { v := float32(2); return &v }(),
+			expectWarning: false,
+		},
+		{
+			name:          "nil temperature",
+			temperature:   nil,
+			expectWarning: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				APIKey:      "test-key",
+				Model:       "gpt-4o-mini",
+				Temperature: tt.temperature,
+			}
+
+			warnings := cfg.Validate(nil)
+			hasWarning := false
+			for _, w := range warnings {
+				if w.Field == "temperature" {
+					hasWarning = true
+					break
+				}
+			}
+
+			if hasWarning != tt.expectWarning {
+				t.Errorf("expected warning=%v, got=%v", tt.expectWarning, hasWarning)
+			}
+		})
+	}
+}
+
+func TestValidateMaxTokens(t *testing.T) {
+	tests := []struct {
+		name          string
+		maxTokens     *int
+		expectWarning bool
+	}{
+		{
+			name:          "valid max tokens",
+			maxTokens:     func() *int { v := 2000; return &v }(),
+			expectWarning: false,
+		},
+		{
+			name:          "negative max tokens",
+			maxTokens:     func() *int { v := -100; return &v }(),
+			expectWarning: true,
+		},
+		{
+			name:          "zero max tokens",
+			maxTokens:     func() *int { v := 0; return &v }(),
+			expectWarning: true,
+		},
+		{
+			name:          "excessive max tokens",
+			maxTokens:     func() *int { v := 200000; return &v }(),
+			expectWarning: true,
+		},
+		{
+			name:          "nil max tokens",
+			maxTokens:     nil,
+			expectWarning: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				APIKey:    "test-key",
+				Model:     "gpt-4o-mini",
+				MaxTokens: tt.maxTokens,
+			}
+
+			warnings := cfg.Validate(nil)
+			hasWarning := false
+			for _, w := range warnings {
+				if w.Field == "max_tokens" {
+					hasWarning = true
+					break
+				}
+			}
+
+			if hasWarning != tt.expectWarning {
+				t.Errorf("expected warning=%v, got=%v", tt.expectWarning, hasWarning)
+			}
+		})
+	}
+}
+
+func TestValidateHistoryMaxMessages(t *testing.T) {
+	tests := []struct {
+		name               string
+		historyMaxMessages int
+		expectWarning      bool
+	}{
+		{"valid positive value", 100, false},
+		{"zero value", 0, true},
+		{"negative value", -10, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				APIKey:             "test-key",
+				Model:              "gpt-4o-mini",
+				HistoryMaxMessages: tt.historyMaxMessages,
+			}
+
+			warnings := cfg.Validate(nil)
+			hasWarning := false
+			for _, w := range warnings {
+				if w.Field == "history_max_messages" {
+					hasWarning = true
+					break
+				}
+			}
+
+			if hasWarning != tt.expectWarning {
+				t.Errorf("expected warning=%v, got=%v", tt.expectWarning, hasWarning)
+			}
+		})
+	}
+}
