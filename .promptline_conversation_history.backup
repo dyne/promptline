@@ -1,0 +1,27 @@
+{"role":"user","content":"What is 2+2?"}
+{"role":"assistant","content":"2 + 2 equals 4."}
+{"role":"user","content":"List files in current directory"}
+{"role":"assistant","tool_calls":[{"index":0,"id":"call_6ff0a1f07e234aa89ffc9679","type":"function","function":{"name":"ls","arguments":"{\"path\": \".\"}"}}]}
+{"role":"tool","content":"\"error,omitempty\": \"\"\n\"result,omitempty\": \"- -rw-r--r--    4.3KB 2025-12-11 23:04:05 AGENTS.md\\n- -rw-r--r--   18.7KB 2025-12-11 23:19:29 CONVERSION_PLAN.md\\n- -rw-r--r--     689B 2025-12-11 23:04:05 Makefile\\n- -rw-r--r--    2.3KB 2025-12-11 23:40:26 QUICKSTART.md\\n- -rw-r--r--    4.5KB 2025-12-12 00:18:44 README.md\\n- -rw-r--r--    5.5KB 2025-12-12 01:24:33 TOOL_CALL_FIX_PLAN.md\\nd -rwxr-xr-x    4.0KB 2025-12-11 23:04:05 cmd\\n- -rw-r--r--     201B 2025-12-12 00:38:17 config.json\\n- -rw-r--r--     406B 2025-12-12 00:18:25 config.json.example\\n- -rw-r--r--   17.8KB 2025-12-11 23:55:30 coverage.out\\nd -rwxr-xr-x    4.0KB 2025-12-11 23:04:05 docs\\n- -rw-r--r--    1.4KB 2025-12-11 23:04:05 example_batch_script.py\\n- -rw-r--r--     916B 2025-12-11 23:38:47 go.mod\\n- -rw-r--r--   13.1KB 2025-12-11 23:38:47 go.sum\\nd -rwxr-xr-x    4.0KB 2025-12-11 23:38:36 internal\\n- -rwxr-xr-x   10.6MB 2025-12-12 01:40:00 promptline\\n- -rw-r--r--     349B 2025-12-11 23:04:05 theme.json\\n\"","name":"ls","tool_call_id":"call_6ff0a1f07e234aa89ffc9679"}
+{"role":"assistant","content":"Here are the files and directories in the current directory:\n\n- `AGENTS.md` (4.3KB)\n- `CONVERSION_PLAN.md` (18.7KB)\n- `Makefile` (689B)\n- `QUICKSTART.md` (2.3KB)\n- `README.md` (4.5KB)\n- `TOOL_CALL_FIX_PLAN.md` (5.5KB)\n- `cmd/` (directory)\n- `config.json` (201B)\n- `config.json.example` (406B)\n- `coverage.out` (17.8KB)\n- `docs/` (directory)\n- `example_batch_script.py` (1.4KB)\n- `go.mod` (916B)\n- `go.sum` (13.1KB)\n- `internal/` (directory)\n- `promptline` (10.6MB)\n- `theme.json` (349B)"}
+{"role":"user","content":"What is the current time?"}
+{"role":"assistant","tool_calls":[{"index":0,"id":"call_a02c00c2bf034b4498c44140","type":"function","function":{"name":"get_current_datetime","arguments":"{}"}}]}
+{"role":"tool","content":"\"error,omitempty\": \"\"\n\"result,omitempty\": \"2025-12-12T01:40:27+01:00\"","name":"get_current_datetime","tool_call_id":"call_a02c00c2bf034b4498c44140"}
+{"role":"assistant","content":"The current time is 01:40:27 on December 12, 2025 (CET)."}
+{"role":"user","content":"u there"}
+{"role":"assistant","content":"Yes, I'm here. How can I assist you?"}
+{"role":"user","content":"you there?"}
+{"role":"user","content":"you there?"}
+{"role":"assistant","content":"Yes, I'm here! I can see your messages. What would you like help with?"}
+{"role":"user","content":"ls"}
+{"role":"assistant","tool_calls":[{"id":"call_00_pm8r793UnnS6sjj2L4FS4Ws6","type":"function","function":{"name":"ls","arguments":"{}"}},{"type":"","function":{"name":"unknown_tool","arguments":"{\"path\": \".\"}"}}]}
+{"role":"tool","content":"\"error,omitempty\": \"\"\n\"result,omitempty\": \"- -rw-r--r--    4.3KB 2025-12-11 23:04:05 AGENTS.md\\n- -rw-r--r--   18.7KB 2025-12-11 23:19:29 CONVERSION_PLAN.md\\n- -rw-r--r--    1.1KB 2025-12-12 12:48:15 Makefile\\n- -rw-r--r--    2.3KB 2025-12-11 23:40:26 QUICKSTART.md\\n- -rw-r--r--    4.8KB 2025-12-12 12:09:53 README.md\\n- -rw-r--r--    5.5KB 2025-12-12 01:24:33 TOOL_CALL_FIX_PLAN.md\\nd -rwxr-xr-x    4.0KB 2025-12-11 23:04:05 cmd\\n- -rw-r--r--     171B 2025-12-12 21:28:20 config.json\\n- -rw-r--r--     455B 2025-12-12 12:09:39 config.json.example\\n- -rw-r--r--   17.8KB 2025-12-11 23:55:30 coverage.out\\n- -rw-r--r--    5.9KB 2025-12-12 11:22:57 coverage_chat.out\\n- -rw-r--r--    8.1KB 2025-12-12 12:12:27 coverage_tools.out\\n- -rw-r--r--    8.1KB 2025-12-12 12:17:07 coverage_tools_new.out\\nd -rwxr-xr-x    4.0KB 2025-12-11 23:04:05 docs\\n- -rw-r--r--    1.4KB 2025-12-11 23:04:05 example_batch_script.py\\n- -rw-r--r--     916B 2025-12-11 23:38:47 go.mod\\n- -rw-r--r--   13.1KB 2025-12-11 23:38:47 go.sum\\nd -rwxr-xr-x    4.0KB 2025-12-12 09:11:24 history\\nd -rwxr-xr-x    4.0KB 2025-12-11 23:38:36 internal\\n- -rwxr-xr-x   10.6MB 2025-12-12 12:49:43 promptline\\n- -rw-r--r--     349B 2025-12-11 23:04:05 theme.json\\n\"","name":"ls","tool_call_id":"call_00_pm8r793UnnS6sjj2L4FS4Ws6"}
+{"role":"tool","content":"\"error,omitempty\": \"unknown tool: unknown_tool\"\n\"result,omitempty\": \"Error: Tool 'unknown_tool' not found. Available tools: [read_file write_file ls get_current_datetime execute_shell_command]\"","name":"unknown_tool"}
+{"role":"user","content":"ls"}
+{"role":"user","content":"you there?"}
+{"role":"user","content":"you there?"}
+{"role":"user","content":"hello"}
+{"role":"user","content":"ls"}
+{"role":"user","content":"you there"}
+{"role":"user","content":"hello"}
+{"role":"user","content":"hello"}

@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -470,4 +471,59 @@ t.Fatalf("Expected 1 tool call, got %d", len(result))
 if result[0].Type != openai.ToolTypeFunction {
 t.Errorf("Expected Type to be %q, got %q", openai.ToolTypeFunction, result[0].Type)
 }
+}
+
+func TestStreamEventHelpers(t *testing.T) {
+t.Run("NewContentEvent", func(t *testing.T) {
+event := NewContentEvent("test content")
+if event.Type != StreamEventContent {
+t.Errorf("expected StreamEventContent, got %v", event.Type)
+}
+if event.Content != "test content" {
+t.Errorf("expected 'test content', got %s", event.Content)
+}
+if event.ToolCall != nil {
+t.Error("expected ToolCall to be nil")
+}
+if event.Err != nil {
+t.Error("expected Err to be nil")
+}
+})
+
+t.Run("NewToolCallEvent", func(t *testing.T) {
+toolCall := &openai.ToolCall{
+ID:   "test-id",
+Type: openai.ToolTypeFunction,
+}
+event := NewToolCallEvent(toolCall)
+if event.Type != StreamEventToolCall {
+t.Errorf("expected StreamEventToolCall, got %v", event.Type)
+}
+if event.ToolCall != toolCall {
+t.Error("expected ToolCall to match")
+}
+if event.Content != "" {
+t.Error("expected Content to be empty")
+}
+if event.Err != nil {
+t.Error("expected Err to be nil")
+}
+})
+
+t.Run("NewErrorEvent", func(t *testing.T) {
+testErr := errors.New("test error")
+event := NewErrorEvent(testErr)
+if event.Type != StreamEventError {
+t.Errorf("expected StreamEventError, got %v", event.Type)
+}
+if event.Err != testErr {
+t.Error("expected Err to match")
+}
+if event.Content != "" {
+t.Error("expected Content to be empty")
+}
+if event.ToolCall != nil {
+t.Error("expected ToolCall to be nil")
+}
+})
 }

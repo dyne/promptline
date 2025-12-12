@@ -189,6 +189,21 @@ type StreamEvent struct {
 	Err      error
 }
 
+// NewContentEvent creates a content streaming event.
+func NewContentEvent(content string) StreamEvent {
+	return StreamEvent{Type: StreamEventContent, Content: content}
+}
+
+// NewToolCallEvent creates a tool call streaming event.
+func NewToolCallEvent(toolCall *openai.ToolCall) StreamEvent {
+	return StreamEvent{Type: StreamEventToolCall, ToolCall: toolCall}
+}
+
+// NewErrorEvent creates an error streaming event.
+func NewErrorEvent(err error) StreamEvent {
+	return StreamEvent{Type: StreamEventError, Err: err}
+}
+
 // StreamResponseWithContext gets a streaming response from the OpenAI API and sends it through a channel of events.
 // If includeUserMessage is true, the prompt is added as a user message before sending the request.
 func (s *Session) StreamResponseWithContext(ctx context.Context, prompt string, includeUserMessage bool, events chan<- StreamEvent) {
@@ -200,7 +215,7 @@ func (s *Session) StreamResponseWithContext(ctx context.Context, prompt string, 
 
 	stream, err := s.createStream(ctx)
 	if err != nil {
-		events <- StreamEvent{Type: StreamEventError, Err: &StreamError{Operation: "create_stream", Err: err}}
+		events <- NewErrorEvent(&StreamError{Operation: "create_stream", Err: err})
 		return
 	}
 	defer stream.Close()
@@ -238,7 +253,7 @@ func (s *Session) processStream(ctx context.Context, stream *openai.ChatCompleti
 	for {
 		select {
 		case <-ctx.Done():
-			events <- StreamEvent{Type: StreamEventError, Err: ctx.Err()}
+			events <- NewErrorEvent(ctx.Err())
 			return
 		default:
 			response, err := stream.Recv()
@@ -263,13 +278,13 @@ func (s *Session) handleStreamEnd(err error, contentBuilder *strings.Builder, to
 		s.emitToolCalls(finalCalls, events)
 		return
 	}
-	events <- StreamEvent{Type: StreamEventError, Err: &StreamError{Operation: "receive_chunk", Err: err}}
+	events <- NewErrorEvent(&StreamError{Operation: "receive_chunk", Err: err})
 }
 
 func (s *Session) handleStreamChunk(delta openai.ChatCompletionStreamChoiceDelta, contentBuilder *strings.Builder, toolCalls map[string]*openai.ToolCall, argBuilders map[string]*strings.Builder, events chan<- StreamEvent) {
 	if delta.Content != "" {
 		contentBuilder.WriteString(delta.Content)
-		events <- StreamEvent{Type: StreamEventContent, Content: delta.Content}
+		events <- NewContentEvent(delta.Content)
 	}
 
 	for _, tc := range delta.ToolCalls {
@@ -283,7 +298,7 @@ func (s *Session) handleStreamChunk(delta openai.ChatCompletionStreamChoiceDelta
 func (s *Session) emitToolCalls(finalCalls []openai.ToolCall, events chan<- StreamEvent) {
 	for _, call := range finalCalls {
 		callCopy := call
-		events <- StreamEvent{Type: StreamEventToolCall, ToolCall: &callCopy}
+		events <- NewToolCallEvent(&callCopy)
 	}
 }
 
