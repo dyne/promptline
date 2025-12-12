@@ -436,3 +436,56 @@ func TestValidateHistoryMaxMessages(t *testing.T) {
 		})
 	}
 }
+
+func TestSandboxDefaults(t *testing.T) {
+	path := writeTempConfig(t, `{"api_key":"test-key"}`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Sandbox.Enabled {
+		t.Fatalf("expected sandbox enabled by default")
+	}
+	if !cfg.Sandbox.NonRootUser {
+		t.Fatalf("expected sandbox to run as non-root user by default")
+	}
+	if cfg.Sandbox.Workdir != "" {
+		t.Fatalf("expected sandbox workdir to default to empty (use process cwd), got %s", cfg.Sandbox.Workdir)
+	}
+	if len(cfg.Sandbox.ReadOnlyPaths) != 0 || len(cfg.Sandbox.MaskedPaths) != 0 {
+		t.Fatalf("expected sandbox path lists to default to empty slices")
+	}
+}
+
+func TestSandboxCustomConfig(t *testing.T) {
+	content := `{
+		"api_key": "test-key",
+		"sandbox": {
+			"enabled": false,
+			"workdir": "/tmp/work",
+			"read_only_paths": ["/opt/ro"],
+			"masked_paths": ["/secret"],
+			"non_root_user": false
+		}
+	}`
+	path := writeTempConfig(t, content)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Sandbox.Enabled {
+		t.Fatalf("expected sandbox enabled=false to override default")
+	}
+	if cfg.Sandbox.Workdir != "/tmp/work" {
+		t.Fatalf("expected sandbox workdir to be set, got %s", cfg.Sandbox.Workdir)
+	}
+	if len(cfg.Sandbox.ReadOnlyPaths) != 1 || cfg.Sandbox.ReadOnlyPaths[0] != "/opt/ro" {
+		t.Fatalf("expected read_only_paths to be parsed")
+	}
+	if len(cfg.Sandbox.MaskedPaths) != 1 || cfg.Sandbox.MaskedPaths[0] != "/secret" {
+		t.Fatalf("expected masked_paths to be parsed")
+	}
+	if cfg.Sandbox.NonRootUser {
+		t.Fatalf("expected non_root_user=false to override default")
+	}
+}

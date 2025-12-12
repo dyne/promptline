@@ -34,12 +34,22 @@ type Config struct {
 	HistoryFile        string       `json:"history_file,omitempty"`
 	CommandHistoryFile string       `json:"command_history_file,omitempty"`
 	HistoryMaxMessages int          `json:"history_max_messages,omitempty"`
+	Sandbox            Sandbox      `json:"sandbox,omitempty"`
 }
 
 // ToolSettings describes tool allow/confirm lists.
 type ToolSettings struct {
 	Allow               []string `json:"allow"`
 	RequireConfirmation []string `json:"require_confirmation"`
+}
+
+// Sandbox describes filesystem sandbox settings.
+type Sandbox struct {
+	Enabled       bool     `json:"enabled"`
+	Workdir       string   `json:"workdir,omitempty"`
+	ReadOnlyPaths []string `json:"read_only_paths,omitempty"`
+	MaskedPaths   []string `json:"masked_paths,omitempty"`
+	NonRootUser   bool     `json:"non_root_user,omitempty"`
 }
 
 // DefaultConfig returns a config with default values
@@ -55,6 +65,10 @@ func DefaultConfig() *Config {
 		HistoryFile:        defaultHistoryFile,
 		CommandHistoryFile: defaultCommandHistoryFile,
 		HistoryMaxMessages: defaultHistoryMax,
+		Sandbox: Sandbox{
+			Enabled:     true,
+			NonRootUser: true,
+		},
 	}
 }
 
@@ -85,7 +99,7 @@ func LoadConfig(filepath string) (*Config, error) {
 			config.APIURL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 		}
 	}
-	
+
 	if val := os.Getenv("OPENAI_API_URL"); val != "" {
 		config.APIURL = val
 	}
