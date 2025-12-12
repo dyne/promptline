@@ -92,3 +92,18 @@ func DefaultColorScheme() *ColorScheme {
 		ProgressIndicator: pterm.NewStyle(pterm.FgYellow),
 	}
 }
+
+// DisabledColorScheme returns a color scheme with all colors disabled (for NO_COLOR).
+func DisabledColorScheme() *ColorScheme {
+	// Disable color output for fatih/color
+	color.NoColor = true
+	
+	return &ColorScheme{
+		Header:            pterm.NewStyle(), // No colors
+		User:              color.New(),      // No colors
+		Assistant:         color.New(),
+		Error:             color.New(),
+		Success:           color.New(),
+		ProgressIndicator: pterm.NewStyle(),
+	}
+}
