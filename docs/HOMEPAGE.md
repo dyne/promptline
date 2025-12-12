@@ -94,7 +94,7 @@ Environment variables override.
 
 ## License
 
-MIT - dyne.org
+GNU AGPLv3+ - dyne.org
 
 Free as in freedom. Fork it, hack it, use it.
 

@@ -54,4 +54,4 @@ Add your own in `internal/tools/builtin.go` - see `docs/`.
 
 ## License
 
-MIT - dyne.org
+GNU AGPLv3+ - dyne.org
