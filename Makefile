@@ -9,7 +9,8 @@ help:
 	@echo "  make build     - Build the application"
 	@echo "  make install   - Install the application globally"
 	@echo "  make clean     - Clean build artifacts"
-	@echo "  make test      - Run tests (if any)"
+	@echo "  make test      - Run tests"
+	@echo "  make test-race - Run tests with race detector"
 	@echo "  make help      - Show this help message"
 
 # Build the application
@@ -27,6 +28,10 @@ clean:
 # Run tests
 test:
 	go test ./...
+
+# Run tests with race detector
+test-race:
+	go test -race ./...
 
 # Format code
 fmt:

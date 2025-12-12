@@ -1114,3 +1114,39 @@ for i := 0; i < b.N; i++ {
 _ = NewRegistryWithPolicy(policy)
 }
 }
+
+// TestRegistryConcurrentAccess verifies thread-safety of the Registry
+func TestRegistryConcurrentAccess(t *testing.T) {
+	registry := NewRegistry()
+	done := make(chan bool)
+	
+	// Spawn multiple readers
+	for i := 0; i < 10; i++ {
+		go func() {
+			for j := 0; j < 100; j++ {
+				_ = registry.GetToolNames()
+				_ = registry.GetTools()
+				_ = registry.OpenAITools()
+				_ = registry.GetPermission("ls")
+			}
+			done <- true
+		}()
+	}
+	
+	// Spawn multiple writers
+	for i := 0; i < 5; i++ {
+		go func(n int) {
+			for j := 0; j < 50; j++ {
+				registry.AllowTool("ls", true)
+				registry.SetAllowed("read_file", true)
+				registry.SetRequireConfirmation("write_file", true)
+			}
+			done <- true
+		}(i)
+	}
+	
+	// Wait for all goroutines
+	for i := 0; i < 15; i++ {
+		<-done
+	}
+}

@@ -58,7 +58,13 @@ type ExecuteOptions struct {
 	Force bool
 }
 
-// Registry holds all available tools with their implementations
+// Registry holds all available tools with their implementations.
+//
+// Thread-safety: Registry is safe for concurrent use from multiple goroutines.
+// All access to tools and permissions maps is protected by a RWMutex.
+// Read operations (getTool, getPermission, GetToolNames, GetTools, OpenAITools)
+// use RLock for concurrent reads. Write operations (RegisterTool, applyPolicy,
+// AllowTool, SetAllowed, SetRequireConfirmation) use Lock for exclusive access.
 type Registry struct {
 	mu          sync.RWMutex
 	tools       map[string]*Tool
@@ -145,6 +151,17 @@ func (r *Registry) GetToolNames() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// GetTools returns a copy of all registered tools (thread-safe)
+func (r *Registry) GetTools() []*Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	tools := make([]*Tool, 0, len(r.tools))
+	for _, tool := range r.tools {
+		tools = append(tools, tool)
+	}
+	return tools
 }
 
 // OpenAITools returns the registry as OpenAI tool definitions.

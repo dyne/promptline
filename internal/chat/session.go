@@ -16,14 +16,21 @@ import (
 	"promptline/internal/tools"
 )
 
-// Session represents a chat session with context
+// Session represents a chat session with context.
+//
+// Thread-safety: Session is safe for concurrent use. All message operations
+// (AddMessage, AddAssistantMessage, AddToolResultMessage, MessagesSnapshot,
+// SaveConversationHistory, LoadConversationHistory) are protected by an internal
+// mutex. The streaming methods (StreamResponseWithContext, processStream) create
+// their own local state (toolCalls map, contentBuilder) and do not share mutable
+// state between goroutines. ToolRegistry has its own thread-safety guarantees.
 type Session struct {
 	Client             *openai.Client
 	Config             *config.Config
 	Messages           []openai.ChatCompletionMessage
 	ToolRegistry       *tools.Registry
 	mu                 sync.Mutex
-	lastSavedMsgCount  int // Track how many messages were last saved
+	lastSavedMsgCount  int // Track how many messages were last saved (protected by mu)
 }
 
 // NewSession creates a new chat session
@@ -227,6 +234,9 @@ func (s *Session) createStream(ctx context.Context) (*openai.ChatCompletionStrea
 	return s.Client.CreateChatCompletionStream(ctx, req)
 }
 
+// processStream handles the streaming loop and local state accumulation.
+// Thread-safety: The contentBuilder, toolCalls, and argBuilders are local to
+// this function call and not shared with other goroutines, so no locking needed.
 func (s *Session) processStream(ctx context.Context, stream *openai.ChatCompletionStream, events chan<- StreamEvent) {
 	var contentBuilder strings.Builder
 	toolCalls := make(map[string]*openai.ToolCall)

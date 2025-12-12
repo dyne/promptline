@@ -332,3 +332,45 @@ func TestMessagesSnapshotIsCopy(t *testing.T) {
 		t.Errorf("expected original content 'user', got %s", s.Messages[1].Content)
 	}
 }
+
+// TestSessionConcurrentOperations verifies thread-safety of Session operations
+func TestSessionConcurrentOperations(t *testing.T) {
+	cfg := &config.Config{
+		APIKey: "test-key",
+		Model:  "gpt-4o-mini",
+	}
+	session := NewSession(cfg)
+	done := make(chan bool)
+	
+	// Spawn multiple writers
+	for i := 0; i < 10; i++ {
+		go func(n int) {
+			for j := 0; j < 50; j++ {
+				session.AddMessage(openai.ChatMessageRoleUser, fmt.Sprintf("Message %d-%d", n, j))
+				session.AddAssistantMessage("Response", nil)
+			}
+			done <- true
+		}(i)
+	}
+	
+	// Spawn multiple readers
+	for i := 0; i < 10; i++ {
+		go func() {
+			for j := 0; j < 100; j++ {
+				_ = session.MessagesSnapshot()
+			}
+			done <- true
+		}()
+	}
+	
+	// Wait for all goroutines
+	for i := 0; i < 20; i++ {
+		<-done
+	}
+	
+	// Verify final state
+	snapshot := session.MessagesSnapshot()
+	if len(snapshot) < 1001 { // 1 system + 1000 user/assistant messages
+		t.Errorf("Expected at least 1001 messages, got %d", len(snapshot))
+	}
+}
