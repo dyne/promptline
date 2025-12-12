@@ -13,8 +13,10 @@ type SandboxRunner interface {
 }
 
 var sandboxRunner SandboxRunner
+var sandboxWorkdir string
 
 // SetSandboxRunner installs the sandbox runner used by execute_shell_command.
-func SetSandboxRunner(r SandboxRunner) {
+func SetSandboxRunner(r SandboxRunner, workdir string) {
 	sandboxRunner = r
+	sandboxWorkdir = workdir
 }

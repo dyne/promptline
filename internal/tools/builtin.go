@@ -254,13 +254,13 @@ func readFile(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("missing or invalid 'path' parameter")
 	}
 
-	// Validate path for security
-	if err := validatePath(path); err != nil {
-		return "", fmt.Errorf("path validation failed: %v", err)
+	resolved, err := validatePathWithinWorkdir(path)
+	if err != nil {
+		return "", err
 	}
 
 	// Use os.ReadFile instead of exec for better security
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(resolved)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %v", err)
 	}
@@ -279,17 +279,17 @@ func writeFile(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("missing or invalid 'content' parameter")
 	}
 
-	// Validate path for security
-	if err := validatePath(path); err != nil {
-		return "", fmt.Errorf("path validation failed: %v", err)
+	resolved, err := validatePathWithinWorkdir(path)
+	if err != nil {
+		return "", err
 	}
 
 	// Use os.WriteFile instead of exec for better security
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(resolved, []byte(content), 0644); err != nil {
 		return "", fmt.Errorf("failed to write file: %v", err)
 	}
 
-	return fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path), nil
+	return fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), resolved), nil
 }
 
 func listDirectory(args map[string]interface{}) (string, error) {
@@ -336,7 +336,7 @@ func getBoolArg(args map[string]interface{}, key string) bool {
 
 func validateDirectoryPath(path string) error {
 	if path != "." {
-		if err := validatePath(path); err != nil {
+		if _, err := validatePathWithinWorkdir(path); err != nil {
 			return fmt.Errorf("path validation failed: %v", err)
 		}
 	}
@@ -351,6 +351,40 @@ func validateDirectoryPath(path string) error {
 	}
 
 	return nil
+}
+
+func validatePathWithinWorkdir(path string) (string, error) {
+	if len(path) > maxPathLength {
+		return "", fmt.Errorf("path exceeds maximum length of %d characters", maxPathLength)
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("path cannot be empty")
+	}
+
+	cleanPath := filepath.Clean(path)
+	absPath, err := filepath.Abs(cleanPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %v", err)
+	}
+
+	// Prevent access to masked/dangerous paths even if under workdir.
+	for _, dangerous := range dangerousPaths {
+		if strings.HasPrefix(absPath, dangerous) {
+			return "", fmt.Errorf("access to %s is restricted for security", dangerous)
+		}
+	}
+
+	if sandboxWorkdir == "" {
+		return absPath, nil
+	}
+	workdirAbs, err := filepath.Abs(filepath.Clean(sandboxWorkdir))
+	if err != nil {
+		return "", fmt.Errorf("invalid workdir: %v", err)
+	}
+	if !strings.HasPrefix(absPath, workdirAbs+string(filepath.Separator)) && absPath != workdirAbs {
+		return "", fmt.Errorf("access denied: path must stay within workdir")
+	}
+	return absPath, nil
 }
 
 func walkDirectory(path string, showHidden bool, result *strings.Builder) error {
