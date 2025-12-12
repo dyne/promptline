@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/sashabaranov/go-openai"
@@ -279,4 +280,39 @@ func (r *Registry) getPermission(name string) Permission {
 	}
 	// Default for unknown tools: blocked and requires confirmation.
 	return Permission{Allowed: false, RequireConfirmation: true}
+}
+
+// FormatToolResult creates a user-friendly display of tool execution
+func FormatToolResult(toolCall openai.ToolCall, result *ToolResult, truncate bool) string {
+var argsStr string
+if toolCall.Function.Arguments != "" {
+var args map[string]interface{}
+if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err == nil && len(args) > 0 {
+parts := make([]string, 0, len(args))
+for key, value := range args {
+parts = append(parts, fmt.Sprintf("%s=%v", key, value))
+}
+argsStr = strings.Join(parts, ", ")
+} else {
+argsStr = toolCall.Function.Arguments
+}
+}
+
+var sb strings.Builder
+if argsStr != "" {
+sb.WriteString(fmt.Sprintf("🔧 Executed: %s(%s)\n", toolCall.Function.Name, argsStr))
+} else {
+sb.WriteString(fmt.Sprintf("🔧 Executed: %s()\n", toolCall.Function.Name))
+}
+
+if result.Error != nil {
+sb.WriteString(fmt.Sprintf("❌ Error: %v\n", result.Error))
+} else {
+displayResult := result.Result
+if truncate && len(displayResult) > 200 {
+displayResult = displayResult[:200] + "..."
+}
+sb.WriteString(fmt.Sprintf("✓ Result:\n%s\n", displayResult))
+}
+return sb.String()
 }

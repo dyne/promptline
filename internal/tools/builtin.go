@@ -1,10 +1,12 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -97,6 +99,75 @@ func registerBuiltInTools(r *Registry) {
 	})
 }
 
+// Security constants for validation
+const (
+	maxCommandLength = 10000
+	maxPathLength    = 4096
+	commandTimeout   = 30 * time.Second
+)
+
+// Dangerous path patterns that should be blocked
+var dangerousPaths = []string{
+	"/etc/", "/sys/", "/proc/", "/dev/",
+	"/boot/", "/root/", "/var/run/", "/var/lib/",
+}
+
+// Command injection patterns to block
+var dangerousPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`[;&|]\s*rm\s`),           // rm after separator
+	regexp.MustCompile(`[;&|]\s*dd\s`),           // dd after separator
+	regexp.MustCompile(`>\s*/dev/`),              // redirect to /dev
+	regexp.MustCompile(`/etc/(passwd|shadow)`),   // system files
+	regexp.MustCompile(`curl.*\|\s*(sh|bash)`),   // curl pipe to shell
+	regexp.MustCompile(`wget.*\|\s*(sh|bash)`),   // wget pipe to shell
+}
+
+// validateCommand checks for dangerous patterns and length limits
+func validateCommand(command string) error {
+	if len(command) > maxCommandLength {
+		return fmt.Errorf("command exceeds maximum length of %d characters", maxCommandLength)
+	}
+	
+	if strings.TrimSpace(command) == "" {
+		return fmt.Errorf("command cannot be empty")
+	}
+	
+	for _, pattern := range dangerousPatterns {
+		if pattern.MatchString(command) {
+			return fmt.Errorf("command contains potentially dangerous pattern: %s", pattern.String())
+		}
+	}
+	
+	return nil
+}
+
+// validatePath checks if a path is safe to access
+func validatePath(path string) error {
+	if len(path) > maxPathLength {
+		return fmt.Errorf("path exceeds maximum length of %d characters", maxPathLength)
+	}
+	
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("path cannot be empty")
+	}
+	
+	// Clean and get absolute path
+	cleanPath := filepath.Clean(path)
+	absPath, err := filepath.Abs(cleanPath)
+	if err != nil {
+		return fmt.Errorf("invalid path: %v", err)
+	}
+	
+	// Check against dangerous paths
+	for _, dangerous := range dangerousPaths {
+		if strings.HasPrefix(absPath, dangerous) {
+			return fmt.Errorf("access to %s is restricted for security", dangerous)
+		}
+	}
+	
+	return nil
+}
+
 // Tool implementations
 
 func getCurrentDatetime(args map[string]interface{}) (string, error) {
@@ -109,8 +180,22 @@ func executeShellCommand(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("missing or invalid 'command' parameter")
 	}
 
-	cmd := exec.Command("sh", "-c", command)
+	// Validate command for security
+	if err := validateCommand(command); err != nil {
+		return "", fmt.Errorf("command validation failed: %v", err)
+	}
+
+	// Execute with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	output, err := cmd.CombinedOutput()
+	
+	if ctx.Err() == context.DeadlineExceeded {
+		return string(output), fmt.Errorf("command timed out after %v", commandTimeout)
+	}
+	
 	if err != nil {
 		return string(output), fmt.Errorf("command failed: %v", err)
 	}
@@ -124,13 +209,18 @@ func readFile(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("missing or invalid 'path' parameter")
 	}
 
-	cmd := exec.Command("cat", path)
-	output, err := cmd.Output()
+	// Validate path for security
+	if err := validatePath(path); err != nil {
+		return "", fmt.Errorf("path validation failed: %v", err)
+	}
+
+	// Use os.ReadFile instead of exec for better security
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %v", err)
 	}
 
-	return string(output), nil
+	return string(content), nil
 }
 
 func writeFile(args map[string]interface{}) (string, error) {
@@ -144,9 +234,13 @@ func writeFile(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("missing or invalid 'content' parameter")
 	}
 
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("cat > %s", path))
-	cmd.Stdin = strings.NewReader(content)
-	if err := cmd.Run(); err != nil {
+	// Validate path for security
+	if err := validatePath(path); err != nil {
+		return "", fmt.Errorf("path validation failed: %v", err)
+	}
+
+	// Use os.WriteFile instead of exec for better security
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return "", fmt.Errorf("failed to write file: %v", err)
 	}
 
@@ -158,6 +252,13 @@ func listDirectory(args map[string]interface{}) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok || path == "" {
 		path = "."
+	}
+
+	// Validate path (but allow "." for current dir)
+	if path != "." {
+		if err := validatePath(path); err != nil {
+			return "", fmt.Errorf("path validation failed: %v", err)
+		}
 	}
 
 	// Get recursive flag (default to false)

@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"sync"
 
 	"github.com/alpkeskin/gotoon"
-	"github.com/chzyer/readline"
 	"github.com/sashabaranov/go-openai"
 	"promptline/internal/config"
 	"promptline/internal/tools"
@@ -23,9 +21,6 @@ type Session struct {
 	Client             *openai.Client
 	Config             *config.Config
 	Messages           []openai.ChatCompletionMessage
-	Scanner            *bufio.Scanner
-	RL                 *readline.Instance
-	history            []string
 	ToolRegistry       *tools.Registry
 	mu                 sync.Mutex
 	lastSavedMsgCount  int // Track how many messages were last saved
@@ -42,18 +37,6 @@ func NewSession(cfg *config.Config) *Session {
 	}
 
 	client := openai.NewClientWithConfig(clientConfig)
-
-	// Initialize readline instance
-	rl, err := readline.NewEx(&readline.Config{
-		Prompt:          "User: ",
-		HistoryFile:     ".promptline_history",
-		AutoComplete:    readline.NewPrefixCompleter(),
-		InterruptPrompt: "^C",
-		EOFPrompt:       "exit",
-	})
-	if err != nil {
-		panic(err)
-	}
 
 	// Initialize tool registry
 	toolRegistry := tools.NewRegistryWithPolicy(cfg.ToolPolicy())
@@ -74,9 +57,6 @@ func NewSession(cfg *config.Config) *Session {
 		Client:       client,
 		Config:       cfg,
 		Messages:     messages,
-		Scanner:      bufio.NewScanner(os.Stdin),
-		RL:           rl,
-		history:      make([]string, 0),
 		ToolRegistry: toolRegistry,
 	}
 
@@ -378,70 +358,6 @@ func (s *Session) streamAndPrint(ctx context.Context, prompt string, includeUser
 	return nil
 }
 
-// GeneratePythonCode generates Python code for batch processing using openbatch
-func (s *Session) GeneratePythonCode() error {
-	fmt.Println("Generating Python code for your batch task...")
-	fmt.Println("Please describe what kind of batch processing you need:")
-
-	// Get specific input for code generation
-	input, err := s.GetInput()
-	if err != nil {
-		return err
-	}
-
-	// Add a specific prompt to guide the AI to generate Python code
-	codePrompt := fmt.Sprintf("Generate a complete Python script using the openbatch library for the following task: %s\n\n"+
-		"Requirements:\n"+
-		"1. Include all necessary imports\n"+
-		"2. Use proper error handling\n"+
-		"3. Follow openbatch best practices\n"+
-		"4. Include comments explaining the code\n"+
-		"5. Make it runnable as a standalone script\n"+
-		"6. Assume openbatch is installed (pip install openbatch)\n"+
-		"7. Output the code in a single Python file with no additional text", input)
-
-	// Add user message to history
-	s.AddMessage(openai.ChatMessageRoleUser, codePrompt)
-
-	// Prepare the request specifically for code generation
-	req := openai.ChatCompletionRequest{
-		Model:    s.Config.Model,
-		Messages: s.MessagesSnapshot(),
-	}
-
-	// Add optional parameters if they exist in config
-	if s.Config.Temperature != nil {
-		req.Temperature = *s.Config.Temperature
-	}
-
-	if s.Config.MaxTokens != nil {
-		req.MaxTokens = *s.Config.MaxTokens
-	} else {
-		// For code generation, we might need more tokens
-		req.MaxTokens = 2000
-	}
-
-	// Get response from OpenAI
-	resp, err := s.Client.CreateChatCompletion(context.Background(), req)
-	if err != nil {
-		return err
-	}
-
-	// Add assistant response to history
-	responseText := resp.Choices[0].Message.Content
-	s.AddMessage(openai.ChatMessageRoleAssistant, responseText)
-
-	fmt.Println("Generated Python code:")
-	fmt.Println("======================")
-	fmt.Println(responseText)
-	fmt.Println("======================")
-	fmt.Println("Save this code to a .py file and run it with Python after installing openbatch:")
-	fmt.Println("pip install openbatch")
-	fmt.Println("python your_script.py")
-
-	return nil
-}
-
 // ClearHistory clears the conversation history
 func (s *Session) ClearHistory() {
 	s.mu.Lock()
@@ -533,28 +449,6 @@ func (s *Session) LoadConversationHistory(filepath string, maxLines int) error {
 	return nil
 }
 
-// GetInput gets input from the user
-func (s *Session) GetInput() (string, error) {
-	line, err := s.RL.Readline()
-	if err != nil {
-		if err == readline.ErrInterrupt {
-			return "", err
-		} else if err == io.EOF {
-			return "exit", nil
-		}
-		return "", err
-	}
-
-	// Add to history if not empty
-	line = strings.TrimSpace(line)
-	if line != "" {
-		s.history = append(s.history, line)
-		s.RL.SaveHistory(line)
-	}
-
-	return line, nil
-}
-
 // PrintHistory prints the conversation history
 func (s *Session) PrintHistory() {
 	fmt.Println("--- Conversation History ---")
@@ -576,40 +470,12 @@ func (s *Session) PrintHistory() {
 }
 
 // FormatToolCallDisplay creates a user-friendly display of tool execution
+// Deprecated: Use tools.FormatToolResult instead
 func (s *Session) FormatToolCallDisplay(toolCall openai.ToolCall, result *tools.ToolResult) string {
-	var argsStr string
-	if toolCall.Function.Arguments != "" {
-		var args map[string]interface{}
-		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err == nil && len(args) > 0 {
-			parts := make([]string, 0, len(args))
-			for key, value := range args {
-				parts = append(parts, fmt.Sprintf("%s=%v", key, value))
-			}
-			argsStr = strings.Join(parts, ", ")
-		} else {
-			argsStr = toolCall.Function.Arguments
-		}
-	}
-
-	var sb strings.Builder
-	if argsStr != "" {
-		sb.WriteString(fmt.Sprintf("🔧 Executed: %s(%s)\n", toolCall.Function.Name, argsStr))
-	} else {
-		sb.WriteString(fmt.Sprintf("🔧 Executed: %s()\n", toolCall.Function.Name))
-	}
-
-	if result.Error != nil {
-		sb.WriteString(fmt.Sprintf("❌ Error: %v\n", result.Error))
-	} else {
-		sb.WriteString(fmt.Sprintf("✓ Result:\n%s\n", result.Result))
-	}
-	return sb.String()
+	return tools.FormatToolResult(toolCall, result, false)
 }
 
-// Close closes the readline instance
+// Close is a no-op for compatibility but may be used for cleanup in the future
 func (s *Session) Close() error {
-	if s.RL != nil {
-		return s.RL.Close()
-	}
 	return nil
 }
