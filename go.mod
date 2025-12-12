@@ -1,14 +1,15 @@
 module promptline
 
-go 1.23.0
+go 1.24
 
 require (
-	github.com/alpkeskin/gotoon v0.1.1
 	github.com/chzyer/readline v1.5.1
+	github.com/criyle/go-sandbox v0.11.8
 	github.com/fatih/color v1.18.0
 	github.com/pterm/pterm v0.12.82
 	github.com/rs/zerolog v1.34.0
 	github.com/sashabaranov/go-openai v1.41.2
+	golang.org/x/sys v0.35.0
 )
 
 require (
@@ -23,7 +24,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/term v0.32.0 // indirect
 	golang.org/x/text v0.26.0 // indirect
 )
