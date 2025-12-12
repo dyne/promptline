@@ -17,6 +17,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -25,6 +26,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/criyle/go-sandbox/runner"
 )
 
 // registerBuiltInTools registers all built-in tools to the registry
@@ -130,12 +133,12 @@ var dangerousPaths = []string{
 
 // Command injection patterns to block
 var dangerousPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`[;&|]\s*rm\s`),           // rm after separator
-	regexp.MustCompile(`[;&|]\s*dd\s`),           // dd after separator
-	regexp.MustCompile(`>\s*/dev/`),              // redirect to /dev
-	regexp.MustCompile(`/etc/(passwd|shadow)`),   // system files
-	regexp.MustCompile(`curl.*\|\s*(sh|bash)`),   // curl pipe to shell
-	regexp.MustCompile(`wget.*\|\s*(sh|bash)`),   // wget pipe to shell
+	regexp.MustCompile(`[;&|]\s*rm\s`),         // rm after separator
+	regexp.MustCompile(`[;&|]\s*dd\s`),         // dd after separator
+	regexp.MustCompile(`>\s*/dev/`),            // redirect to /dev
+	regexp.MustCompile(`/etc/(passwd|shadow)`), // system files
+	regexp.MustCompile(`curl.*\|\s*(sh|bash)`), // curl pipe to shell
+	regexp.MustCompile(`wget.*\|\s*(sh|bash)`), // wget pipe to shell
 }
 
 // validateCommand checks for dangerous patterns and length limits
@@ -143,17 +146,17 @@ func validateCommand(command string) error {
 	if len(command) > maxCommandLength {
 		return fmt.Errorf("command exceeds maximum length of %d characters", maxCommandLength)
 	}
-	
+
 	if strings.TrimSpace(command) == "" {
 		return fmt.Errorf("command cannot be empty")
 	}
-	
+
 	for _, pattern := range dangerousPatterns {
 		if pattern.MatchString(command) {
 			return fmt.Errorf("command contains potentially dangerous pattern: %s", pattern.String())
 		}
 	}
-	
+
 	return nil
 }
 
@@ -162,25 +165,25 @@ func validatePath(path string) error {
 	if len(path) > maxPathLength {
 		return fmt.Errorf("path exceeds maximum length of %d characters", maxPathLength)
 	}
-	
+
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("path cannot be empty")
 	}
-	
+
 	// Clean and get absolute path
 	cleanPath := filepath.Clean(path)
 	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
 		return fmt.Errorf("invalid path: %v", err)
 	}
-	
+
 	// Check against dangerous paths
 	for _, dangerous := range dangerousPaths {
 		if strings.HasPrefix(absPath, dangerous) {
 			return fmt.Errorf("access to %s is restricted for security", dangerous)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -205,13 +208,39 @@ func executeShellCommand(args map[string]interface{}) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
+	if sandboxRunner != nil {
+		outBuf := &bytes.Buffer{}
+		errBuf := &bytes.Buffer{}
+		result, err := sandboxRunner.ExecInSandbox(ctx, "sh", []string{"-c", command}, nil, outBuf, errBuf)
+
+		output := outBuf.String() + errBuf.String()
+
+		if ctx.Err() == context.DeadlineExceeded {
+			return output, fmt.Errorf("command timed out after %v", commandTimeout)
+		}
+
+		// If sandbox unavailable, fall back.
+		if err != nil {
+			return executeShellCommandHost(ctx, command)
+		}
+
+		if result.Status != runner.StatusNormal || result.ExitStatus != 0 {
+			return output, fmt.Errorf("command failed: status=%d exit=%d", result.Status, result.ExitStatus)
+		}
+		return output, nil
+	}
+
+	return executeShellCommandHost(ctx, command)
+}
+
+func executeShellCommandHost(ctx context.Context, command string) (string, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	output, err := cmd.CombinedOutput()
-	
+
 	if ctx.Err() == context.DeadlineExceeded {
 		return string(output), fmt.Errorf("command timed out after %v", commandTimeout)
 	}
-	
+
 	if err != nil {
 		return string(output), fmt.Errorf("command failed: %v", err)
 	}

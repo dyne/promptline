@@ -28,6 +28,7 @@ import (
 
 	"github.com/sashabaranov/go-openai"
 	"promptline/internal/config"
+	"promptline/internal/sandbox"
 	"promptline/internal/tools"
 )
 
@@ -40,12 +41,12 @@ import (
 // their own local state (toolCalls map, contentBuilder) and do not share mutable
 // state between goroutines. ToolRegistry has its own thread-safety guarantees.
 type Session struct {
-	Client             ChatClient
-	Config             *config.Config
-	Messages           []openai.ChatCompletionMessage
-	ToolRegistry       *tools.Registry
-	mu                 sync.Mutex
-	lastSavedMsgCount  int // Track how many messages were last saved (protected by mu)
+	Client            ChatClient
+	Config            *config.Config
+	Messages          []openai.ChatCompletionMessage
+	ToolRegistry      *tools.Registry
+	mu                sync.Mutex
+	lastSavedMsgCount int // Track how many messages were last saved (protected by mu)
 }
 
 // NewSession creates a new chat session with a default OpenAI client.
@@ -64,6 +65,8 @@ func NewSession(cfg *config.Config) *Session {
 
 // NewSessionWithClient creates a new chat session with a provided client (for testing).
 func NewSessionWithClient(cfg *config.Config, client ChatClient) *Session {
+	tools.SetSandboxRunner(sandbox.NewManager(cfg.Sandbox))
+
 	// Initialize tool registry
 	toolRegistry := tools.NewRegistryWithPolicy(cfg.ToolPolicy())
 
@@ -114,7 +117,7 @@ func (s *Session) AddAssistantMessage(content string, toolCalls []openai.ToolCal
 func (s *Session) AddToolResultMessage(call openai.ToolCall, result *tools.ToolResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Use plain result as content. TOON encoding was causing issues with history serialization.
 	// The API accepts plain text for tool results.
 	content := result.Result
@@ -363,7 +366,7 @@ func finalizeToolCalls(toolCalls map[string]*openai.ToolCall, argBuilders map[st
 		if call.ID == "" {
 			continue
 		}
-		
+
 		// Drop nameless + empty-arg tool calls (often stray/unsolicited).
 		if call.Function.Name == "" && trimmed == "" {
 			continue
@@ -445,7 +448,7 @@ func (s *Session) SaveConversationHistory(filepath string) error {
 
 	// Only save non-system messages
 	history := s.Messages[1:]
-	
+
 	// Check if there are new messages to save
 	if len(history) <= s.lastSavedMsgCount {
 		return nil // Nothing new to save
@@ -504,7 +507,7 @@ func (s *Session) LoadConversationHistory(filepath string, maxLines int) error {
 
 	// Append to session (after system message)
 	s.Messages = append(s.Messages, messages...)
-	
+
 	// Update saved message count since we loaded them
 	s.lastSavedMsgCount = len(messages)
 
