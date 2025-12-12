@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/chzyer/readline"
+	"github.com/pterm/pterm"
 	"github.com/rs/zerolog"
 	"github.com/sashabaranov/go-openai"
 	"promptline/internal/chat"
@@ -162,22 +163,41 @@ func runTUIMode(logger zerolog.Logger) {
 		}
 	}
 
-	// Initialize readline with dynamic command completion
+	// Initialize readline with dynamic command completion and Ctrl-R handler
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          colors.User.Sprint("❯ "),
 		HistoryFile:     ".promptline_history",
 		AutoComplete:    getCommandCompleter(),
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
+		// Custom keybinding for Ctrl-R
+		FuncOnWidthChanged: func(f func()) {
+			// Not used but required for custom operations
+		},
 	})
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize readline")
 	}
 	defer rl.Close()
+	
+	// Set up Ctrl-R handler for history search
+	rl.Config.FuncFilterInputRune = func(r rune) (rune, bool) {
+		if r == 18 { // Ctrl-R
+			// Trigger history search
+			selected := searchConversationHistory(session, colors, logger)
+			if selected != "" {
+				// Write the selected text to readline buffer
+				rl.WriteStdin([]byte(selected))
+			}
+			return 0, false
+		}
+		return r, true
+	}
 
 	// Display header
 	colors.Header.Println("Promptline - AI Chat")
 	fmt.Println("Type /help for commands, Ctrl+C or /quit to exit")
+	fmt.Println("Press Ctrl+R to search conversation history")
 	fmt.Println()
 
 	// Main event loop
@@ -267,6 +287,10 @@ func handleCommand(input string, session *chat.Session, colors *theme.ColorSchem
 			seen[cmd.Name] = true
 			fmt.Printf("  /%-12s - %s\n", cmd.Name, cmd.Description)
 		}
+		fmt.Println("\nKeyboard Shortcuts:")
+		fmt.Println("  Ctrl+R       - Search conversation history (fuzzy search)")
+		fmt.Println("  Ctrl+↑/↓     - Navigate command history")
+		fmt.Println("  Tab          - Auto-complete commands")
 		fmt.Println()
 		return false
 		
@@ -428,6 +452,60 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 		fmt.Println() // newline after response
 		fmt.Println()
 	}
+}
+
+// searchConversationHistory shows an interactive fuzzy search of conversation history
+func searchConversationHistory(session *chat.Session, colors *theme.ColorScheme, logger zerolog.Logger) string {
+	history := session.GetHistory()
+	if len(history) == 0 {
+		colors.Error.Println("\nNo conversation history available")
+		return ""
+	}
+
+	// Build list of user messages only
+	var userMessages []string
+	for _, msg := range history {
+		if msg.Role == "user" && msg.Content != "" {
+			userMessages = append(userMessages, msg.Content)
+		}
+	}
+
+	if len(userMessages) == 0 {
+		colors.Error.Println("\nNo user messages in history")
+		return ""
+	}
+
+	// Deduplicate and reverse (most recent first)
+	seen := make(map[string]bool)
+	var uniqueMessages []string
+	for i := len(userMessages) - 1; i >= 0; i-- {
+		msg := userMessages[i]
+		if !seen[msg] {
+			seen[msg] = true
+			uniqueMessages = append(uniqueMessages, msg)
+		}
+	}
+
+	if len(uniqueMessages) == 0 {
+		return ""
+	}
+
+	// Show interactive selector
+	fmt.Println() // newline before selector
+	colors.Header.Println("Search History (Ctrl-C to cancel, arrows to navigate):")
+	
+	selected, err := pterm.DefaultInteractiveSelect.
+		WithOptions(uniqueMessages).
+		WithDefaultText("Select a previous prompt").
+		WithFilter(true). // Enable fuzzy search
+		Show()
+	
+	if err != nil {
+		logger.Debug().Err(err).Msg("History search cancelled")
+		return ""
+	}
+
+	return selected
 }
 
 // executeToolCall executes a single tool call and adds result to session
