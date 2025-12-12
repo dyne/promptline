@@ -24,7 +24,7 @@ import (
 // their own local state (toolCalls map, contentBuilder) and do not share mutable
 // state between goroutines. ToolRegistry has its own thread-safety guarantees.
 type Session struct {
-	Client             *openai.Client
+	Client             ChatClient
 	Config             *config.Config
 	Messages           []openai.ChatCompletionMessage
 	ToolRegistry       *tools.Registry
@@ -32,7 +32,7 @@ type Session struct {
 	lastSavedMsgCount  int // Track how many messages were last saved (protected by mu)
 }
 
-// NewSession creates a new chat session
+// NewSession creates a new chat session with a default OpenAI client.
 func NewSession(cfg *config.Config) *Session {
 	// Create client with custom base URL if provided
 	clientConfig := openai.DefaultConfig(cfg.APIKey)
@@ -43,7 +43,11 @@ func NewSession(cfg *config.Config) *Session {
 	}
 
 	client := openai.NewClientWithConfig(clientConfig)
+	return NewSessionWithClient(cfg, client)
+}
 
+// NewSessionWithClient creates a new chat session with a provided client (for testing).
+func NewSessionWithClient(cfg *config.Config, client ChatClient) *Session {
 	// Initialize tool registry
 	toolRegistry := tools.NewRegistryWithPolicy(cfg.ToolPolicy())
 
