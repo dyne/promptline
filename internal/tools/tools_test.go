@@ -37,6 +37,144 @@ func TestExecuteListDirectory(t *testing.T) {
 	}
 }
 
+func TestListDirectoryTableDriven(t *testing.T) {
+	registry := NewRegistry()
+
+	tests := []struct {
+		name         string
+		setupFunc    func(t *testing.T) (string, map[string]interface{})
+		wantContains []string
+		wantExclude  []string
+		wantErr      bool
+	}{
+		{
+			name: "non-recursive with visible files",
+			setupFunc: func(t *testing.T) (string, map[string]interface{}) {
+				dir := t.TempDir()
+				os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("test"), 0o644)
+				os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("test"), 0o644)
+				return dir, map[string]interface{}{"path": dir, "recursive": false}
+			},
+			wantContains: []string{"file1.txt", "file2.txt"},
+		},
+		{
+			name: "non-recursive excludes hidden files by default",
+			setupFunc: func(t *testing.T) (string, map[string]interface{}) {
+				dir := t.TempDir()
+				os.WriteFile(filepath.Join(dir, "visible.txt"), []byte("test"), 0o644)
+				os.WriteFile(filepath.Join(dir, ".hidden"), []byte("test"), 0o644)
+				return dir, map[string]interface{}{"path": dir, "recursive": false}
+			},
+			wantContains: []string{"visible.txt"},
+			wantExclude:  []string{".hidden"},
+		},
+		{
+			name: "non-recursive includes hidden files when requested",
+			setupFunc: func(t *testing.T) (string, map[string]interface{}) {
+				dir := t.TempDir()
+				os.WriteFile(filepath.Join(dir, "visible.txt"), []byte("test"), 0o644)
+				os.WriteFile(filepath.Join(dir, ".hidden"), []byte("test"), 0o644)
+				return dir, map[string]interface{}{"path": dir, "recursive": false, "show_hidden": true}
+			},
+			wantContains: []string{"visible.txt", ".hidden"},
+		},
+		{
+			name: "recursive lists subdirectories",
+			setupFunc: func(t *testing.T) (string, map[string]interface{}) {
+				dir := t.TempDir()
+				os.WriteFile(filepath.Join(dir, "root.txt"), []byte("test"), 0o644)
+				subdir := filepath.Join(dir, "subdir")
+				os.Mkdir(subdir, 0o755)
+				os.WriteFile(filepath.Join(subdir, "nested.txt"), []byte("test"), 0o644)
+				return dir, map[string]interface{}{"path": dir, "recursive": true}
+			},
+			wantContains: []string{"root.txt", "subdir", "nested.txt"},
+		},
+		{
+			name: "recursive excludes hidden directories",
+			setupFunc: func(t *testing.T) (string, map[string]interface{}) {
+				dir := t.TempDir()
+				os.WriteFile(filepath.Join(dir, "visible.txt"), []byte("test"), 0o644)
+				hiddenDir := filepath.Join(dir, ".hidden")
+				os.Mkdir(hiddenDir, 0o755)
+				os.WriteFile(filepath.Join(hiddenDir, "secret.txt"), []byte("test"), 0o644)
+				return dir, map[string]interface{}{"path": dir, "recursive": true}
+			},
+			wantContains: []string{"visible.txt"},
+			wantExclude:  []string{".hidden", "secret.txt"},
+		},
+		{
+			name: "recursive includes hidden when show_hidden=true",
+			setupFunc: func(t *testing.T) (string, map[string]interface{}) {
+				dir := t.TempDir()
+				hiddenDir := filepath.Join(dir, ".hidden")
+				os.Mkdir(hiddenDir, 0o755)
+				os.WriteFile(filepath.Join(hiddenDir, "secret.txt"), []byte("test"), 0o644)
+				return dir, map[string]interface{}{"path": dir, "recursive": true, "show_hidden": true}
+			},
+			wantContains: []string{".hidden", "secret.txt"},
+		},
+		{
+			name: "empty directory returns appropriate message",
+			setupFunc: func(t *testing.T) (string, map[string]interface{}) {
+				dir := t.TempDir()
+				return dir, map[string]interface{}{"path": dir}
+			},
+			wantContains: []string{"Directory is empty"},
+		},
+		{
+			name: "non-existent path returns error",
+			setupFunc: func(t *testing.T) (string, map[string]interface{}) {
+				return "/nonexistent/path/that/does/not/exist", map[string]interface{}{
+					"path": "/nonexistent/path/that/does/not/exist",
+				}
+			},
+			wantErr: true,
+		},
+		{
+			name: "file path instead of directory returns error",
+			setupFunc: func(t *testing.T) (string, map[string]interface{}) {
+				dir := t.TempDir()
+				file := filepath.Join(dir, "file.txt")
+				os.WriteFile(file, []byte("test"), 0o644)
+				return file, map[string]interface{}{"path": file}
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, args := tt.setupFunc(t)
+			result := registry.Execute("ls", args)
+
+			if tt.wantErr {
+				if result.Error == nil {
+					t.Errorf("expected error, got none")
+				}
+				return
+			}
+
+			if result.Error != nil {
+				t.Errorf("unexpected error: %v", result.Error)
+				return
+			}
+
+			for _, want := range tt.wantContains {
+				if !strings.Contains(result.Result, want) {
+					t.Errorf("expected output to contain %q, got: %s", want, result.Result)
+				}
+			}
+
+			for _, exclude := range tt.wantExclude {
+				if strings.Contains(result.Result, exclude) {
+					t.Errorf("expected output to NOT contain %q, got: %s", exclude, result.Result)
+				}
+			}
+		})
+	}
+}
+
 func TestExecuteUnknownTool(t *testing.T) {
 	registry := NewRegistry()
 	result := registry.Execute("does_not_exist", nil)

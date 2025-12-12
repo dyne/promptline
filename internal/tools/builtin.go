@@ -248,97 +248,114 @@ func writeFile(args map[string]interface{}) (string, error) {
 }
 
 func listDirectory(args map[string]interface{}) (string, error) {
-	// Get path parameter (default to current directory)
-	path, ok := args["path"].(string)
-	if !ok || path == "" {
-		path = "."
+	path := getPathArg(args)
+	if err := validateDirectoryPath(path); err != nil {
+		return "", err
 	}
 
-	// Validate path (but allow "." for current dir)
-	if path != "." {
-		if err := validatePath(path); err != nil {
-			return "", fmt.Errorf("path validation failed: %v", err)
-		}
-	}
-
-	// Get recursive flag (default to false)
-	recursive := false
-	if recursiveArg, ok := args["recursive"].(bool); ok {
-		recursive = recursiveArg
-	}
-
-	// Get show_hidden flag (default to false)
-	showHidden := false
-	if showHiddenArg, ok := args["show_hidden"].(bool); ok {
-		showHidden = showHiddenArg
-	}
-
-	// Check if path exists
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", fmt.Errorf("path not found: %v", err)
-	}
-
-	if !info.IsDir() {
-		return "", fmt.Errorf("path '%s' is not a directory", path)
-	}
+	recursive := getBoolArg(args, "recursive")
+	showHidden := getBoolArg(args, "show_hidden")
 
 	var result strings.Builder
+	var err error
 
 	if recursive {
-		// Use filepath.Walk for recursive listing
-		err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-
-			// Skip hidden files if not requested
-			if !showHidden && strings.HasPrefix(filepath.Base(filePath), ".") && filePath != path {
-				if info.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-
-			// Format entry
-			formatEntry(&result, filePath, info, path)
-			return nil
-		})
-
-		if err != nil {
-			return "", fmt.Errorf("failed to walk directory: %v", err)
-		}
+		err = walkDirectory(path, showHidden, &result)
 	} else {
-		// Use os.ReadDir for non-recursive listing
-		entries, err := os.ReadDir(path)
-		if err != nil {
-			return "", fmt.Errorf("failed to read directory: %v", err)
-		}
-
-		for _, entry := range entries {
-			// Skip hidden files if not requested
-			if !showHidden && strings.HasPrefix(entry.Name(), ".") {
-				continue
-			}
-
-			// Get full file info
-			entryPath := filepath.Join(path, entry.Name())
-			info, err := entry.Info()
-			if err != nil {
-				result.WriteString(fmt.Sprintf("%-40s <error reading info>\n", entry.Name()))
-				continue
-			}
-
-			formatEntry(&result, entryPath, info, path)
-		}
+		err = listDirectoryNonRecursive(path, showHidden, &result)
 	}
 
-	output := result.String()
-	if output == "" {
+	if err != nil {
+		return "", err
+	}
+
+	if result.Len() == 0 {
 		return "Directory is empty", nil
 	}
 
-	return output, nil
+	return result.String(), nil
+}
+
+func getPathArg(args map[string]interface{}) string {
+	path, ok := args["path"].(string)
+	if !ok || path == "" {
+		return "."
+	}
+	return path
+}
+
+func getBoolArg(args map[string]interface{}, key string) bool {
+	val, ok := args[key].(bool)
+	return ok && val
+}
+
+func validateDirectoryPath(path string) error {
+	if path != "." {
+		if err := validatePath(path); err != nil {
+			return fmt.Errorf("path validation failed: %v", err)
+		}
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("path not found: %v", err)
+	}
+
+	if !info.IsDir() {
+		return fmt.Errorf("path '%s' is not a directory", path)
+	}
+
+	return nil
+}
+
+func walkDirectory(path string, showHidden bool, result *strings.Builder) error {
+	return filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if shouldSkipHidden(filePath, info, path, showHidden) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		formatEntry(result, filePath, info, path)
+		return nil
+	})
+}
+
+func listDirectoryNonRecursive(path string, showHidden bool, result *strings.Builder) error {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return fmt.Errorf("failed to read directory: %v", err)
+	}
+
+	for _, entry := range entries {
+		if !showHidden && isHidden(entry.Name()) {
+			continue
+		}
+
+		entryPath := filepath.Join(path, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			result.WriteString(fmt.Sprintf("%-40s <error reading info>\n", entry.Name()))
+			continue
+		}
+
+		formatEntry(result, entryPath, info, path)
+	}
+
+	return nil
+}
+
+func shouldSkipHidden(filePath string, info os.FileInfo, basePath string, showHidden bool) bool {
+	return !showHidden && isHidden(filepath.Base(filePath)) && filePath != basePath
+}
+
+func isHidden(name string) bool {
+	return strings.HasPrefix(name, ".")
 }
 
 // formatEntry formats a single directory entry for output
