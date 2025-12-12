@@ -23,4 +23,7 @@ jobs:
         run: go build ./cmd/promptline
 
       - name: Test
-        run: make test
+        run: |
+          make test
+          make test-race
+          make coverage
