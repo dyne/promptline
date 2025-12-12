@@ -28,7 +28,6 @@ import (
 
 	"github.com/sashabaranov/go-openai"
 	"promptline/internal/config"
-	"promptline/internal/sandbox"
 	"promptline/internal/tools"
 )
 
@@ -65,8 +64,6 @@ func NewSession(cfg *config.Config) *Session {
 
 // NewSessionWithClient creates a new chat session with a provided client (for testing).
 func NewSessionWithClient(cfg *config.Config, client ChatClient) *Session {
-	tools.SetSandboxRunner(sandbox.NewManager(cfg.Sandbox))
-
 	// Initialize tool registry
 	toolRegistry := tools.NewRegistryWithPolicy(cfg.ToolPolicy())
 
