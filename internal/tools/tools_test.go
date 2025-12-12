@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -547,5 +548,431 @@ if result.Error == nil {
 t.Fatalf("expected error for restricted path: %s", tt.path)
 }
 })
+}
+}
+
+// Test FormatToolResult with various scenarios
+func TestFormatToolResult(t *testing.T) {
+tests := []struct {
+name          string
+toolCall      openai.ToolCall
+result        *ToolResult
+truncate      bool
+wantSubstring string
+}{
+{
+name: "successful execution with args",
+toolCall: openai.ToolCall{
+Function: openai.FunctionCall{
+Name:      "test_tool",
+Arguments: `{"arg1":"value1","arg2":"value2"}`,
+},
+},
+result: &ToolResult{
+Function: "test_tool",
+Result:   "success output",
+Error:    nil,
+},
+truncate:      false,
+wantSubstring: "test_tool",
+},
+{
+name: "execution with error",
+toolCall: openai.ToolCall{
+Function: openai.FunctionCall{
+Name:      "failing_tool",
+Arguments: `{}`,
+},
+},
+result: &ToolResult{
+Function: "failing_tool",
+Result:   "",
+Error:    errors.New("execution failed"),
+},
+truncate:      false,
+wantSubstring: "Error",
+},
+{
+name: "truncated long output",
+toolCall: openai.ToolCall{
+Function: openai.FunctionCall{
+Name:      "verbose_tool",
+Arguments: `{}`,
+},
+},
+result: &ToolResult{
+Function: "verbose_tool",
+Result:   strings.Repeat("a", 300),
+Error:    nil,
+},
+truncate:      true,
+wantSubstring: "...",
+},
+{
+name: "no truncation for short output",
+toolCall: openai.ToolCall{
+Function: openai.FunctionCall{
+Name:      "short_tool",
+Arguments: `{}`,
+},
+},
+result: &ToolResult{
+Function: "short_tool",
+Result:   "short result",
+Error:    nil,
+},
+truncate:      true,
+wantSubstring: "short result",
+},
+{
+name: "tool with no arguments",
+toolCall: openai.ToolCall{
+Function: openai.FunctionCall{
+Name:      "no_args_tool",
+Arguments: "",
+},
+},
+result: &ToolResult{
+Function: "no_args_tool",
+Result:   "no args result",
+Error:    nil,
+},
+truncate:      false,
+wantSubstring: "no_args_tool()",
+},
+{
+name: "tool with invalid JSON args (graceful handling)",
+toolCall: openai.ToolCall{
+Function: openai.FunctionCall{
+Name:      "bad_json_tool",
+Arguments: `{"incomplete":`,
+},
+},
+result: &ToolResult{
+Function: "bad_json_tool",
+Result:   "result",
+Error:    nil,
+},
+truncate:      false,
+wantSubstring: "bad_json_tool",
+},
+}
+
+for _, tt := range tests {
+t.Run(tt.name, func(t *testing.T) {
+output := FormatToolResult(tt.toolCall, tt.result, tt.truncate)
+if !strings.Contains(output, tt.wantSubstring) {
+t.Errorf("expected output to contain %q, got: %s", tt.wantSubstring, output)
+}
+// Verify truncation works correctly
+if tt.truncate && len(tt.result.Result) > 200 {
+if !strings.Contains(output, "...") {
+t.Error("expected truncated output to contain '...'")
+}
+}
+})
+}
+}
+
+// Test concurrent tool execution
+func TestConcurrentToolExecution(t *testing.T) {
+registry := NewRegistry()
+const numGoroutines = 50
+
+// Test concurrent reads (should be safe)
+t.Run("concurrent reads", func(t *testing.T) {
+var wg sync.WaitGroup
+errors := make(chan error, numGoroutines)
+
+for i := 0; i < numGoroutines; i++ {
+wg.Add(1)
+go func() {
+defer wg.Done()
+result := registry.Execute("get_current_datetime", map[string]interface{}{})
+if result.Error != nil {
+errors <- result.Error
+}
+}()
+}
+
+wg.Wait()
+close(errors)
+
+for err := range errors {
+t.Errorf("concurrent read failed: %v", err)
+}
+})
+
+// Test concurrent permission checks
+t.Run("concurrent permission checks", func(t *testing.T) {
+var wg sync.WaitGroup
+for i := 0; i < numGoroutines; i++ {
+wg.Add(1)
+go func() {
+defer wg.Done()
+_ = registry.GetPermission("read_file")
+_ = registry.GetToolNames()
+}()
+}
+wg.Wait()
+})
+
+// Test concurrent permission modifications
+t.Run("concurrent permission modifications", func(t *testing.T) {
+var wg sync.WaitGroup
+for i := 0; i < numGoroutines; i++ {
+wg.Add(1)
+go func(idx int) {
+defer wg.Done()
+// Alternate between allowing and blocking
+registry.SetAllowed("execute_shell_command", idx%2 == 0)
+}(i)
+}
+wg.Wait()
+// Should not panic or deadlock
+})
+}
+
+// Test policy application edge cases
+func TestPolicyApplicationEdgeCases(t *testing.T) {
+t.Run("empty policy on empty registry", func(t *testing.T) {
+r := &Registry{
+tools:       make(map[string]*Tool),
+permissions: make(map[string]Permission),
+}
+r.applyPolicy(Policy{})
+// Should not panic
+})
+
+t.Run("nil policy maps", func(t *testing.T) {
+registry := NewRegistry()
+registry.applyPolicy(Policy{
+Allowed:             nil,
+RequireConfirmation: nil,
+})
+// Should handle nil maps gracefully
+})
+
+t.Run("policy with unknown tool names", func(t *testing.T) {
+registry := NewRegistry()
+policy := Policy{
+Allowed: map[string]bool{
+"unknown_tool_xyz": true,
+},
+RequireConfirmation: map[string]bool{
+"another_unknown": true,
+},
+}
+registry.applyPolicy(policy)
+// Should not panic, policy for unknown tools is ignored
+})
+
+t.Run("multiple policy applications", func(t *testing.T) {
+registry := NewRegistry()
+
+// First policy: allow read_file
+policy1 := Policy{
+Allowed: map[string]bool{
+"read_file": true,
+},
+}
+registry.applyPolicy(policy1)
+
+// Second policy: block read_file
+policy2 := Policy{
+Allowed: map[string]bool{
+"read_file": false,
+},
+}
+registry.applyPolicy(policy2)
+
+// Second policy should override
+perm := registry.GetPermission("read_file")
+if perm.Allowed {
+t.Error("expected second policy to override first policy")
+}
+})
+}
+
+// Test permission denied scenarios in detail
+func TestPermissionDeniedScenarios(t *testing.T) {
+t.Run("tool not in allow list", func(t *testing.T) {
+registry := NewRegistryWithPolicy(Policy{
+Allowed: map[string]bool{
+"read_file": true,
+},
+})
+
+result := registry.Execute("write_file", map[string]interface{}{
+"path":    "/tmp/test.txt",
+"content": "test",
+})
+
+if !errors.Is(result.Error, ErrToolNotAllowed) {
+t.Errorf("expected ErrToolNotAllowed, got: %v", result.Error)
+}
+})
+
+t.Run("explicitly blocked tool", func(t *testing.T) {
+registry := NewRegistry()
+registry.SetAllowed("read_file", false)
+
+result := registry.Execute("read_file", map[string]interface{}{
+"path": "/tmp/test.txt",
+})
+
+if !errors.Is(result.Error, ErrToolNotAllowed) {
+t.Errorf("expected ErrToolNotAllowed, got: %v", result.Error)
+}
+})
+
+t.Run("force flag bypasses permission", func(t *testing.T) {
+registry := NewRegistry()
+registry.SetAllowed("read_file", false)
+
+// Create a test file
+tempFile := filepath.Join(t.TempDir(), "test.txt")
+if err := os.WriteFile(tempFile, []byte("content"), 0644); err != nil {
+t.Fatalf("failed to create test file: %v", err)
+}
+
+result := registry.ExecuteWithOptions("read_file", map[string]interface{}{
+"path": tempFile,
+}, ExecuteOptions{Force: true})
+
+if result.Error != nil {
+t.Errorf("expected Force to bypass permission, got error: %v", result.Error)
+}
+})
+}
+
+// Test confirmation requirement scenarios
+func TestConfirmationRequirements(t *testing.T) {
+t.Run("confirmation blocks execution", func(t *testing.T) {
+registry := NewRegistryWithPolicy(Policy{
+Allowed: map[string]bool{
+"write_file": true,
+},
+RequireConfirmation: map[string]bool{
+"write_file": true,
+},
+})
+
+result := registry.Execute("write_file", map[string]interface{}{
+"path":    "/tmp/test.txt",
+"content": "test",
+})
+
+if !errors.Is(result.Error, ErrToolRequiresConfirmation) {
+t.Errorf("expected ErrToolRequiresConfirmation, got: %v", result.Error)
+}
+})
+
+t.Run("force bypasses confirmation", func(t *testing.T) {
+registry := NewRegistryWithPolicy(Policy{
+Allowed: map[string]bool{
+"write_file": true,
+},
+RequireConfirmation: map[string]bool{
+"write_file": true,
+},
+})
+
+tempFile := filepath.Join(t.TempDir(), "test.txt")
+result := registry.ExecuteWithOptions("write_file", map[string]interface{}{
+"path":    tempFile,
+"content": "test content",
+}, ExecuteOptions{Force: true})
+
+if result.Error != nil {
+t.Errorf("expected Force to bypass confirmation, got error: %v", result.Error)
+}
+})
+
+t.Run("toggle confirmation requirement", func(t *testing.T) {
+registry := NewRegistry()
+
+// Initially no confirmation required for read_file
+perm := registry.GetPermission("read_file")
+initialRequire := perm.RequireConfirmation
+
+// Set confirmation requirement
+registry.SetRequireConfirmation("read_file", true)
+perm = registry.GetPermission("read_file")
+if !perm.RequireConfirmation {
+t.Error("expected confirmation to be required after setting")
+}
+
+// Remove confirmation requirement
+registry.SetRequireConfirmation("read_file", false)
+perm = registry.GetPermission("read_file")
+if perm.RequireConfirmation {
+t.Error("expected confirmation to not be required after unsetting")
+}
+
+// Should match initial state
+if initialRequire != perm.RequireConfirmation {
+t.Error("expected to return to initial state")
+}
+})
+}
+
+// Benchmarks for tool registry operations
+func BenchmarkRegistryExecute(b *testing.B) {
+registry := NewRegistry()
+args := map[string]interface{}{}
+
+b.ResetTimer()
+for i := 0; i < b.N; i++ {
+_ = registry.Execute("get_current_datetime", args)
+}
+}
+
+func BenchmarkRegistryGetPermission(b *testing.B) {
+registry := NewRegistry()
+
+b.ResetTimer()
+for i := 0; i < b.N; i++ {
+_ = registry.GetPermission("read_file")
+}
+}
+
+func BenchmarkRegistryOpenAITools(b *testing.B) {
+registry := NewRegistry()
+
+b.ResetTimer()
+for i := 0; i < b.N; i++ {
+_ = registry.OpenAITools()
+}
+}
+
+func BenchmarkConcurrentExecute(b *testing.B) {
+registry := NewRegistry()
+args := map[string]interface{}{}
+
+b.ResetTimer()
+b.RunParallel(func(pb *testing.PB) {
+for pb.Next() {
+_ = registry.Execute("get_current_datetime", args)
+}
+})
+}
+
+func BenchmarkPolicyApplication(b *testing.B) {
+registry := NewRegistry()
+policy := DefaultPolicy()
+
+b.ResetTimer()
+for i := 0; i < b.N; i++ {
+registry.applyPolicy(policy)
+}
+}
+
+func BenchmarkRegistryWithPolicy(b *testing.B) {
+policy := DefaultPolicy()
+
+b.ResetTimer()
+for i := 0; i < b.N; i++ {
+_ = NewRegistryWithPolicy(policy)
 }
 }
