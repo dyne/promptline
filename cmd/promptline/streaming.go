@@ -121,9 +121,7 @@ func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *t
 	toolArgs := toolCall.Function.Arguments
 
 	if toolName == "read_file" && shouldFillPath(toolCall.Function.Arguments) {
-		if filled := fillPathFromHistory(session, toolCall, logger); filled != "" {
-			toolArgs = filled
-		}
+		toolArgs = fillPathFromHistory(session, toolCall, logger)
 	}
 
 	logToolCall(logger, toolName, toolArgs)
@@ -196,28 +194,26 @@ func shouldFillPath(args string) bool {
 }
 
 func fillPathFromHistory(session *chat.Session, call *openai.ToolCall, logger zerolog.Logger) string {
-	lastUser := latestUserMessage(session)
-	if lastUser == "" {
-		return call.Function.Arguments
-	}
-
-	// Pick the first plausible filename/path from the user text.
-	candidate := extractPathCandidate(lastUser)
+	candidate := latestPathMention(session)
 	if candidate == "" {
 		return call.Function.Arguments
 	}
 
-	// Use the original user-provided form in the arguments. Path validation will still run inside the tool.
+	// Use the original text form; validation still happens in the tool.
 	call.Function.Arguments = fmt.Sprintf(`{"path": %q}`, candidate)
-	logger.Debug().Str("path", candidate).Msg("Filled missing read_file path from user history")
+	logger.Debug().Str("path", candidate).Msg("Filled missing read_file path from conversation")
 	return call.Function.Arguments
 }
 
-func latestUserMessage(session *chat.Session) string {
+func latestPathMention(session *chat.Session) string {
 	history := session.GetHistory()
 	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "user" && strings.TrimSpace(history[i].Content) != "" {
-			return history[i].Content
+		content := strings.TrimSpace(history[i].Content)
+		if content == "" {
+			continue
+		}
+		if candidate := extractPathCandidate(content); candidate != "" {
+			return candidate
 		}
 	}
 	return ""

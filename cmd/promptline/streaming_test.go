@@ -270,6 +270,54 @@ func TestExecuteToolCallFillsMissingPathFromHistory(t *testing.T) {
 	}
 }
 
+func TestExecuteToolCallFillsPathFromAssistantMention(t *testing.T) {
+	tmp := t.TempDir()
+	filePath := filepath.Join(tmp, "config.json")
+	if err := os.WriteFile(filePath, []byte("assistant seen"), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get cwd: %v", err)
+	}
+	defer os.Chdir(prev)
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("failed to chdir: %v", err)
+	}
+
+	cfg := &config.Config{
+		APIKey: "test-key",
+		Model:  "gpt-4o-mini",
+	}
+	session := chat.NewSession(cfg)
+	session.AddMessage("user", "can you see the config")
+	session.AddAssistantMessage("Yes, I can see `config.json`.", nil)
+
+	logger := zerolog.Nop()
+	colors := testColorScheme()
+
+	toolCall := &openai.ToolCall{
+		ID:   "call_assistant_path",
+		Type: openai.ToolTypeFunction,
+		Function: openai.FunctionCall{
+			Name:      "read_file",
+			Arguments: "{}",
+		},
+	}
+
+	executeToolCall(session, toolCall, colors, logger)
+
+	history := session.GetHistory()
+	if len(history) == 0 {
+		t.Fatalf("expected tool result in history")
+	}
+	last := history[len(history)-1]
+	if strings.TrimSpace(last.Content) != "assistant seen" {
+		t.Fatalf("expected file content, got: %s", last.Content)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && containsRecursive(s, substr)
 }
