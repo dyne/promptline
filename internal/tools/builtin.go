@@ -249,9 +249,9 @@ func executeShellCommandHost(ctx context.Context, command string) (string, error
 }
 
 func readFile(args map[string]interface{}) (string, error) {
-	path, ok := args["path"].(string)
-	if !ok {
-		return "", fmt.Errorf("missing or invalid 'path' parameter")
+	path, err := extractPathArg(args)
+	if err != nil {
+		return "", err
 	}
 
 	resolved, err := validatePathWithinWorkdir(path)
@@ -269,9 +269,9 @@ func readFile(args map[string]interface{}) (string, error) {
 }
 
 func writeFile(args map[string]interface{}) (string, error) {
-	path, ok := args["path"].(string)
-	if !ok {
-		return "", fmt.Errorf("missing or invalid 'path' parameter")
+	path, err := extractPathArg(args)
+	if err != nil {
+		return "", err
 	}
 
 	content, ok := args["content"].(string)
@@ -435,6 +435,53 @@ func shouldSkipHidden(filePath string, info os.FileInfo, basePath string, showHi
 
 func isHidden(name string) bool {
 	return strings.HasPrefix(name, ".")
+}
+
+// extractPathArg accepts a variety of shapes for the path argument and normalizes to string.
+func extractPathArg(args map[string]interface{}) (string, error) {
+	if args == nil {
+		return "", fmt.Errorf("missing or invalid 'path' parameter")
+	}
+
+	if path, ok := getStringLike(args["path"]); ok {
+		return path, nil
+	}
+
+	// Common alternate keys the model sometimes emits.
+	if path, ok := getStringLike(args["file"]); ok {
+		return path, nil
+	}
+	if path, ok := getStringLike(args["filepath"]); ok {
+		return path, nil
+	}
+
+	return "", fmt.Errorf("missing or invalid 'path' parameter")
+}
+
+func getStringLike(val interface{}) (string, bool) {
+	switch v := val.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return "", false
+		}
+		return v, true
+	case []byte:
+		if len(v) == 0 {
+			return "", false
+		}
+		return string(v), true
+	case []interface{}:
+		for _, item := range v {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				return s, true
+			}
+		}
+	case map[string]interface{}:
+		if nested, ok := getStringLike(v["path"]); ok {
+			return nested, true
+		}
+	}
+	return "", false
 }
 
 // formatEntry formats a single directory entry for output
