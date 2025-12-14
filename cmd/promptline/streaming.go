@@ -93,14 +93,22 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 	if len(toolCallsToExecute) > 0 {
 		fmt.Println() // newline before tool execution
 
+		anySuccess := false
 		for _, event := range toolCallsToExecute {
-			executeToolCall(session, event.ToolCall, colors, logger)
+			if executeToolCall(session, event.ToolCall, colors, logger) {
+				anySuccess = true
+			}
 		}
 
-		// Continue conversation with tool results (recursive call)
-		fmt.Println()
-		colors.Assistant.Print("⟫ ")
-		streamConversation(session, "", false, colors, logger)
+		// Continue conversation with tool results (recursive call) only if at least one succeeded
+		if anySuccess {
+			fmt.Println()
+			colors.Assistant.Print("⟫ ")
+			streamConversation(session, "", false, colors, logger)
+		} else {
+			fmt.Println()
+			fmt.Println()
+		}
 	} else {
 		// No tool calls, conversation complete
 		fmt.Println() // newline after response
@@ -109,7 +117,8 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 }
 
 // executeToolCall executes a single tool call and adds result to session
-func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *theme.ColorScheme, logger zerolog.Logger) {
+// Returns true when the tool succeeds.
+func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *theme.ColorScheme, logger zerolog.Logger) bool {
 	toolName := toolCall.Function.Name
 	toolArgs := toolCall.Function.Arguments
 
@@ -155,12 +164,14 @@ func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *t
 			Str("tool_name", toolName).
 			Err(result.Error).
 			Msg("Tool execution failed")
+		return false
 	} else {
 		logger.Debug().
 			Str("tool_name", toolName).
 			Int("result_length", len(result.Result)).
 			Msg("Tool executed successfully")
 	}
+	return true
 }
 
 func logToolCall(logger zerolog.Logger, name, args string) {

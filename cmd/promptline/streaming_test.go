@@ -49,7 +49,10 @@ func TestExecuteToolCallSuccess(t *testing.T) {
 	}
 
 	// Should not panic
-	executeToolCall(session, toolCall, colors, logger)
+	success := executeToolCall(session, toolCall, colors, logger)
+	if !success {
+		t.Fatalf("expected tool call success")
+	}
 
 	// Verify tool result was added to history
 	history := session.GetHistory()
@@ -72,16 +75,17 @@ func TestExecuteToolCallWithArgs(t *testing.T) {
 		ID:   "call_456",
 		Type: openai.ToolTypeFunction,
 		Function: openai.FunctionCall{
-			Name:      "ls",
+			Name:      "nonexistent_tool",
 			Arguments: `{"path": "."}`,
 		},
 	}
 
-	// Should not panic
-	executeToolCall(session, toolCall, colors, logger)
+	if executeToolCall(session, toolCall, colors, logger) {
+		t.Fatalf("expected failure for nonexistent tool")
+	}
 }
 
-func TestExecuteToolCallError(t *testing.T) {
+func TestExecuteToolCallLsSuccess(t *testing.T) {
 	cfg := &config.Config{
 		APIKey: "test-key",
 		Model:  "gpt-4o-mini",
@@ -96,18 +100,18 @@ func TestExecuteToolCallError(t *testing.T) {
 		ID:   "call_789",
 		Type: openai.ToolTypeFunction,
 		Function: openai.FunctionCall{
-			Name:      "nonexistent_tool",
+			Name:      "ls",
 			Arguments: "{}",
 		},
 	}
 
-	// Should handle error gracefully
-	executeToolCall(session, toolCall, colors, logger)
+	if !executeToolCall(session, toolCall, colors, logger) {
+		t.Fatalf("expected success for allowed ls tool")
+	}
 
-	// Should still add error result to history
 	history := session.GetHistory()
 	if len(history) == 0 {
-		t.Error("Expected error result in history")
+		t.Error("Expected result in history")
 	}
 }
 
