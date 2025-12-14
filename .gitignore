@@ -3,3 +3,5 @@ config.json
 .promptline*history
 work/
 .cache/
+coverage*
+*.out
