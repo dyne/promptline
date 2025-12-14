@@ -41,7 +41,7 @@ func TestInitLoggerWithFile(t *testing.T) {
 	tempDir := t.TempDir()
 	logFile := tempDir + "/test.log"
 
-	logger, err := initLogger(false, logFile)
+	logger, err := initLogger(true, logFile)
 	if err != nil {
 		t.Fatalf("initLogger failed: %v", err)
 	}

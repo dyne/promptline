@@ -33,6 +33,7 @@ import (
 func handleConversation(input string, session *chat.Session, colors *theme.ColorScheme, logger zerolog.Logger) {
 	// Log user input (already echoed by readline, don't print again)
 	logger.Info().Str("user_input", input).Msg("User input received")
+	logConversation(logger, openai.ChatMessageRoleUser, input)
 
 	// Stream the conversation, handling tool calls recursively
 	streamConversation(session, input, true, colors, logger)
@@ -86,6 +87,7 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 		Dur("duration_ms", duration).
 		Int("tool_calls", len(toolCallsToExecute)).
 		Msg("AI response received")
+	logConversation(logger, openai.ChatMessageRoleAssistant, responseBuilder.String())
 
 	// Execute any tool calls and continue conversation
 	if len(toolCallsToExecute) > 0 {
@@ -125,6 +127,11 @@ func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *t
 
 	// Add result to conversation history
 	session.AddToolResultMessage(*toolCall, result)
+	toolContent := result.Result
+	if toolContent == "" && result.Error != nil {
+		toolContent = result.Error.Error()
+	}
+	logConversation(logger, openai.ChatMessageRoleTool, toolContent)
 
 	// Display result to user
 	formatted := tools.FormatToolResult(*toolCall, result, true)
@@ -146,4 +153,14 @@ func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *t
 			Int("result_length", len(result.Result)).
 			Msg("Tool executed successfully")
 	}
+}
+
+func logConversation(logger zerolog.Logger, role, content string) {
+	if content == "" {
+		return
+	}
+	logger.Info().
+		Str("role", role).
+		Str("content", content).
+		Msg("conversation")
 }

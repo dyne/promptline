@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/rs/zerolog"
 )
@@ -61,15 +62,26 @@ func initLogger(debug bool, logFilePath string) (zerolog.Logger, error) {
 
 	// Configure output
 	var output io.Writer
-	if logFilePath != "" {
-		// Log to file only
+	if debug {
+		if logFilePath == "" {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				logFilePath = filepath.Join(home, ".promptline_debug.log")
+			}
+		}
+
 		file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
-			return zerolog.Logger{}, fmt.Errorf("failed to open log file: %w", err)
+			// Fall back to a temp file if the default location is not writable.
+			tmp, tmpErr := os.CreateTemp("", "promptline_debug_*.log")
+			if tmpErr != nil {
+				return zerolog.Logger{}, fmt.Errorf("failed to open log file: %w", err)
+			}
+			file = tmp
 		}
 		output = file
 	} else {
-		// No logging to console by default - use io.Discard
+		// Logging is disabled when debug mode is off
 		output = io.Discard
 	}
 
