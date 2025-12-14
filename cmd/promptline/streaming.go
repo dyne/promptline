@@ -31,8 +31,6 @@ import (
 
 // handleConversation sends user message and streams AI response
 func handleConversation(input string, session *chat.Session, colors *theme.ColorScheme, logger zerolog.Logger) {
-	// Log user input (already echoed by readline, don't print again)
-	logger.Info().Str("user_input", input).Msg("User input received")
 	logConversation(logger, openai.ChatMessageRoleUser, input)
 
 	// Stream the conversation, handling tool calls recursively
@@ -113,6 +111,8 @@ func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *t
 	toolName := toolCall.Function.Name
 	toolArgs := toolCall.Function.Arguments
 
+	logToolCall(logger, toolName, toolArgs)
+
 	// Show what tool is being called
 	colors.ProgressIndicator.Printf("🔧 [%s]", toolName)
 	fmt.Println()
@@ -153,6 +153,14 @@ func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *t
 			Int("result_length", len(result.Result)).
 			Msg("Tool executed successfully")
 	}
+}
+
+func logToolCall(logger zerolog.Logger, name, args string) {
+	logger.Info().
+		Str("role", "tool_call").
+		Str("tool", name).
+		Str("args", args).
+		Msg("conversation")
 }
 
 func logConversation(logger zerolog.Logger, role, content string) {
