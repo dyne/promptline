@@ -67,6 +67,12 @@ func initLogger(debug bool, logFilePath string) (zerolog.Logger, error) {
 			home, err := os.UserHomeDir()
 			if err == nil {
 				logFilePath = filepath.Join(home, ".promptline_debug.log")
+			} else {
+				cwd, cwdErr := os.Getwd()
+				if cwdErr != nil {
+					return zerolog.Logger{}, fmt.Errorf("failed to determine default log path: %w", cwdErr)
+				}
+				logFilePath = filepath.Join(cwd, ".promptline_debug.log")
 			}
 		}
 
