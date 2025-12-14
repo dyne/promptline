@@ -19,6 +19,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -111,6 +113,12 @@ func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *t
 	toolName := toolCall.Function.Name
 	toolArgs := toolCall.Function.Arguments
 
+	if toolName == "read_file" && shouldFillPath(toolCall.Function.Arguments) {
+		if filled := fillPathFromHistory(session, toolCall, logger); filled != "" {
+			toolArgs = filled
+		}
+	}
+
 	logToolCall(logger, toolName, toolArgs)
 
 	// Show what tool is being called
@@ -171,4 +179,61 @@ func logConversation(logger zerolog.Logger, role, content string) {
 		Str("role", role).
 		Str("content", content).
 		Msg("conversation")
+}
+
+func shouldFillPath(args string) bool {
+	trimmed := strings.TrimSpace(args)
+	return trimmed == "" || trimmed == "{}" || trimmed == "null"
+}
+
+func fillPathFromHistory(session *chat.Session, call *openai.ToolCall, logger zerolog.Logger) string {
+	lastUser := latestUserMessage(session)
+	if lastUser == "" {
+		return call.Function.Arguments
+	}
+
+	// Pick the first plausible filename/path from the user text.
+	candidate := extractPathCandidate(lastUser)
+	if candidate == "" {
+		return call.Function.Arguments
+	}
+
+	abs := candidate
+	if !filepath.IsAbs(candidate) {
+		if cwd, err := os.Getwd(); err == nil {
+			abs = filepath.Join(cwd, candidate)
+		}
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return call.Function.Arguments
+	}
+
+	// Use the original user-provided form in the arguments, but verify it exists.
+	call.Function.Arguments = fmt.Sprintf(`{"path": %q}`, candidate)
+	logger.Debug().Str("path", candidate).Msg("Filled missing read_file path from user history")
+	return call.Function.Arguments
+}
+
+func latestUserMessage(session *chat.Session) string {
+	history := session.GetHistory()
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "user" && strings.TrimSpace(history[i].Content) != "" {
+			return history[i].Content
+		}
+	}
+	return ""
+}
+
+func extractPathCandidate(message string) string {
+	fields := strings.Fields(message)
+	for _, f := range fields {
+		clean := strings.Trim(f, " \t\n\r\"'`.,;:()[]{}<>")
+		if clean == "" {
+			continue
+		}
+		if strings.Contains(clean, "/") || strings.Contains(clean, ".") {
+			return clean
+		}
+	}
+	return ""
 }
