@@ -19,8 +19,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -209,17 +207,7 @@ func fillPathFromHistory(session *chat.Session, call *openai.ToolCall, logger ze
 		return call.Function.Arguments
 	}
 
-	abs := candidate
-	if !filepath.IsAbs(candidate) {
-		if cwd, err := os.Getwd(); err == nil {
-			abs = filepath.Join(cwd, candidate)
-		}
-	}
-	if _, err := os.Stat(abs); err != nil {
-		return call.Function.Arguments
-	}
-
-	// Use the original user-provided form in the arguments, but verify it exists.
+	// Use the original user-provided form in the arguments. Path validation will still run inside the tool.
 	call.Function.Arguments = fmt.Sprintf(`{"path": %q}`, candidate)
 	logger.Debug().Str("path", candidate).Msg("Filled missing read_file path from user history")
 	return call.Function.Arguments
