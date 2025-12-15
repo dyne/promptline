@@ -36,11 +36,6 @@ func runTUIMode(logger zerolog.Logger) {
 		logger.Fatal().Err(err).Msg("Failed to load config")
 	}
 
-	sb := initSandbox(cfg, logger)
-	if sb != nil {
-		defer sb.Close()
-	}
-
 	// Load theme with manager (supports NO_COLOR env var)
 	themeMgr, err := theme.NewManager("theme.json")
 	if err != nil {

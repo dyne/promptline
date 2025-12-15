@@ -4,12 +4,11 @@ go 1.24
 
 require (
 	github.com/chzyer/readline v1.5.1
-	github.com/criyle/go-sandbox v0.11.8
 	github.com/fatih/color v1.18.0
 	github.com/pterm/pterm v0.12.82
 	github.com/rs/zerolog v1.34.0
 	github.com/sashabaranov/go-openai v1.41.2
-	golang.org/x/sys v0.35.0
+	golang.org/x/sys v0.35.0 // indirect
 )
 
 require (

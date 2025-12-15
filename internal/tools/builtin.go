@@ -17,7 +17,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -26,8 +25,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/criyle/go-sandbox/runner"
 )
 
 // registerBuiltInTools registers all built-in tools to the registry
@@ -208,28 +205,6 @@ func executeShellCommand(args map[string]interface{}) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
-	if sandboxRunner != nil {
-		outBuf := &bytes.Buffer{}
-		errBuf := &bytes.Buffer{}
-		result, err := sandboxRunner.ExecInSandbox(ctx, "sh", []string{"-c", command}, nil, outBuf, errBuf)
-
-		output := outBuf.String() + errBuf.String()
-
-		if ctx.Err() == context.DeadlineExceeded {
-			return output, fmt.Errorf("command timed out after %v", commandTimeout)
-		}
-
-		// If sandbox unavailable, fall back.
-		if err != nil {
-			return executeShellCommandHost(ctx, command)
-		}
-
-		if result.Status != runner.StatusNormal || result.ExitStatus != 0 {
-			return output, fmt.Errorf("command failed: status=%d exit=%d", result.Status, result.ExitStatus)
-		}
-		return output, nil
-	}
-
 	return executeShellCommandHost(ctx, command)
 }
 
@@ -374,16 +349,6 @@ func validatePathWithinWorkdir(path string) (string, error) {
 		}
 	}
 
-	if sandboxWorkdir == "" {
-		return absPath, nil
-	}
-	workdirAbs, err := filepath.Abs(filepath.Clean(sandboxWorkdir))
-	if err != nil {
-		return "", fmt.Errorf("invalid workdir: %v", err)
-	}
-	if !strings.HasPrefix(absPath, workdirAbs+string(filepath.Separator)) && absPath != workdirAbs {
-		return "", fmt.Errorf("access denied: path must stay within workdir")
-	}
 	return absPath, nil
 }
 

@@ -496,9 +496,6 @@ func TestWriteFileInvalidPath(t *testing.T) {
 }
 
 func TestReadFileFlexiblePathParsing(t *testing.T) {
-	// Ensure sandbox path restriction does not interfere with absolute paths.
-	sandboxWorkdir = ""
-
 	registry := NewRegistryWithPolicy(Policy{
 		Allowed: map[string]bool{
 			"read_file": true,

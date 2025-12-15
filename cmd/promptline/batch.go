@@ -44,11 +44,6 @@ func runBatch(logger zerolog.Logger) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	sb := initSandbox(cfg, logger)
-	if sb != nil {
-		defer sb.Close()
-	}
-
 	// Create chat session
 	session := chat.NewSession(cfg)
 	defer session.Close()

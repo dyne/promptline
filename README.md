@@ -23,13 +23,6 @@ Requires Go 1.22+ and `OPENAI_API_KEY` set.
   "tools": {
     "allow": ["read_file", "ls"],
     "require_confirmation": ["write_file", "execute_shell_command"]
-  },
-  "sandbox": {
-    "enabled": true,
-    "workdir": ".",
-    "read_only_paths": ["/bin", "/usr", "/lib", "/lib64"],
-    "masked_paths": [],
-    "non_root_user": true
   }
 }
 ```
