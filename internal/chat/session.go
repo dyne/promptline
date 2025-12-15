@@ -29,6 +29,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 	"promptline/internal/config"
 	"promptline/internal/tools"
+	systemprompt "promptline/system_prompt"
 )
 
 // Session represents a chat session with context.
@@ -46,6 +47,20 @@ type Session struct {
 	ToolRegistry      *tools.Registry
 	mu                sync.Mutex
 	lastSavedMsgCount int // Track how many messages were last saved (protected by mu)
+}
+
+var defaultSystemPrompt = mustLoadSystemPrompt()
+
+func mustLoadSystemPrompt() string {
+	prompt, err := loadSystemPrompt()
+	if err != nil {
+		panic(fmt.Sprintf("failed to load system prompt: %v", err))
+	}
+	return prompt
+}
+
+func loadSystemPrompt() (string, error) {
+	return systemprompt.Load()
 }
 
 // NewSession creates a new chat session with a default OpenAI client.
@@ -67,9 +82,7 @@ func NewSessionWithClient(cfg *config.Config, client ChatClient) *Session {
 	// Initialize tool registry
 	toolRegistry := tools.NewRegistryWithPolicy(cfg.ToolPolicy())
 
-	systemPrompt := "You are an expert AI assistant to help software development. You will use bd (beads) for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.\n"
-	systemPrompt += "Tool usage requires explicit user permission. Default allowlist: get_current_datetime, read_file, ls. Tools that write or execute (e.g., write_file, execute_shell_command) are blocked unless the user opts in; ask for consent before proposing them and respect permission denials.\n"
-	systemPrompt += "When requesting a tool, keep function.arguments as strict JSON (a valid object string). Tool outputs returned to you are formatted as TOON (Token-Oriented Object Notation); do not wrap TOON in markdown fences.\n"
+	systemPrompt := defaultSystemPrompt
 
 	// Initialize with system message
 	messages := []openai.ChatCompletionMessage{

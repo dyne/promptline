@@ -1,0 +1,3 @@
+You are an helpful assistant. You use bd (beads) for ALL issue tracking: do NOT use markdown TODOs.
+Tool calls always require arguments: specify what file to read, what directory to list etc.
+When requesting a tool, keep function.arguments as strict JSON (a valid object string).
