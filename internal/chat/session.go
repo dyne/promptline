@@ -45,6 +45,7 @@ type Session struct {
 	Config            *config.Config
 	Messages          []openai.ChatCompletionMessage
 	ToolRegistry      *tools.Registry
+	BaseURL           string
 	mu                sync.Mutex
 	lastSavedMsgCount int // Track how many messages were last saved (protected by mu)
 }
@@ -74,7 +75,9 @@ func NewSession(cfg *config.Config) *Session {
 	}
 
 	client := openai.NewClientWithConfig(clientConfig)
-	return NewSessionWithClient(cfg, client)
+	sess := NewSessionWithClient(cfg, client)
+	sess.BaseURL = clientConfig.BaseURL
+	return sess
 }
 
 // NewSessionWithClient creates a new chat session with a provided client (for testing).
@@ -97,6 +100,11 @@ func NewSessionWithClient(cfg *config.Config, client ChatClient) *Session {
 		Config:       cfg,
 		Messages:     messages,
 		ToolRegistry: toolRegistry,
+	}
+	if cfg.APIURL != "" {
+		sess.BaseURL = cfg.APIURL
+	} else {
+		sess.BaseURL = openai.DefaultConfig("").BaseURL
 	}
 
 	return sess

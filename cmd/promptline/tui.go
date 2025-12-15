@@ -88,8 +88,8 @@ func runTUIMode(logger zerolog.Logger) {
 
 	// Display header
 	colors.Header.Println("Promptline by Dyne.org")
-	fmt.Printf("Connected to: %s\n", cfg.APIURL)
-	fmt.Printf("Model in use: %s\n", cfg.Model)
+	fmt.Printf("Connected to: %s\n", session.BaseURL)
+	fmt.Printf("Model in use: %s\n", session.Config.Model)
 	// fmt.Println("Type /help for commands, Ctrl+C or /quit to exit")
 	// fmt.Println("Press Ctrl+R to search conversation history")
 	fmt.Println()
