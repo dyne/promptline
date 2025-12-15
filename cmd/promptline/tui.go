@@ -92,9 +92,9 @@ func runTUIMode(logger zerolog.Logger) {
 	}
 
 	// Display header
-	colors.Header.Println("Promptline - AI Chat")
-	fmt.Println("Type /help for commands, Ctrl+C or /quit to exit")
-	fmt.Println("Press Ctrl+R to search conversation history")
+	colors.Header.Println("Promptline by Dyne.org")
+	// fmt.Println("Type /help for commands, Ctrl+C or /quit to exit")
+	// fmt.Println("Press Ctrl+R to search conversation history")
 	fmt.Println()
 
 	// Track debug mode for commands

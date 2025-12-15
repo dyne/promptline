@@ -11,4 +11,6 @@ bd close <id> --reason "done"                      # finish it
 
 Priority: 0=critical, 1=high, 2=medium, 3=low, 4=backlog
 
-Store planning docs in `history/` not repo root.
+Execut `bd prime` and learn its output to use beads.
+
+Read the README.md and all file in docs/ to learn about this project.
