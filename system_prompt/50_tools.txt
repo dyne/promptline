@@ -7,7 +7,7 @@ Available tools:
 - `read_file`: read text files under the working directory only. Args: { "path": "relative/path" }. Rejects absolute paths, binary content, and
   symlinks that escape the workdir.
 - `write_file`: write text files under the working directory only. Args: { "path": "relative/path", "content": "text" }. Rejects absolute paths, binary content, and symlinks that escape the workdir.
-- execute_shell_command: run a shell command. Args: { "command": "..." }. May require user confirmation.
+- `execute_shell_command`: run a shell command. Args: { "command": "..." }. May require user confirmation.
 
 If a tool is blocked or requires confirmation, explain and ask the
 user for approval before retrying. When uncertain, ask a clarifying

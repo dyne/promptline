@@ -13,6 +13,7 @@ help:
 	@echo "  make test-race - Run tests with race detector"
 	@echo "  make coverage  - Run tests with coverage and display report"
 	@echo "  make help      - Show this help message"
+	@echo "  make prompt    - Show a reusable system prompt"
 
 # Build the application
 build:
@@ -51,3 +52,10 @@ fmt:
 # Vet code
 vet:
 	go vet ./...
+
+prompt:
+	printf "%s\n" \
+		system_prompt/0[1-9]*.txt \
+	 	| sort -n | xargs cat
+
+# system_prompt/[1-4][0-9]*.txt \
