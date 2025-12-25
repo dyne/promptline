@@ -5,31 +5,42 @@ only when explicitly asked to do so.
 
 Use org-mode for ALL planning: do NOT use markdown TODOs and place
 everything in a single PLAN.org file. Org-mode is meant to aid
-supervision of AI workflows: agents like you HAVE TO create issues
-when discovering new work. When asked to work always refer to existing
+supervision of workflows: agents like you HAVE TO create entries when
+discovering new work. When asked to work always refer to existing
 entries in PLAN.org or, if nothing related is found, create a new
 entry.
 
-For planning, create first level org-mode entries with a concise title
-and a longer description in the body. Then proceed detailing them
-adding second level org-mode entries with a concise title and longer
-description in body.
+New work plans are first level org-mode entries with a concise title
+and a longer description in the body, add them on top of the org-mode
+file and separate them by an empty line from the rest. Before adding
+them always check if there is already one about the same topic, if yes
+then stop and warn the user, suggesting it can be re-used and extended
+adding second level entries.
 
-All second level entries need org-mode :PROPERTIES: set with a unique
-:ID: and a :DEPENDS: field listing comma separated ids on the same
-level they depend upon. Also a :STATUS: field with string values:
-- `open` - just planned, not being worked upon
-- `wip` - work in progress
-- `done` - succesfully solved
-- `abort` - skipped despite being planned
-And a :PRIORITY: field with a number:
-- `0` - Critical (security, data loss, broken builds)
-- `1` - High (major features, important bugs)
-- `2` - Medium (default, nice-to-have)
-- `3` - Low (polish, optimization)
-- `4` - Backlog (future ideas)
+Also second level org-mode entries are made with a concise title and
+longer description in body. Check for repetition among them and warn
+the user and suggest they can be merged. Add new second level entries
+if they are really new and not already included in the same first
+level group. You MUST keep the descending order of second level
+entries strictly in order of possible execution according to
+inter-dependencies between them.
 
-For working, first switch to "wip" the :STATUS: of the entry, then
-start working. Switch it to "done" when finished. Never work on a
-entry that has "wip" status but report the error and stop
-working. Also do not work on entries with "done" or "abort" status.
+All entries must have org-todo-keywords TODO/WIP/DONE in title.  When
+starting to work, first re-read the PLAN.org first level section you
+are going to work on, to include any user-made modification, then
+switch it to WIP and start working. Switch it to DONE when
+finished. Never work on a entry that has WIP status but report the
+error and stop working. Also do not work on entries with DONE status.
+
+All entries must have one org-mode tag at the end of their title, indicating their priority: critical, high, medium (default), low, backlog. Up to you to decide the priority during the planning phase, here a brief explanation:
+- :critical: (security, data loss, broken builds)
+- :high (major features, important bugs)
+- :medium: (default, nice-to-have)
+- :low: (polish, optimization)
+- :backlog: (future ideas)
+
+When work is completed, all subsequent interactions should be added to
+the same first level entry. For instance if the user asks refinements
+and while debugging or running tests a new plan for work arises, it
+should be inserted as new entries in the second level if it is related
+to the same first level entry.
