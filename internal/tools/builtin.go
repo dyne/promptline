@@ -25,6 +25,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // registerBuiltInTools registers all built-in tools to the registry
@@ -229,7 +230,12 @@ func readFile(args map[string]interface{}) (string, error) {
 		return "", err
 	}
 
-	resolved, err := validatePathWithinWorkdir(path)
+	workdir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine working directory: %v", err)
+	}
+
+	resolved, err := resolvePathWithinBase(path, workdir)
 	if err != nil {
 		return "", err
 	}
@@ -238,6 +244,10 @@ func readFile(args map[string]interface{}) (string, error) {
 	content, err := os.ReadFile(resolved)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %v", err)
+	}
+
+	if !isTextContent(content) {
+		return "", fmt.Errorf("file appears to be binary; read_file supports text only")
 	}
 
 	return string(content), nil
@@ -254,9 +264,22 @@ func writeFile(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("missing or invalid 'content' parameter")
 	}
 
-	resolved, err := validatePathWithinWorkdir(path)
+	if !isTextContent([]byte(content)) {
+		return "", fmt.Errorf("content appears to be binary; write_file supports text only")
+	}
+
+	workdir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine working directory: %v", err)
+	}
+
+	resolved, err := resolvePathWithinBase(path, workdir)
 	if err != nil {
 		return "", err
+	}
+
+	if info, err := os.Stat(resolved); err == nil && info.IsDir() {
+		return "", fmt.Errorf("path '%s' is a directory", resolved)
 	}
 
 	// Use os.WriteFile instead of exec for better security
@@ -350,6 +373,111 @@ func validatePathWithinWorkdir(path string) (string, error) {
 	}
 
 	return absPath, nil
+}
+
+func resolvePathWithinBase(path, baseDir string) (string, error) {
+	if len(path) > maxPathLength {
+		return "", fmt.Errorf("path exceeds maximum length of %d characters", maxPathLength)
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("path cannot be empty")
+	}
+	if filepath.IsAbs(path) {
+		return "", fmt.Errorf("absolute paths are not allowed")
+	}
+
+	baseAbs, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid base directory: %v", err)
+	}
+	baseResolved, err := filepath.EvalSymlinks(baseAbs)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve base directory: %v", err)
+	}
+
+	cleanRel := filepath.Clean(path)
+	absPath := filepath.Clean(filepath.Join(baseResolved, cleanRel))
+	if !hasPathPrefix(absPath, baseResolved) {
+		return "", fmt.Errorf("path escapes working directory")
+	}
+
+	for _, dangerous := range dangerousPaths {
+		if strings.HasPrefix(absPath, dangerous) {
+			return "", fmt.Errorf("access to %s is restricted for security", dangerous)
+		}
+	}
+
+	resolved, err := resolveSymlinkedPath(absPath, baseResolved)
+	if err != nil {
+		return "", err
+	}
+
+	if !hasPathPrefix(resolved, baseResolved) {
+		return "", fmt.Errorf("path escapes working directory")
+	}
+
+	return resolved, nil
+}
+
+func resolveSymlinkedPath(path, baseResolved string) (string, error) {
+	if _, err := os.Lstat(path); err == nil {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve path: %v", err)
+		}
+		return resolved, nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("failed to stat path: %v", err)
+	}
+
+	parent := filepath.Dir(path)
+	parentResolved, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve parent path: %v", err)
+	}
+	if !hasPathPrefix(parentResolved, baseResolved) {
+		return "", fmt.Errorf("path escapes working directory")
+	}
+	return filepath.Join(parentResolved, filepath.Base(path)), nil
+}
+
+func hasPathPrefix(path, base string) bool {
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && rel != "..")
+}
+
+func isTextContent(data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	if !utf8.Valid(data) {
+		return false
+	}
+
+	const sampleSize = 8192
+	limit := len(data)
+	if limit > sampleSize {
+		limit = sampleSize
+	}
+
+	var nonPrintable int
+	for _, b := range data[:limit] {
+		switch b {
+		case '\n', '\r', '\t':
+			continue
+		}
+		if b == 0 {
+			return false
+		}
+		if b < 0x20 || b == 0x7f {
+			nonPrintable++
+		}
+	}
+
+	return nonPrintable*20 < limit
 }
 
 func walkDirectory(path string, showHidden bool, result *strings.Builder) error {

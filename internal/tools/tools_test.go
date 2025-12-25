@@ -28,6 +28,30 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
+func tempDirInCwd(t *testing.T) (string, string) {
+	t.Helper()
+	base, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+	dir, err := os.MkdirTemp(".", "tools-test-")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		t.Fatalf("failed to resolve temp dir: %v", err)
+	}
+	relDir, err := filepath.Rel(base, absDir)
+	if err != nil {
+		t.Fatalf("failed to get relative temp dir: %v", err)
+	}
+	return absDir, relDir
+}
+
 func TestExecuteListDirectory(t *testing.T) {
 	registry := NewRegistry()
 	tempDir := t.TempDir()
@@ -316,11 +340,11 @@ func TestExecuteWriteAndReadFile(t *testing.T) {
 			"write_file": false,
 		},
 	})
-	tempDir := t.TempDir()
-	filePath := filepath.Join(tempDir, "sample.txt")
+	_, relDir := tempDirInCwd(t)
+	relPath := filepath.Join(relDir, "sample.txt")
 
 	writeResult := registry.Execute("write_file", map[string]interface{}{
-		"path":    filePath,
+		"path":    relPath,
 		"content": "sample content",
 	})
 	if writeResult.Error != nil {
@@ -328,7 +352,7 @@ func TestExecuteWriteAndReadFile(t *testing.T) {
 	}
 
 	readResult := registry.Execute("read_file", map[string]interface{}{
-		"path": filePath,
+		"path": relPath,
 	})
 	if readResult.Error != nil {
 		t.Fatalf("expected read_file success, got: %v", readResult.Error)
@@ -486,12 +510,145 @@ func TestWriteFileInvalidPath(t *testing.T) {
 	})
 
 	result := registry.Execute("write_file", map[string]interface{}{
-		"path":    "/nonexistent/dir/file.txt",
+		"path":    filepath.Join("missing-dir", "file.txt"),
 		"content": "test",
 	})
 
 	if result.Error == nil {
 		t.Fatal("expected error for invalid path")
+	}
+}
+
+func TestReadFileRejectsAbsolutePath(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"read_file": true,
+		},
+	})
+
+	result := registry.Execute("read_file", map[string]interface{}{
+		"path": "/tmp/absolute.txt",
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for absolute path")
+	}
+}
+
+func TestWriteFileRejectsAbsolutePath(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"write_file": true,
+		},
+		RequireConfirmation: map[string]bool{
+			"write_file": false,
+		},
+	})
+
+	result := registry.Execute("write_file", map[string]interface{}{
+		"path":    "/tmp/absolute.txt",
+		"content": "data",
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for absolute path")
+	}
+}
+
+func TestReadFileRejectsBinaryContent(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"read_file": true,
+		},
+	})
+
+	absDir, relDir := tempDirInCwd(t)
+	filePath := filepath.Join(absDir, "binary.dat")
+	relPath := filepath.Join(relDir, "binary.dat")
+
+	if err := os.WriteFile(filePath, []byte{0x00, 0x01, 0x02}, 0o644); err != nil {
+		t.Fatalf("failed to write binary file: %v", err)
+	}
+
+	result := registry.Execute("read_file", map[string]interface{}{
+		"path": relPath,
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for binary content")
+	}
+}
+
+func TestWriteFileRejectsBinaryContent(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"write_file": true,
+		},
+		RequireConfirmation: map[string]bool{
+			"write_file": false,
+		},
+	})
+
+	_, relDir := tempDirInCwd(t)
+	relPath := filepath.Join(relDir, "binary.txt")
+
+	result := registry.Execute("write_file", map[string]interface{}{
+		"path":    relPath,
+		"content": "text\u0000binary",
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for binary content")
+	}
+}
+
+func TestReadFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"read_file": true,
+		},
+	})
+
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o644); err != nil {
+		t.Fatalf("failed to write outside file: %v", err)
+	}
+
+	absDir, relDir := tempDirInCwd(t)
+	linkPath := filepath.Join(absDir, "outside_link")
+	if err := os.Symlink(outsideFile, linkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	result := registry.Execute("read_file", map[string]interface{}{
+		"path": filepath.Join(relDir, "outside_link"),
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for symlink outside workdir")
+	}
+}
+
+func TestWriteFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allowed: map[string]bool{
+			"write_file": true,
+		},
+		RequireConfirmation: map[string]bool{
+			"write_file": false,
+		},
+	})
+
+	outsideDir := t.TempDir()
+
+	absDir, relDir := tempDirInCwd(t)
+	linkPath := filepath.Join(absDir, "outside_dir")
+	if err := os.Symlink(outsideDir, linkPath); err != nil {
+		t.Fatalf("failed to create symlink directory: %v", err)
+	}
+
+	result := registry.Execute("write_file", map[string]interface{}{
+		"path":    filepath.Join(relDir, "outside_dir", "file.txt"),
+		"content": "data",
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for symlink outside workdir")
 	}
 }
 
@@ -502,8 +659,9 @@ func TestReadFileFlexiblePathParsing(t *testing.T) {
 		},
 	})
 
-	tmp := t.TempDir()
-	filePath := filepath.Join(tmp, "note.txt")
+	absDir, relDir := tempDirInCwd(t)
+	filePath := filepath.Join(absDir, "note.txt")
+	relPath := filepath.Join(relDir, "note.txt")
 	expected := "hello"
 	if err := os.WriteFile(filePath, []byte(expected), 0o644); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
@@ -511,7 +669,7 @@ func TestReadFileFlexiblePathParsing(t *testing.T) {
 
 	// Path as array (sometimes produced by models).
 	result := registry.Execute("read_file", map[string]interface{}{
-		"path": []interface{}{filePath},
+		"path": []interface{}{relPath},
 	})
 	if result.Error != nil {
 		t.Fatalf("expected success with array path, got: %v", result.Error)
@@ -523,7 +681,7 @@ func TestReadFileFlexiblePathParsing(t *testing.T) {
 	// Path nested in map
 	result = registry.Execute("read_file", map[string]interface{}{
 		"path": map[string]interface{}{
-			"path": filePath,
+			"path": relPath,
 		},
 	})
 	if result.Error != nil {
@@ -1024,13 +1182,14 @@ func TestPermissionDeniedScenarios(t *testing.T) {
 		registry.SetAllowed("read_file", false)
 
 		// Create a test file
-		tempFile := filepath.Join(t.TempDir(), "test.txt")
-		if err := os.WriteFile(tempFile, []byte("content"), 0644); err != nil {
+		absDir, relDir := tempDirInCwd(t)
+		tempFile := filepath.Join(absDir, "test.txt")
+		if err := os.WriteFile(tempFile, []byte("content"), 0o644); err != nil {
 			t.Fatalf("failed to create test file: %v", err)
 		}
 
 		result := registry.ExecuteWithOptions("read_file", map[string]interface{}{
-			"path": tempFile,
+			"path": filepath.Join(relDir, "test.txt"),
 		}, ExecuteOptions{Force: true})
 
 		if result.Error != nil {
@@ -1071,7 +1230,8 @@ func TestConfirmationRequirements(t *testing.T) {
 			},
 		})
 
-		tempFile := filepath.Join(t.TempDir(), "test.txt")
+		_, relDir := tempDirInCwd(t)
+		tempFile := filepath.Join(relDir, "test.txt")
 		result := registry.ExecuteWithOptions("write_file", map[string]interface{}{
 			"path":    tempFile,
 			"content": "test content",
