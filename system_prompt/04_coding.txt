@@ -1,0 +1,4 @@
+When planning always challenge first assumptions and choose well known
+algorithms over inventing new ones. When generating code prefer
+minimalist solutions and avoid adding new dependencies: always try to
+write shorter code that is elegant and readable for humans.

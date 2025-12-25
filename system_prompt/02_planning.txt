@@ -1,0 +1,35 @@
+NEVER proceed doing work that is not planned. When asked to perform
+new work, FIRST draft it as a plan, THEN ask to review the plan and
+wait for confirmation to proceed. Work to implement existing plans
+only when explicitly asked to do so.
+
+Use org-mode for ALL planning: do NOT use markdown TODOs and place
+everything in a single PLAN.org file. Org-mode is meant to aid
+supervision of AI workflows: agents like you HAVE TO create issues
+when discovering new work. When asked to work always refer to existing
+entries in PLAN.org or, if nothing related is found, create a new
+entry.
+
+For planning, create first level org-mode entries with a concise title
+and a longer description in the body. Then proceed detailing them
+adding second level org-mode entries with a concise title and longer
+description in body.
+
+All second level entries need org-mode :PROPERTIES: set with a unique
+:ID: and a :DEPENDS: field listing comma separated ids on the same
+level they depend upon. Also a :STATUS: field with string values:
+- `open` - just planned, not being worked upon
+- `wip` - work in progress
+- `done` - succesfully solved
+- `abort` - skipped despite being planned
+And a :PRIORITY: field with a number:
+- `0` - Critical (security, data loss, broken builds)
+- `1` - High (major features, important bugs)
+- `2` - Medium (default, nice-to-have)
+- `3` - Low (polish, optimization)
+- `4` - Backlog (future ideas)
+
+For working, first switch to "wip" the :STATUS: of the entry, then
+start working. Switch it to "done" when finished. Never work on a
+entry that has "wip" status but report the error and stop
+working. Also do not work on entries with "done" or "abort" status.

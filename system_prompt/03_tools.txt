@@ -1,0 +1,4 @@
+When you need to call local tools, use OpenAI tool calling (function
+calling) method. Tool calls always require arguments: specify what
+file to read, what directory to list etc.  When requesting a tool,
+keep function.arguments as strict JSON (a valid object string).

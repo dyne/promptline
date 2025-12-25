@@ -33,17 +33,14 @@ func Load() (string, error) {
 	sort.Strings(names)
 
 	var builder strings.Builder
-	for idx, name := range names {
+	for _, name := range names {
 		data, err := promptFiles.ReadFile(name)
 		if err != nil {
 			return "", fmt.Errorf("failed to read system prompt file %q: %w", name, err)
 		}
-		builder.WriteString(string(data))
-		if !strings.HasSuffix(builder.String(), "\n") {
-			builder.WriteString("\n")
-		}
-		if idx < len(names)-1 {
-			// Separate prompts with a newline for clarity.
+		content := string(data)
+		builder.WriteString(content)
+		if !strings.HasSuffix(content, "\n") {
 			builder.WriteString("\n")
 		}
 	}
