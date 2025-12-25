@@ -5,3 +5,4 @@ work/
 .cache/
 coverage*
 *.out
+.gocache

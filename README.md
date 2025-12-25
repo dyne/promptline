@@ -22,7 +22,7 @@ Requires Go 1.22+ and `OPENAI_API_KEY` set.
   "model": "gpt-4o-mini",
   "tools": {
     "allow": ["read_file", "ls"],
-    "require_confirmation": ["write_file", "execute_shell_command"]
+    "ask": ["write_file", "execute_shell_command"]
   }
 }
 ```
@@ -41,7 +41,7 @@ Keys: `Ctrl+↑/↓` history, `Ctrl+C` exit
 
 ## Tools
 
-AI can call functions to read/write files, run commands. Permissions in config control what needs confirmation.
+AI can call functions to read/write files, run commands. Permissions in config control allow/ask/deny behavior.
 
 Built-in: `ls` `read_file` `write_file` `execute_shell_command` `get_current_datetime`
 

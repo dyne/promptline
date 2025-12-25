@@ -47,6 +47,7 @@ func runBatch(logger zerolog.Logger) error {
 	// Create chat session
 	session := chat.NewSession(cfg)
 	defer session.Close()
+	session.ToolApprover = newToolApprover(nil)
 
 	// Load conversation history
 	if cfg.HistoryFile != "" {

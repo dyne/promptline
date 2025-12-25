@@ -34,7 +34,7 @@ func BenchmarkToolRegistration(b *testing.B) {
 // BenchmarkGetPermission measures permission check performance
 func BenchmarkGetPermission(b *testing.B) {
 	registry := NewRegistry()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = registry.getPermission("ls")
@@ -45,7 +45,7 @@ func BenchmarkGetPermission(b *testing.B) {
 func BenchmarkExecuteOpenAIToolCall(b *testing.B) {
 	registry := NewRegistry()
 	registry.SetAllowed("ls", true)
-	
+
 	toolCall := openai.ToolCall{
 		ID:   "test-call",
 		Type: openai.ToolTypeFunction,
@@ -54,7 +54,7 @@ func BenchmarkExecuteOpenAIToolCall(b *testing.B) {
 			Arguments: `{"path": "."}`,
 		},
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = registry.ExecuteOpenAIToolCall(toolCall)
@@ -66,7 +66,7 @@ func BenchmarkExecuteMultipleTools(b *testing.B) {
 	registry := NewRegistry()
 	registry.SetAllowed("ls", true)
 	registry.SetAllowed("get_current_datetime", true)
-	
+
 	toolCalls := []openai.ToolCall{
 		{
 			ID:   "call1",
@@ -85,7 +85,7 @@ func BenchmarkExecuteMultipleTools(b *testing.B) {
 			},
 		},
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, tc := range toolCalls {
@@ -104,13 +104,13 @@ func BenchmarkFormatToolResult(b *testing.B) {
 			Arguments: `{"path": "."}`,
 		},
 	}
-	
+
 	result := &ToolResult{
 		Function: "ls",
 		Result:   "file1.txt\nfile2.txt\nfile3.txt",
 		Error:    nil,
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = FormatToolResult(toolCall, result, false)
@@ -121,7 +121,7 @@ func BenchmarkFormatToolResult(b *testing.B) {
 func BenchmarkConcurrentToolExecution(b *testing.B) {
 	registry := NewRegistry()
 	registry.SetAllowed("get_current_datetime", true)
-	
+
 	toolCall := openai.ToolCall{
 		ID:   "test-call",
 		Type: openai.ToolTypeFunction,
@@ -130,7 +130,7 @@ func BenchmarkConcurrentToolExecution(b *testing.B) {
 			Arguments: `{}`,
 		},
 	}
-	
+
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -142,16 +142,18 @@ func BenchmarkConcurrentToolExecution(b *testing.B) {
 // BenchmarkPolicyApplicationBench measures policy application overhead
 func BenchmarkPolicyApplicationBench(b *testing.B) {
 	policy := Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"tool1": true,
 			"tool2": true,
-			"tool3": false,
 		},
-		RequireConfirmation: map[string]bool{
+		Ask: map[string]bool{
 			"tool2": true,
 		},
+		Deny: map[string]bool{
+			"tool3": true,
+		},
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		registry := NewRegistry()
@@ -162,7 +164,7 @@ func BenchmarkPolicyApplicationBench(b *testing.B) {
 // BenchmarkOpenAIToolsConversion measures OpenAI tools conversion
 func BenchmarkOpenAIToolsConversion(b *testing.B) {
 	registry := NewRegistry()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = registry.OpenAITools()

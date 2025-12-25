@@ -41,10 +41,10 @@ Tool calls execute immediately, inject results into history, continue streaming.
 
 Per tool:
 1. **Allow** - execute without asking
-2. **Require confirmation** - ask first
-3. **Block** - reject (default)
+2. **Ask** - prompt before executing
+3. **Deny** - reject
 
-Default: read-only allowed (`ls` `read_file` `get_current_datetime`), writes need confirmation (`write_file` `execute_shell_command`).
+Default: ask for all tools unless configured otherwise.
 
 ## History
 

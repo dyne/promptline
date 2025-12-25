@@ -36,10 +36,12 @@ type Config struct {
 	HistoryMaxMessages int          `json:"history_max_messages,omitempty"`
 }
 
-// ToolSettings describes tool allow/confirm lists.
+// ToolSettings describes tool allow/ask/deny lists.
 type ToolSettings struct {
 	Allow               []string `json:"allow"`
-	RequireConfirmation []string `json:"require_confirmation"`
+	Ask                 []string `json:"ask,omitempty"`
+	Deny                []string `json:"deny,omitempty"`
+	RequireConfirmation []string `json:"require_confirmation,omitempty"`
 }
 
 // DefaultConfig returns a config with default values
@@ -115,14 +117,25 @@ func (c *Config) ToolPolicy() tools.Policy {
 		for _, name := range c.Tools.Allow {
 			allow[name] = true
 		}
-		policy.Allowed = allow
+		policy.Allow = allow
 	}
-	if c.Tools.RequireConfirmation != nil {
-		confirm := make(map[string]bool, len(c.Tools.RequireConfirmation))
-		for _, name := range c.Tools.RequireConfirmation {
-			confirm[name] = true
+	askList := append([]string{}, c.Tools.Ask...)
+	if len(c.Tools.RequireConfirmation) > 0 {
+		askList = append(askList, c.Tools.RequireConfirmation...)
+	}
+	if askList != nil {
+		ask := make(map[string]bool, len(askList))
+		for _, name := range askList {
+			ask[name] = true
 		}
-		policy.RequireConfirmation = confirm
+		policy.Ask = ask
+	}
+	if c.Tools.Deny != nil {
+		deny := make(map[string]bool, len(c.Tools.Deny))
+		for _, name := range c.Tools.Deny {
+			deny[name] = true
+		}
+		policy.Deny = deny
 	}
 	return policy
 }
@@ -181,11 +194,29 @@ func (c *Config) Validate(registry *tools.Registry) []ValidationWarning {
 			}
 		}
 
+		for _, toolName := range c.Tools.Ask {
+			if !registeredTools[toolName] {
+				warnings = append(warnings, ValidationWarning{
+					Field:   "tools.ask",
+					Message: fmt.Sprintf("tool %q in ask list is not registered", toolName),
+				})
+			}
+		}
+
 		for _, toolName := range c.Tools.RequireConfirmation {
 			if !registeredTools[toolName] {
 				warnings = append(warnings, ValidationWarning{
 					Field:   "tools.require_confirmation",
 					Message: fmt.Sprintf("tool %q in require_confirmation list is not registered", toolName),
+				})
+			}
+		}
+
+		for _, toolName := range c.Tools.Deny {
+			if !registeredTools[toolName] {
+				warnings = append(warnings, ValidationWarning{
+					Field:   "tools.deny",
+					Message: fmt.Sprintf("tool %q in deny list is not registered", toolName),
 				})
 			}
 		}

@@ -29,6 +29,9 @@ var (
 	// ErrToolRequiresConfirmation indicates a tool requires confirmation before running.
 	ErrToolRequiresConfirmation = errors.New("tool requires confirmation")
 
+	// ErrToolDeniedByUser indicates the user denied executing a tool.
+	ErrToolDeniedByUser = errors.New("tool execution denied by user")
+
 	// ErrToolNotFound indicates the requested tool doesn't exist in the registry.
 	ErrToolNotFound = errors.New("tool not found")
 

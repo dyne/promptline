@@ -36,6 +36,9 @@ func TestExecuteToolCallSuccess(t *testing.T) {
 	}
 
 	session := chat.NewSession(cfg)
+	session.ToolApprover = func(call openai.ToolCall) (bool, error) {
+		return true, nil
+	}
 	logger := zerolog.Nop()
 	colors := testColorScheme()
 
@@ -49,10 +52,7 @@ func TestExecuteToolCallSuccess(t *testing.T) {
 	}
 
 	// Should not panic
-	success := executeToolCall(session, toolCall, colors, logger)
-	if !success {
-		t.Fatalf("expected tool call success")
-	}
+	executeToolCall(session, toolCall, colors, logger)
 
 	// Verify tool result was added to history
 	history := session.GetHistory()
@@ -68,6 +68,9 @@ func TestExecuteToolCallWithArgs(t *testing.T) {
 	}
 
 	session := chat.NewSession(cfg)
+	session.ToolApprover = func(call openai.ToolCall) (bool, error) {
+		return true, nil
+	}
 	logger := zerolog.Nop()
 	colors := testColorScheme()
 
@@ -80,8 +83,15 @@ func TestExecuteToolCallWithArgs(t *testing.T) {
 		},
 	}
 
-	if executeToolCall(session, toolCall, colors, logger) {
-		t.Fatalf("expected failure for nonexistent tool")
+	executeToolCall(session, toolCall, colors, logger)
+
+	history := session.GetHistory()
+	if len(history) == 0 {
+		t.Fatal("expected tool result in history")
+	}
+	last := history[len(history)-1]
+	if !strings.Contains(last.Content, "not found") && !strings.Contains(last.Content, "unknown tool") {
+		t.Fatalf("expected not found error, got: %s", last.Content)
 	}
 }
 
@@ -92,6 +102,9 @@ func TestExecuteToolCallLsSuccess(t *testing.T) {
 	}
 
 	session := chat.NewSession(cfg)
+	session.ToolApprover = func(call openai.ToolCall) (bool, error) {
+		return true, nil
+	}
 	logger := zerolog.Nop()
 	colors := testColorScheme()
 
@@ -105,9 +118,7 @@ func TestExecuteToolCallLsSuccess(t *testing.T) {
 		},
 	}
 
-	if !executeToolCall(session, toolCall, colors, logger) {
-		t.Fatalf("expected success for allowed ls tool")
-	}
+	executeToolCall(session, toolCall, colors, logger)
 
 	history := session.GetHistory()
 	if len(history) == 0 {
@@ -122,6 +133,9 @@ func TestExecuteToolCallLongResult(t *testing.T) {
 	}
 
 	session := chat.NewSession(cfg)
+	session.ToolApprover = func(call openai.ToolCall) (bool, error) {
+		return true, nil
+	}
 	logger := zerolog.Nop()
 	colors := testColorScheme()
 
@@ -244,6 +258,9 @@ func TestExecuteToolCallFillsMissingPathFromHistory(t *testing.T) {
 		Model:  "gpt-4o-mini",
 	}
 	session := chat.NewSession(cfg)
+	session.ToolApprover = func(call openai.ToolCall) (bool, error) {
+		return true, nil
+	}
 	session.AddMessage("user", "read config.json")
 
 	logger := zerolog.Nop()
@@ -291,6 +308,9 @@ func TestExecuteToolCallFillsPathFromAssistantMention(t *testing.T) {
 		Model:  "gpt-4o-mini",
 	}
 	session := chat.NewSession(cfg)
+	session.ToolApprover = func(call openai.ToolCall) (bool, error) {
+		return true, nil
+	}
 	session.AddMessage("user", "can you see the config")
 	session.AddAssistantMessage("Yes, I can see `config.json`.", nil)
 

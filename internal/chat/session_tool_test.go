@@ -17,6 +17,8 @@
 package chat
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sashabaranov/go-openai"
@@ -169,6 +171,62 @@ func TestToolCallMessageSequence(t *testing.T) {
 	}
 }
 
+func TestExecuteToolCallWithApprovalDeniedByUser(t *testing.T) {
+	cfg := &config.Config{
+		APIKey: "test-key",
+		Model:  "test-model",
+		Tools: config.ToolSettings{
+			Ask: []string{"get_current_datetime"},
+		},
+	}
+	session := NewSession(cfg)
+	session.ToolApprover = func(call openai.ToolCall) (bool, error) {
+		return false, nil
+	}
+
+	toolCall := openai.ToolCall{
+		ID:   "call-approve-1",
+		Type: openai.ToolTypeFunction,
+		Function: openai.FunctionCall{
+			Name:      "get_current_datetime",
+			Arguments: "{}",
+		},
+	}
+
+	result := session.ExecuteToolCallWithApproval(toolCall)
+	if !errors.Is(result.Error, tools.ErrToolDeniedByUser) {
+		t.Fatalf("expected ErrToolDeniedByUser, got: %v", result.Error)
+	}
+	if !strings.Contains(result.Result, "User denied execution") {
+		t.Errorf("expected denial message, got: %s", result.Result)
+	}
+}
+
+func TestExecuteToolCallWithApprovalAllowed(t *testing.T) {
+	cfg := &config.Config{
+		APIKey: "test-key",
+		Model:  "test-model",
+		Tools: config.ToolSettings{
+			Allow: []string{"get_current_datetime"},
+		},
+	}
+	session := NewSession(cfg)
+
+	toolCall := openai.ToolCall{
+		ID:   "call-approve-2",
+		Type: openai.ToolTypeFunction,
+		Function: openai.FunctionCall{
+			Name:      "get_current_datetime",
+			Arguments: "{}",
+		},
+	}
+
+	result := session.ExecuteToolCallWithApproval(toolCall)
+	if result.Error != nil {
+		t.Fatalf("expected success, got: %v", result.Error)
+	}
+}
+
 // TestMultipleToolCalls verifies handling of multiple tool calls
 func TestMultipleToolCalls(t *testing.T) {
 	cfg := &config.Config{
@@ -261,7 +319,7 @@ func TestToolResultsInHistory(t *testing.T) {
 	})
 
 	history := session.GetHistory()
-	
+
 	// Should have user, assistant, and tool messages
 	if len(history) != 3 {
 		t.Fatalf("expected 3 messages in history, got %d", len(history))

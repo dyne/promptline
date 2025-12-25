@@ -120,7 +120,7 @@ func registerBuiltInTools(r *Registry) {
 const (
 	maxCommandLength = 10000
 	maxPathLength    = 4096
-	commandTimeout   = 30 * time.Second
+	commandTimeout   = 5 * time.Second
 )
 
 // Dangerous path patterns that should be blocked

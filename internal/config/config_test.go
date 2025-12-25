@@ -89,11 +89,14 @@ func TestToolPolicyEmpty(t *testing.T) {
 
 	// Empty config tools should return empty maps (not nil, but empty)
 	// The tool registry itself applies defaults via NewRegistry()
-	if len(policy.Allowed) != 0 {
-		t.Error("expected empty Allowed map when no tools configured")
+	if len(policy.Allow) != 0 {
+		t.Error("expected empty Allow map when no tools configured")
 	}
-	if len(policy.RequireConfirmation) != 0 {
-		t.Error("expected empty RequireConfirmation map when no tools configured")
+	if len(policy.Ask) != 0 {
+		t.Error("expected empty Ask map when no tools configured")
+	}
+	if len(policy.Deny) != 0 {
+		t.Error("expected empty Deny map when no tools configured")
 	}
 }
 
@@ -102,7 +105,9 @@ func TestCustomToolPolicy(t *testing.T) {
 		"api_key": "test-key",
 		"tools": {
 			"allow": ["custom_tool"],
-			"require_confirmation": ["another_tool"]
+			"ask": ["another_tool"],
+			"deny": ["blocked_tool"],
+			"require_confirmation": ["legacy_tool"]
 		}
 	}`
 	path := writeTempConfig(t, content)
@@ -114,13 +119,21 @@ func TestCustomToolPolicy(t *testing.T) {
 	policy := cfg.ToolPolicy()
 
 	// Custom allow list
-	if !policy.Allowed["custom_tool"] {
+	if !policy.Allow["custom_tool"] {
 		t.Error("expected custom_tool to be in allow list")
 	}
 
-	// Custom confirmation list
-	if !policy.RequireConfirmation["another_tool"] {
-		t.Error("expected another_tool to be in confirmation list")
+	// Custom ask list
+	if !policy.Ask["another_tool"] {
+		t.Error("expected another_tool to be in ask list")
+	}
+	if !policy.Ask["legacy_tool"] {
+		t.Error("expected legacy_tool to be in ask list from require_confirmation")
+	}
+
+	// Custom deny list
+	if !policy.Deny["blocked_tool"] {
+		t.Error("expected blocked_tool to be in deny list")
 	}
 }
 

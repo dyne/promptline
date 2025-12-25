@@ -53,7 +53,11 @@ func tempDirInCwd(t *testing.T) (string, string) {
 }
 
 func TestExecuteListDirectory(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"ls": true,
+		},
+	})
 	tempDir := t.TempDir()
 
 	// create a file to ensure output is non-empty
@@ -78,7 +82,11 @@ func TestExecuteListDirectory(t *testing.T) {
 }
 
 func TestListDirectoryTableDriven(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"ls": true,
+		},
+	})
 
 	tests := []struct {
 		name         string
@@ -224,7 +232,11 @@ func TestExecuteUnknownTool(t *testing.T) {
 }
 
 func TestExecuteOpenAIToolCall(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"ls": true,
+		},
+	})
 	tempDir := t.TempDir()
 
 	args := `{"path": "` + tempDir + `"}`
@@ -279,7 +291,11 @@ func TestExecuteOpenAIToolCallMissingName(t *testing.T) {
 }
 
 func TestExecuteGetCurrentDatetime(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"get_current_datetime": true,
+		},
+	})
 	result := registry.Execute("get_current_datetime", map[string]interface{}{})
 	if result.Error != nil {
 		t.Fatalf("expected no error, got: %v", result.Error)
@@ -294,14 +310,14 @@ func TestExecuteShellCommandBlockedByDefault(t *testing.T) {
 	result := registry.Execute("execute_shell_command", map[string]interface{}{
 		"command": "printf 'hello'",
 	})
-	if !errors.Is(result.Error, ErrToolNotAllowed) {
-		t.Fatalf("expected ErrToolNotAllowed, got: %v", result.Error)
+	if !errors.Is(result.Error, ErrToolRequiresConfirmation) {
+		t.Fatalf("expected ErrToolRequiresConfirmation, got: %v", result.Error)
 	}
 }
 
 func TestExecuteShellCommandRequiresConfirmation(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Ask: map[string]bool{
 			"execute_shell_command": true,
 		},
 	})
@@ -315,7 +331,7 @@ func TestExecuteShellCommandRequiresConfirmation(t *testing.T) {
 
 func TestExecuteShellCommandWithForce(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Ask: map[string]bool{
 			"execute_shell_command": true,
 		},
 	})
@@ -332,12 +348,9 @@ func TestExecuteShellCommandWithForce(t *testing.T) {
 
 func TestExecuteWriteAndReadFile(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"write_file": true,
 			"read_file":  true,
-		},
-		RequireConfirmation: map[string]bool{
-			"write_file": false,
 		},
 	})
 	_, relDir := tempDirInCwd(t)
@@ -388,42 +401,42 @@ func TestGetToolNames(t *testing.T) {
 
 func TestGetPermission(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"read_file": true,
 		},
-		RequireConfirmation: map[string]bool{
+		Ask: map[string]bool{
 			"write_file": true,
 		},
 	})
 
 	// Allowed tool
 	perm := registry.GetPermission("read_file")
-	if !perm.Allowed {
-		t.Error("expected read_file to be allowed")
+	if perm.Level != PermissionAllow {
+		t.Errorf("expected read_file to be allow, got %s", perm.Level)
 	}
 
 	// Tool with confirmation
 	perm = registry.GetPermission("write_file")
-	if !perm.RequireConfirmation {
-		t.Error("expected write_file to require confirmation")
+	if perm.Level != PermissionAsk {
+		t.Errorf("expected write_file to be ask, got %s", perm.Level)
 	}
 
 	// Unknown tool
 	perm = registry.GetPermission("unknown_tool")
-	if perm.Allowed {
-		t.Error("expected unknown tool to not be allowed")
+	if perm.Level != PermissionAsk {
+		t.Errorf("expected unknown tool to default to ask, got %s", perm.Level)
 	}
 }
 
 func TestAllowTool(t *testing.T) {
 	registry := NewRegistry()
 
-	// Initially blocked
+	// Initially requires confirmation
 	result := registry.Execute("execute_shell_command", map[string]interface{}{
 		"command": "echo test",
 	})
-	if !errors.Is(result.Error, ErrToolNotAllowed) {
-		t.Fatalf("expected ErrToolNotAllowed, got: %v", result.Error)
+	if !errors.Is(result.Error, ErrToolRequiresConfirmation) {
+		t.Fatalf("expected ErrToolRequiresConfirmation, got: %v", result.Error)
 	}
 
 	// Allow the tool without confirmation
@@ -489,7 +502,11 @@ func TestOpenAITools(t *testing.T) {
 }
 
 func TestReadFileNonExistent(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"read_file": true,
+		},
+	})
 	result := registry.Execute("read_file", map[string]interface{}{
 		"path": "/nonexistent/file.txt",
 	})
@@ -501,11 +518,8 @@ func TestReadFileNonExistent(t *testing.T) {
 
 func TestWriteFileInvalidPath(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"write_file": true,
-		},
-		RequireConfirmation: map[string]bool{
-			"write_file": false,
 		},
 	})
 
@@ -521,7 +535,7 @@ func TestWriteFileInvalidPath(t *testing.T) {
 
 func TestReadFileRejectsAbsolutePath(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"read_file": true,
 		},
 	})
@@ -536,11 +550,8 @@ func TestReadFileRejectsAbsolutePath(t *testing.T) {
 
 func TestWriteFileRejectsAbsolutePath(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"write_file": true,
-		},
-		RequireConfirmation: map[string]bool{
-			"write_file": false,
 		},
 	})
 
@@ -555,7 +566,7 @@ func TestWriteFileRejectsAbsolutePath(t *testing.T) {
 
 func TestReadFileRejectsBinaryContent(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"read_file": true,
 		},
 	})
@@ -578,11 +589,8 @@ func TestReadFileRejectsBinaryContent(t *testing.T) {
 
 func TestWriteFileRejectsBinaryContent(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"write_file": true,
-		},
-		RequireConfirmation: map[string]bool{
-			"write_file": false,
 		},
 	})
 
@@ -600,7 +608,7 @@ func TestWriteFileRejectsBinaryContent(t *testing.T) {
 
 func TestReadFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"read_file": true,
 		},
 	})
@@ -627,11 +635,8 @@ func TestReadFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
 
 func TestWriteFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"write_file": true,
-		},
-		RequireConfirmation: map[string]bool{
-			"write_file": false,
 		},
 	})
 
@@ -654,7 +659,7 @@ func TestWriteFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
 
 func TestReadFileFlexiblePathParsing(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"read_file": true,
 		},
 	})
@@ -694,11 +699,8 @@ func TestReadFileFlexiblePathParsing(t *testing.T) {
 
 func TestExecuteShellCommandOutput(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"execute_shell_command": true,
-		},
-		RequireConfirmation: map[string]bool{
-			"execute_shell_command": false,
 		},
 	})
 
@@ -716,11 +718,8 @@ func TestExecuteShellCommandOutput(t *testing.T) {
 
 func TestExecuteShellCommandError(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
-		Allowed: map[string]bool{
+		Allow: map[string]bool{
 			"execute_shell_command": true,
-		},
-		RequireConfirmation: map[string]bool{
-			"execute_shell_command": false,
 		},
 	})
 
@@ -734,7 +733,11 @@ func TestExecuteShellCommandError(t *testing.T) {
 }
 
 func TestListDirectoryEmpty(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"ls": true,
+		},
+	})
 	tempDir := t.TempDir()
 
 	result := registry.Execute("ls", map[string]interface{}{
@@ -810,24 +813,34 @@ func TestValidatePath(t *testing.T) {
 }
 
 func TestExecuteShellCommandWithTimeout(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"execute_shell_command": true,
+		},
+	})
 
 	// Test that long-running commands timeout
 	result := registry.Execute("execute_shell_command", map[string]interface{}{
-		"command": "sleep 35",
+		"command": "sleep 6",
 	})
 
 	if result.Error == nil {
 		t.Fatal("expected timeout error for long-running command")
 	}
 
-	if !strings.Contains(result.Error.Error(), "timeout") && !strings.Contains(result.Error.Error(), "blocked") {
+	if !strings.Contains(result.Error.Error(), "timeout") &&
+		!strings.Contains(result.Error.Error(), "timed out") &&
+		!strings.Contains(result.Error.Error(), "blocked") {
 		t.Errorf("expected timeout or blocked error, got: %v", result.Error)
 	}
 }
 
 func TestExecuteShellCommandSecurityBlocks(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"execute_shell_command": true,
+		},
+	})
 
 	tests := []struct {
 		name    string
@@ -852,7 +865,11 @@ func TestExecuteShellCommandSecurityBlocks(t *testing.T) {
 }
 
 func TestReadFileSecurityBlocks(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"read_file": true,
+		},
+	})
 
 	tests := []struct {
 		name string
@@ -877,7 +894,11 @@ func TestReadFileSecurityBlocks(t *testing.T) {
 }
 
 func TestWriteFileSecurityBlocks(t *testing.T) {
-	registry := NewRegistry()
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"write_file": true,
+		},
+	})
 
 	tests := []struct {
 		name string
@@ -1028,6 +1049,7 @@ func TestFormatToolResult(t *testing.T) {
 // Test concurrent tool execution
 func TestConcurrentToolExecution(t *testing.T) {
 	registry := NewRegistry()
+	registry.SetAllowed("get_current_datetime", true)
 	const numGoroutines = 50
 
 	// Test concurrent reads (should be safe)
@@ -1098,8 +1120,9 @@ func TestPolicyApplicationEdgeCases(t *testing.T) {
 	t.Run("nil policy maps", func(t *testing.T) {
 		registry := NewRegistry()
 		registry.applyPolicy(Policy{
-			Allowed:             nil,
-			RequireConfirmation: nil,
+			Allow: nil,
+			Ask:   nil,
+			Deny:  nil,
 		})
 		// Should handle nil maps gracefully
 	})
@@ -1107,10 +1130,10 @@ func TestPolicyApplicationEdgeCases(t *testing.T) {
 	t.Run("policy with unknown tool names", func(t *testing.T) {
 		registry := NewRegistry()
 		policy := Policy{
-			Allowed: map[string]bool{
+			Allow: map[string]bool{
 				"unknown_tool_xyz": true,
 			},
-			RequireConfirmation: map[string]bool{
+			Ask: map[string]bool{
 				"another_unknown": true,
 			},
 		}
@@ -1123,7 +1146,7 @@ func TestPolicyApplicationEdgeCases(t *testing.T) {
 
 		// First policy: allow read_file
 		policy1 := Policy{
-			Allowed: map[string]bool{
+			Allow: map[string]bool{
 				"read_file": true,
 			},
 		}
@@ -1131,15 +1154,15 @@ func TestPolicyApplicationEdgeCases(t *testing.T) {
 
 		// Second policy: block read_file
 		policy2 := Policy{
-			Allowed: map[string]bool{
-				"read_file": false,
+			Deny: map[string]bool{
+				"read_file": true,
 			},
 		}
 		registry.applyPolicy(policy2)
 
 		// Second policy should override
 		perm := registry.GetPermission("read_file")
-		if perm.Allowed {
+		if perm.Level != PermissionDeny {
 			t.Error("expected second policy to override first policy")
 		}
 	})
@@ -1147,9 +1170,9 @@ func TestPolicyApplicationEdgeCases(t *testing.T) {
 
 // Test permission denied scenarios in detail
 func TestPermissionDeniedScenarios(t *testing.T) {
-	t.Run("tool not in allow list", func(t *testing.T) {
+	t.Run("tool defaults to ask when not configured", func(t *testing.T) {
 		registry := NewRegistryWithPolicy(Policy{
-			Allowed: map[string]bool{
+			Allow: map[string]bool{
 				"read_file": true,
 			},
 		})
@@ -1159,8 +1182,8 @@ func TestPermissionDeniedScenarios(t *testing.T) {
 			"content": "test",
 		})
 
-		if !errors.Is(result.Error, ErrToolNotAllowed) {
-			t.Errorf("expected ErrToolNotAllowed, got: %v", result.Error)
+		if !errors.Is(result.Error, ErrToolRequiresConfirmation) {
+			t.Errorf("expected ErrToolRequiresConfirmation, got: %v", result.Error)
 		}
 	})
 
@@ -1202,10 +1225,7 @@ func TestPermissionDeniedScenarios(t *testing.T) {
 func TestConfirmationRequirements(t *testing.T) {
 	t.Run("confirmation blocks execution", func(t *testing.T) {
 		registry := NewRegistryWithPolicy(Policy{
-			Allowed: map[string]bool{
-				"write_file": true,
-			},
-			RequireConfirmation: map[string]bool{
+			Ask: map[string]bool{
 				"write_file": true,
 			},
 		})
@@ -1222,10 +1242,7 @@ func TestConfirmationRequirements(t *testing.T) {
 
 	t.Run("force bypasses confirmation", func(t *testing.T) {
 		registry := NewRegistryWithPolicy(Policy{
-			Allowed: map[string]bool{
-				"write_file": true,
-			},
-			RequireConfirmation: map[string]bool{
+			Ask: map[string]bool{
 				"write_file": true,
 			},
 		})
@@ -1245,26 +1262,29 @@ func TestConfirmationRequirements(t *testing.T) {
 	t.Run("toggle confirmation requirement", func(t *testing.T) {
 		registry := NewRegistry()
 
-		// Initially no confirmation required for read_file
+		// Initially confirmation required for read_file (default ask)
 		perm := registry.GetPermission("read_file")
-		initialRequire := perm.RequireConfirmation
-
-		// Set confirmation requirement
-		registry.SetRequireConfirmation("read_file", true)
-		perm = registry.GetPermission("read_file")
-		if !perm.RequireConfirmation {
-			t.Error("expected confirmation to be required after setting")
+		initialLevel := perm.Level
+		if initialLevel != PermissionAsk {
+			t.Errorf("expected default permission to be ask, got: %s", initialLevel)
 		}
 
 		// Remove confirmation requirement
 		registry.SetRequireConfirmation("read_file", false)
 		perm = registry.GetPermission("read_file")
-		if perm.RequireConfirmation {
-			t.Error("expected confirmation to not be required after unsetting")
+		if perm.Level != PermissionAllow {
+			t.Errorf("expected permission to be allow after unsetting confirmation, got: %s", perm.Level)
+		}
+
+		// Restore confirmation requirement
+		registry.SetRequireConfirmation("read_file", true)
+		perm = registry.GetPermission("read_file")
+		if perm.Level != PermissionAsk {
+			t.Errorf("expected confirmation to be required after setting, got: %s", perm.Level)
 		}
 
 		// Should match initial state
-		if initialRequire != perm.RequireConfirmation {
+		if initialLevel != perm.Level {
 			t.Error("expected to return to initial state")
 		}
 	})
@@ -1273,6 +1293,7 @@ func TestConfirmationRequirements(t *testing.T) {
 // Benchmarks for tool registry operations
 func BenchmarkRegistryExecute(b *testing.B) {
 	registry := NewRegistry()
+	registry.SetAllowed("get_current_datetime", true)
 	args := map[string]interface{}{}
 
 	b.ResetTimer()
@@ -1301,6 +1322,7 @@ func BenchmarkRegistryOpenAITools(b *testing.B) {
 
 func BenchmarkConcurrentExecute(b *testing.B) {
 	registry := NewRegistry()
+	registry.SetAllowed("get_current_datetime", true)
 	args := map[string]interface{}{}
 
 	b.ResetTimer()

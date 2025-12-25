@@ -25,11 +25,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-// Default allow/confirm lists for built-in tools.
-var (
-	DefaultAllowList   = []string{"get_current_datetime", "read_file", "ls"}
-	DefaultConfirmList = []string{"execute_shell_command", "write_file"}
-)
+// Default permissions are ask unless explicitly set by policy.
 
 // ExecutorFunc is the function signature for tool implementations
 type ExecutorFunc func(args map[string]interface{}) (string, error)
@@ -50,15 +46,24 @@ type ToolResult struct {
 }
 
 // Permission describes the policy for a tool.
+type PermissionLevel string
+
+const (
+	PermissionAllow PermissionLevel = "allow"
+	PermissionAsk   PermissionLevel = "ask"
+	PermissionDeny  PermissionLevel = "deny"
+)
+
+// Permission describes the policy for a tool.
 type Permission struct {
-	Allowed             bool
-	RequireConfirmation bool
+	Level PermissionLevel
 }
 
-// Policy configures which tools are allowed and which require confirmation.
+// Policy configures which tools are allowed, asked, or denied.
 type Policy struct {
-	Allowed             map[string]bool
-	RequireConfirmation map[string]bool
+	Allow map[string]bool
+	Ask   map[string]bool
+	Deny  map[string]bool
 }
 
 // ExecuteOptions controls how tool execution is handled.
@@ -106,8 +111,8 @@ func (r *Registry) RegisterTool(tool *Tool) {
 	defer r.mu.Unlock()
 	r.tools[tool.Name] = tool
 	if _, ok := r.permissions[tool.Name]; !ok {
-		// Unknown tools default to blocked + confirmation.
-		r.permissions[tool.Name] = Permission{Allowed: false, RequireConfirmation: true}
+		// Default to ask unless configured otherwise.
+		r.permissions[tool.Name] = Permission{Level: PermissionAsk}
 	}
 }
 
@@ -118,36 +123,36 @@ func (r *Registry) applyPolicy(policy Policy) {
 	for name := range r.tools {
 		perm, ok := r.permissions[name]
 		if !ok {
-			perm = Permission{Allowed: false, RequireConfirmation: true}
+			perm = Permission{Level: PermissionAsk}
 		}
-		if policy.Allowed != nil {
-			perm.Allowed = policy.Allowed[name]
-		}
-		if policy.RequireConfirmation != nil {
-			perm.RequireConfirmation = policy.RequireConfirmation[name]
-		}
+		perm.Level = applyPolicyLevel(perm.Level, name, policy)
 		r.permissions[name] = perm
 	}
 }
 
-// DefaultPolicy returns the default allow/confirm policy.
+// DefaultPolicy returns the default allow/ask/deny policy.
 func DefaultPolicy() Policy {
-	return PolicyFromLists(DefaultAllowList, DefaultConfirmList)
+	return PolicyFromLists(nil, nil, nil)
 }
 
-// PolicyFromLists builds a policy from allow/confirmation lists.
-func PolicyFromLists(allow, confirm []string) Policy {
+// PolicyFromLists builds a policy from allow/ask/deny lists.
+func PolicyFromLists(allow, ask, deny []string) Policy {
 	allowMap := make(map[string]bool, len(allow))
 	for _, name := range allow {
 		allowMap[name] = true
 	}
-	confirmMap := make(map[string]bool, len(confirm))
-	for _, name := range confirm {
-		confirmMap[name] = true
+	askMap := make(map[string]bool, len(ask))
+	for _, name := range ask {
+		askMap[name] = true
+	}
+	denyMap := make(map[string]bool, len(deny))
+	for _, name := range deny {
+		denyMap[name] = true
 	}
 	return Policy{
-		Allowed:             allowMap,
-		RequireConfirmation: confirmMap,
+		Allow: allowMap,
+		Ask:   askMap,
+		Deny:  denyMap,
 	}
 }
 
@@ -211,14 +216,20 @@ func (r *Registry) ExecuteWithOptions(function string, args map[string]interface
 
 	if !opts.Force {
 		perm := r.getPermission(function)
-		if !perm.Allowed {
-			result.Error = fmt.Errorf("%w: %s", ErrToolNotAllowed, function)
-			result.Result = fmt.Sprintf("Tool '%s' is blocked by policy. Enable it to proceed.", function)
-			return result
-		}
-		if perm.RequireConfirmation {
+		switch perm.Level {
+		case PermissionAllow:
+			// Allowed with no prompt.
+		case PermissionAsk:
 			result.Error = fmt.Errorf("%w: %s", ErrToolRequiresConfirmation, function)
-			result.Result = fmt.Sprintf("Tool '%s' requires explicit approval before running.", function)
+			result.Result = fmt.Sprintf("Tool '%s' requires user approval before running.", function)
+			return result
+		case PermissionDeny:
+			result.Error = fmt.Errorf("%w: %s", ErrToolNotAllowed, function)
+			result.Result = fmt.Sprintf("Tool '%s' is denied by policy. Enable it to proceed.", function)
+			return result
+		default:
+			result.Error = fmt.Errorf("%w: %s", ErrToolRequiresConfirmation, function)
+			result.Result = fmt.Sprintf("Tool '%s' requires user approval before running.", function)
 			return result
 		}
 	}
@@ -261,8 +272,10 @@ func (r *Registry) AllowTool(name string, requireConfirmation bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	perm := r.permissions[name]
-	perm.Allowed = true
-	perm.RequireConfirmation = requireConfirmation
+	perm.Level = PermissionAllow
+	if requireConfirmation {
+		perm.Level = PermissionAsk
+	}
 	r.permissions[name] = perm
 }
 
@@ -271,7 +284,11 @@ func (r *Registry) SetAllowed(name string, allowed bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	perm := r.permissions[name]
-	perm.Allowed = allowed
+	if allowed {
+		perm.Level = PermissionAllow
+	} else {
+		perm.Level = PermissionDeny
+	}
 	r.permissions[name] = perm
 }
 
@@ -280,7 +297,11 @@ func (r *Registry) SetRequireConfirmation(name string, require bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	perm := r.permissions[name]
-	perm.RequireConfirmation = require
+	if require {
+		perm.Level = PermissionAsk
+	} else {
+		perm.Level = PermissionAllow
+	}
 	r.permissions[name] = perm
 }
 
@@ -304,41 +325,53 @@ func (r *Registry) getPermission(name string) Permission {
 	if perm, ok := r.permissions[name]; ok {
 		return perm
 	}
-	// Default for unknown tools: blocked and requires confirmation.
-	return Permission{Allowed: false, RequireConfirmation: true}
+	// Default for unknown tools: ask.
+	return Permission{Level: PermissionAsk}
+}
+
+func applyPolicyLevel(current PermissionLevel, name string, policy Policy) PermissionLevel {
+	level := current
+	if policy.Deny != nil && policy.Deny[name] {
+		level = PermissionDeny
+	} else if policy.Ask != nil && policy.Ask[name] {
+		level = PermissionAsk
+	} else if policy.Allow != nil && policy.Allow[name] {
+		level = PermissionAllow
+	}
+	return level
 }
 
 // FormatToolResult creates a user-friendly display of tool execution
 func FormatToolResult(toolCall openai.ToolCall, result *ToolResult, truncate bool) string {
-var argsStr string
-if toolCall.Function.Arguments != "" {
-var args map[string]interface{}
-if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err == nil && len(args) > 0 {
-parts := make([]string, 0, len(args))
-for key, value := range args {
-parts = append(parts, fmt.Sprintf("%s=%v", key, value))
-}
-argsStr = strings.Join(parts, ", ")
-} else {
-argsStr = toolCall.Function.Arguments
-}
-}
+	var argsStr string
+	if toolCall.Function.Arguments != "" {
+		var args map[string]interface{}
+		if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err == nil && len(args) > 0 {
+			parts := make([]string, 0, len(args))
+			for key, value := range args {
+				parts = append(parts, fmt.Sprintf("%s=%v", key, value))
+			}
+			argsStr = strings.Join(parts, ", ")
+		} else {
+			argsStr = toolCall.Function.Arguments
+		}
+	}
 
-var sb strings.Builder
-if argsStr != "" {
-sb.WriteString(fmt.Sprintf("🔧 Executed: %s(%s)\n", toolCall.Function.Name, argsStr))
-} else {
-sb.WriteString(fmt.Sprintf("🔧 Executed: %s()\n", toolCall.Function.Name))
-}
+	var sb strings.Builder
+	if argsStr != "" {
+		sb.WriteString(fmt.Sprintf("🔧 Executed: %s(%s)\n", toolCall.Function.Name, argsStr))
+	} else {
+		sb.WriteString(fmt.Sprintf("🔧 Executed: %s()\n", toolCall.Function.Name))
+	}
 
-if result.Error != nil {
-sb.WriteString(fmt.Sprintf("❌ Error: %v\n", result.Error))
-} else {
-displayResult := result.Result
-if truncate && len(displayResult) > 200 {
-displayResult = displayResult[:200] + "..."
-}
-sb.WriteString(fmt.Sprintf("✓ Result:\n%s\n", displayResult))
-}
-return sb.String()
+	if result.Error != nil {
+		sb.WriteString(fmt.Sprintf("❌ Error: %v\n", result.Error))
+	} else {
+		displayResult := result.Result
+		if truncate && len(displayResult) > 200 {
+			displayResult = displayResult[:200] + "..."
+		}
+		sb.WriteString(fmt.Sprintf("✓ Result:\n%s\n", displayResult))
+	}
+	return sb.String()
 }

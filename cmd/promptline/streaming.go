@@ -91,15 +91,15 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 	if len(toolCallsToExecute) > 0 {
 		fmt.Println() // newline before tool execution
 
-		anySuccess := false
+		anyHandled := false
 		for _, event := range toolCallsToExecute {
 			if executeToolCall(session, event.ToolCall, colors, logger) {
-				anySuccess = true
+				anyHandled = true
 			}
 		}
 
-		// Continue conversation with tool results (recursive call) only if at least one succeeded
-		if anySuccess {
+		// Continue conversation with tool results if any tool call was handled
+		if anyHandled {
 			fmt.Println()
 			colors.Assistant.Print("⟫ ")
 			streamConversation(session, "", false, colors, logger)
@@ -114,8 +114,8 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 	}
 }
 
-// executeToolCall executes a single tool call and adds result to session
-// Returns true when the tool succeeds.
+// executeToolCall executes a single tool call and adds result to session.
+// Returns true when the tool call is handled.
 func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *theme.ColorScheme, logger zerolog.Logger) bool {
 	toolName := toolCall.Function.Name
 	toolArgs := toolCall.Function.Arguments
@@ -135,8 +135,8 @@ func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *t
 		Str("tool_args", toolArgs).
 		Msg("Executing tool")
 
-	// Execute the tool
-	result := session.ToolRegistry.ExecuteOpenAIToolCall(*toolCall)
+	// Execute the tool with approval handling
+	result := session.ExecuteToolCallWithApproval(*toolCall)
 
 	// Add result to conversation history
 	session.AddToolResultMessage(*toolCall, result)
@@ -160,7 +160,6 @@ func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *t
 			Str("tool_name", toolName).
 			Err(result.Error).
 			Msg("Tool execution failed")
-		return false
 	} else {
 		logger.Debug().
 			Str("tool_name", toolName).

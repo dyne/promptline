@@ -46,9 +46,13 @@ type Session struct {
 	Messages          []openai.ChatCompletionMessage
 	ToolRegistry      *tools.Registry
 	BaseURL           string
+	ToolApprover      ToolApprovalFunc
 	mu                sync.Mutex
 	lastSavedMsgCount int // Track how many messages were last saved (protected by mu)
 }
+
+// ToolApprovalFunc determines whether a tool call is approved for execution.
+type ToolApprovalFunc func(call openai.ToolCall) (bool, error)
 
 var defaultSystemPrompt = mustLoadSystemPrompt()
 
@@ -200,11 +204,48 @@ func (s *Session) GetResponseWithContext(ctx context.Context, prompt string) (st
 
 		// Execute all tool calls
 		for _, toolCall := range response.ToolCalls {
-			result := s.ToolRegistry.ExecuteOpenAIToolCall(toolCall)
+			result := s.ExecuteToolCallWithApproval(toolCall)
 			s.AddToolResultMessage(toolCall, result)
 		}
 
 		// Loop continues to get next response with tool results
+	}
+}
+
+// ExecuteToolCallWithApproval evaluates tool permission and optionally asks for approval.
+func (s *Session) ExecuteToolCallWithApproval(call openai.ToolCall) *tools.ToolResult {
+	name := call.Function.Name
+	if name == "" {
+		name = "unknown_tool"
+	}
+	perm := s.ToolRegistry.GetPermission(name)
+	switch perm.Level {
+	case tools.PermissionAllow:
+		return s.ToolRegistry.ExecuteOpenAIToolCall(call)
+	case tools.PermissionDeny:
+		return deniedToolResult(name, fmt.Sprintf("Tool %q is denied by policy.", name), tools.ErrToolNotAllowed)
+	case tools.PermissionAsk:
+		if s.ToolApprover == nil {
+			return deniedToolResult(name, fmt.Sprintf("Tool %q requires user approval, but no approver is configured.", name), tools.ErrToolDeniedByUser)
+		}
+		approved, err := s.ToolApprover(call)
+		if err != nil {
+			return deniedToolResult(name, fmt.Sprintf("Tool %q approval failed: %v", name, err), tools.ErrToolDeniedByUser)
+		}
+		if !approved {
+			return deniedToolResult(name, fmt.Sprintf("User denied execution of tool %q.", name), tools.ErrToolDeniedByUser)
+		}
+		return s.ToolRegistry.ExecuteOpenAIToolCallWithOptions(call, tools.ExecuteOptions{Force: true})
+	default:
+		return deniedToolResult(name, fmt.Sprintf("Tool %q requires user approval.", name), tools.ErrToolDeniedByUser)
+	}
+}
+
+func deniedToolResult(name, message string, err error) *tools.ToolResult {
+	return &tools.ToolResult{
+		Function: name,
+		Result:   message,
+		Error:    err,
 	}
 }
 

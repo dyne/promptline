@@ -46,6 +46,7 @@ func runTUIMode(logger zerolog.Logger) {
 	// Create chat session
 	session := chat.NewSession(cfg)
 	defer session.Close()
+	session.ToolApprover = newToolApprover(colors)
 
 	// Load conversation history
 	if cfg.HistoryFile != "" {

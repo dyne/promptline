@@ -26,6 +26,7 @@ import (
 	"github.com/rs/zerolog"
 	"promptline/internal/chat"
 	"promptline/internal/theme"
+	"promptline/internal/tools"
 )
 
 // Command represents a slash command
@@ -141,20 +142,16 @@ func showPermissions(session *chat.Session, colors *theme.ColorScheme) {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, '\t', 0)
-	fmt.Fprintln(w, "Tool\tAllowed\tRequire Confirmation")
-	fmt.Fprintln(w, "────\t───────\t────────────────────")
+	fmt.Fprintln(w, "Tool\tPermission")
+	fmt.Fprintln(w, "────\t──────────")
 
 	for _, name := range toolNames {
 		perm := session.ToolRegistry.GetPermission(name)
-		allowed := "✓"
-		if !perm.Allowed {
-			allowed = "✗"
+		level := string(perm.Level)
+		if level == "" {
+			level = string(tools.PermissionAsk)
 		}
-		confirm := "No"
-		if perm.RequireConfirmation {
-			confirm = "Yes"
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", name, allowed, confirm)
+		fmt.Fprintf(w, "%s\t%s\n", name, level)
 	}
 	w.Flush()
 	fmt.Println()

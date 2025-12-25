@@ -9,6 +9,6 @@
   "history_max_messages": 100,
   "tools": {
     "allow": ["get_current_datetime", "read_file", "ls"],
-    "require_confirmation": ["write_file", "execute_shell_command"]
+    "ask": ["write_file", "execute_shell_command"]
   }
 }

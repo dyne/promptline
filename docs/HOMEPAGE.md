@@ -75,7 +75,7 @@ Clean separation: chat session, tool registry, config, theme.
   "model": "gpt-4o-mini",
   "tools": {
     "allow": ["read_file", "ls"],
-    "require_confirmation": ["write_file", "execute_shell_command"]
+    "ask": ["write_file", "execute_shell_command"]
   }
 }
 ```

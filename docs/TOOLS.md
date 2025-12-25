@@ -6,7 +6,7 @@ AI calls functions to interact with system. OpenAI tool-calling protocol.
 
 1. Advertise tools in request
 2. Model returns `tool_calls` with name + JSON args
-3. Check permission (allow/confirm/block)
+3. Check permission (allow/ask/deny)
 4. Execute or reject
 5. Inject result into conversation
 6. Stream final response
@@ -22,8 +22,7 @@ AI calls functions to interact with system. OpenAI tool-calling protocol.
 ## Permissions
 
 Default:
-- **Allow**: `get_current_datetime` `read_file` `ls`
-- **Confirm**: `write_file` `execute_shell_command`
+- **Ask**: all tools (prompt required)
 
 Override in `config.json`:
 
@@ -31,12 +30,13 @@ Override in `config.json`:
 {
   "tools": {
     "allow": ["ls", "read_file"],
-    "require_confirmation": ["write_file", "execute_shell_command"]
+    "ask": ["write_file"],
+    "deny": ["execute_shell_command"]
   }
 }
 ```
 
-New tools blocked by default.
+New tools are asked by default.
 
 ## Adding Tools
 
@@ -110,9 +110,9 @@ Tools that execute commands, access filesystem, network, modify data need:
 - Path restrictions
 - Command allowlists
 - Rate limiting
-- User confirmation
+- User approval
 
-Default policy blocks new tools and requires confirmation for writes.
+Default policy asks before running any tool unless configured otherwise.
 
 ## Example
 
