@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -2185,6 +2186,13 @@ func uptimeTool(ctx context.Context, args map[string]interface{}) (string, error
 	}
 	line, err := readProcFirstLine("/proc/uptime")
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			seconds, fallbackErr := uptimeFallbackSeconds()
+			if fallbackErr != nil {
+				return "", fallbackErr
+			}
+			return formatUptime(seconds), nil
+		}
 		return "", err
 	}
 	fields := strings.Fields(line)
@@ -2204,7 +2212,14 @@ func freeTool(ctx context.Context, args map[string]interface{}) (string, error) 
 	}
 	entries, err := readMemInfo()
 	if err != nil {
-		return "", err
+		if errors.Is(err, os.ErrNotExist) {
+			entries, err = readMemInfoFallback()
+			if err != nil {
+				return "", err
+			}
+		} else {
+			return "", err
+		}
 	}
 
 	keys := []string{"MemTotal", "MemFree", "MemAvailable", "Buffers", "Cached"}
@@ -2926,6 +2941,9 @@ func relativeDepth(base, path string) int {
 func listProcesses(ctx context.Context, filter string, limit int) ([]processInfo, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return listProcessesFallback(ctx, filter, limit)
+		}
 		return nil, err
 	}
 	var pids []int
@@ -2969,6 +2987,9 @@ func listProcesses(ctx context.Context, filter string, limit int) ([]processInfo
 func findProcessIDs(ctx context.Context, name string) ([]int, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return findProcessIDsFallback(ctx, name)
+		}
 		return nil, err
 	}
 	var pids []int
