@@ -23,15 +23,21 @@ import (
 
 func TestInitLogger(t *testing.T) {
 	// Test with debug mode off - just ensure it doesn't crash
-	_, err := initLogger(false, "")
+	_, closer, err := initLogger(false, "")
 	if err != nil {
 		t.Fatalf("initLogger failed: %v", err)
 	}
+	if closer != nil {
+		_ = closer.Close()
+	}
 
 	// Test with debug mode on
-	_, err = initLogger(true, "")
+	_, closer, err = initLogger(true, "")
 	if err != nil {
 		t.Fatalf("initLogger with debug failed: %v", err)
+	}
+	if closer != nil {
+		_ = closer.Close()
 	}
 
 	// If we got here without panicking, test passed
@@ -41,9 +47,14 @@ func TestInitLoggerWithFile(t *testing.T) {
 	tempDir := t.TempDir()
 	logFile := tempDir + "/test.log"
 
-	logger, err := initLogger(true, logFile)
+	logger, closer, err := initLogger(true, logFile)
 	if err != nil {
 		t.Fatalf("initLogger failed: %v", err)
+	}
+	if closer != nil {
+		defer func() {
+			_ = closer.Close()
+		}()
 	}
 
 	// Write a log message
@@ -67,9 +78,12 @@ func TestInitLoggerWithFile(t *testing.T) {
 
 func TestInitLoggerDefaultOutput(t *testing.T) {
 	// Without log file, should use io.Discard
-	logger, err := initLogger(false, "")
+	logger, closer, err := initLogger(false, "")
 	if err != nil {
 		t.Fatalf("initLogger failed: %v", err)
+	}
+	if closer != nil {
+		_ = closer.Close()
 	}
 
 	// Should not panic when logging

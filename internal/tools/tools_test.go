@@ -18,10 +18,12 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -241,7 +243,13 @@ func TestExecuteOpenAIToolCall(t *testing.T) {
 	})
 	tempDir := t.TempDir()
 
-	args := `{"path": "` + tempDir + `"}`
+	argsBytes, err := json.Marshal(map[string]interface{}{
+		"path": tempDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal args: %v", err)
+	}
+	args := string(argsBytes)
 	call := openai.ToolCall{
 		ID:   "call-1",
 		Type: openai.ToolTypeFunction,
@@ -984,6 +992,9 @@ func TestWriteFileRejectsBinaryContent(t *testing.T) {
 }
 
 func TestReadFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests require elevated privileges on windows")
+	}
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
 			"read_file": true,
@@ -1011,6 +1022,9 @@ func TestReadFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
 }
 
 func TestWriteFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink tests require elevated privileges on windows")
+	}
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
 			"write_file": true,
@@ -1106,12 +1120,40 @@ func TestValidatePath(t *testing.T) {
 		{"valid tmp path", "/tmp/test.txt", false},
 		{"empty path", "", true},
 		{"too long path", strings.Repeat("a", 4097), true},
-		{"etc directory", "/etc/config.conf", true},
-		{"sys directory", "/sys/devices/test", true},
-		{"proc directory", "/proc/cpuinfo", true},
-		{"dev directory", "/dev/null", true},
-		{"boot directory", "/boot/grub/grub.cfg", true},
-		{"root home", "/root/.bashrc", true},
+	}
+	if runtime.GOOS != "windows" {
+		tests = append(tests,
+			struct {
+				name    string
+				path    string
+				wantErr bool
+			}{"etc directory", "/etc/config.conf", true},
+			struct {
+				name    string
+				path    string
+				wantErr bool
+			}{"sys directory", "/sys/devices/test", true},
+			struct {
+				name    string
+				path    string
+				wantErr bool
+			}{"proc directory", "/proc/cpuinfo", true},
+			struct {
+				name    string
+				path    string
+				wantErr bool
+			}{"dev directory", "/dev/null", true},
+			struct {
+				name    string
+				path    string
+				wantErr bool
+			}{"boot directory", "/boot/grub/grub.cfg", true},
+			struct {
+				name    string
+				path    string
+				wantErr bool
+			}{"root home", "/root/.bashrc", true},
+		)
 	}
 
 	for _, tt := range tests {

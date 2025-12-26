@@ -34,7 +34,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"promptline/internal/paths"
@@ -2251,13 +2250,10 @@ func dfTool(ctx context.Context, args map[string]interface{}) (string, error) {
 		return "", err
 	}
 
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(resolved, &stat); err != nil {
+	size, free, available, err := diskUsage(resolved)
+	if err != nil {
 		return "", err
 	}
-	size := int64(stat.Blocks) * int64(stat.Bsize)
-	free := int64(stat.Bfree) * int64(stat.Bsize)
-	available := int64(stat.Bavail) * int64(stat.Bsize)
 	used := size - free
 	usePercent := 0.0
 	if size > 0 {
@@ -2569,7 +2565,7 @@ func mkfifoTool(ctx context.Context, args map[string]interface{}) (string, error
 		}
 		mode = uint32(parsed)
 	}
-	if err := syscall.Mkfifo(resolved, mode); err != nil {
+	if err := mkfifoPath(resolved, mode); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("Created fifo %s", resolved), nil
@@ -2743,7 +2739,7 @@ func chmodTool(ctx context.Context, args map[string]interface{}) (string, error)
 	if err := ensureOwnedByCurrentUser(resolved); err != nil {
 		return "", err
 	}
-	if err := os.Chmod(resolved, mode); err != nil {
+	if err := chmodPath(resolved, mode); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("Permissions updated for %s", resolved), nil
@@ -2863,29 +2859,6 @@ func parseModeString(mode string) (os.FileMode, error) {
 		return 0, fmt.Errorf("invalid mode: %v", err)
 	}
 	return os.FileMode(parsed), nil
-}
-
-func ensureOwnedByCurrentUser(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return fmt.Errorf("unable to determine file ownership")
-	}
-	current, err := user.Current()
-	if err != nil {
-		return err
-	}
-	uid, err := strconv.ParseUint(current.Uid, 10, 32)
-	if err != nil {
-		return fmt.Errorf("unable to parse current user id")
-	}
-	if stat.Uid != uint32(uid) {
-		return fmt.Errorf("refusing to change permissions on files not owned by current user")
-	}
-	return nil
 }
 
 func computeDiskUsage(ctx context.Context, root string, info os.FileInfo, maxDepth int, maxEntries int) (int64, error) {

@@ -17,6 +17,7 @@
 package chat
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -56,10 +57,16 @@ func TestToolApprovalWorkflowIntegration(t *testing.T) {
 		return call.Function.Name == "read_file", nil
 	}
 
+	readArgs, err := json.Marshal(map[string]interface{}{
+		"path": relPath,
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal read args: %v", err)
+	}
 	readCall := openai.ToolCall{
 		Function: openai.FunctionCall{
 			Name:      "read_file",
-			Arguments: `{"path":"` + relPath + `"}`,
+			Arguments: string(readArgs),
 		},
 	}
 	readResult := session.ExecuteToolCallWithApproval(readCall)
@@ -70,10 +77,17 @@ func TestToolApprovalWorkflowIntegration(t *testing.T) {
 		t.Fatalf("expected read content, got %q", readResult.Result)
 	}
 
+	writeArgs, err := json.Marshal(map[string]interface{}{
+		"path":    relPath,
+		"content": "updated",
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal write args: %v", err)
+	}
 	writeCall := openai.ToolCall{
 		Function: openai.FunctionCall{
 			Name:      "write_file",
-			Arguments: `{"path":"` + relPath + `","content":"updated"}`,
+			Arguments: string(writeArgs),
 		},
 	}
 	writeResult := session.ExecuteToolCallWithApproval(writeCall)

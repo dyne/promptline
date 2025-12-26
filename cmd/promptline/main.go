@@ -36,10 +36,15 @@ func main() {
 	flag.Parse()
 
 	// Initialize logger
-	logger, err := initLogger(*debugMode, *logFile)
+	logger, closer, err := initLogger(*debugMode, *logFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+	if closer != nil {
+		defer func() {
+			_ = closer.Close()
+		}()
 	}
 	logger.Info().Msg("Promptline starting")
 
@@ -54,7 +59,7 @@ func main() {
 	runTUIMode(logger)
 }
 
-func initLogger(debug bool, logFilePath string) (zerolog.Logger, error) {
+func initLogger(debug bool, logFilePath string) (zerolog.Logger, io.Closer, error) {
 	// Set log level
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	if debug {
@@ -63,11 +68,12 @@ func initLogger(debug bool, logFilePath string) (zerolog.Logger, error) {
 
 	// Configure output
 	var output io.Writer
+	var closer io.Closer
 	if debug {
 		if logFilePath == "" {
 			cwd, cwdErr := os.Getwd()
 			if cwdErr != nil {
-				return zerolog.Logger{}, fmt.Errorf("failed to determine default log path: %w", cwdErr)
+				return zerolog.Logger{}, nil, fmt.Errorf("failed to determine default log path: %w", cwdErr)
 			}
 			logFilePath = filepath.Join(cwd, "promptline_debug.log")
 		}
@@ -77,10 +83,11 @@ func initLogger(debug bool, logFilePath string) (zerolog.Logger, error) {
 			// Fall back to a temp file if the default location is not writable.
 			tmp, tmpErr := os.CreateTemp("", "promptline_debug_*.log")
 			if tmpErr != nil {
-				return zerolog.Logger{}, fmt.Errorf("failed to open log file: %w", err)
+				return zerolog.Logger{}, nil, fmt.Errorf("failed to open log file: %w", err)
 			}
 			file = tmp
 		}
+		closer = file
 		output = file
 	} else {
 		// Logging is disabled when debug mode is off
@@ -88,5 +95,5 @@ func initLogger(debug bool, logFilePath string) (zerolog.Logger, error) {
 	}
 
 	// Create logger with timestamp
-	return zerolog.New(output).With().Timestamp().Logger(), nil
+	return zerolog.New(output).With().Timestamp().Logger(), closer, nil
 }

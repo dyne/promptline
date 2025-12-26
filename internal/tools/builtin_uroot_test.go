@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -99,6 +100,9 @@ func TestURootFileOperations(t *testing.T) {
 	})
 
 	t.Run("ln", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink tests require elevated privileges on windows")
+		}
 		registry := NewRegistry()
 		dir := makeTempDir(t)
 		target := writeTestFile(t, dir, "target.txt", "linked")
@@ -155,6 +159,9 @@ func TestURootFileOperations(t *testing.T) {
 	})
 
 	t.Run("readlink and realpath", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink tests require elevated privileges on windows")
+		}
 		registry := NewRegistry()
 		dir := makeTempDir(t)
 		target := writeTestFile(t, dir, "real.txt", "real")
@@ -306,12 +313,12 @@ func TestURootDirectoryOperations(t *testing.T) {
 	})
 
 	t.Run("dirname and basename", func(t *testing.T) {
-		path := "a/b/c.txt"
+		path := filepath.Join("a", "b", "c.txt")
 		dirResult := executeTool(t, registry, "dirname", map[string]interface{}{"path": path})
 		if dirResult.Error != nil {
 			t.Fatalf("expected dirname success, got %v", dirResult.Error)
 		}
-		if strings.TrimSpace(dirResult.Result) != "a/b" {
+		if strings.TrimSpace(dirResult.Result) != filepath.Dir(path) {
 			t.Fatalf("unexpected dirname output: %q", dirResult.Result)
 		}
 
@@ -319,7 +326,7 @@ func TestURootDirectoryOperations(t *testing.T) {
 		if baseResult.Error != nil {
 			t.Fatalf("expected basename success, got %v", baseResult.Error)
 		}
-		if strings.TrimSpace(baseResult.Result) != "c.txt" {
+		if strings.TrimSpace(baseResult.Result) != filepath.Base(path) {
 			t.Fatalf("unexpected basename output: %q", baseResult.Result)
 		}
 	})
@@ -598,18 +605,26 @@ func TestURootSystemInformation(t *testing.T) {
 
 	t.Run("uptime and free", func(t *testing.T) {
 		uptimeResult := executeTool(t, registry, "uptime", map[string]interface{}{})
-		if uptimeResult.Error != nil {
+		if runtime.GOOS == "windows" {
+			if uptimeResult.Error == nil {
+				t.Fatalf("expected uptime error on windows")
+			}
+		} else if uptimeResult.Error != nil {
 			t.Fatalf("expected uptime success, got %v", uptimeResult.Error)
 		}
-		if !strings.Contains(uptimeResult.Result, "up") {
+		if runtime.GOOS != "windows" && !strings.Contains(uptimeResult.Result, "up") {
 			t.Fatalf("unexpected uptime output: %q", uptimeResult.Result)
 		}
 
 		freeResult := executeTool(t, registry, "free", map[string]interface{}{})
-		if freeResult.Error != nil {
+		if runtime.GOOS == "windows" {
+			if freeResult.Error == nil {
+				t.Fatalf("expected free error on windows")
+			}
+		} else if freeResult.Error != nil {
 			t.Fatalf("expected free success, got %v", freeResult.Error)
 		}
-		if !strings.Contains(freeResult.Result, "Mem") {
+		if runtime.GOOS != "windows" && !strings.Contains(freeResult.Result, "Mem") {
 			t.Fatalf("unexpected free output: %q", freeResult.Result)
 		}
 	})
@@ -739,15 +754,21 @@ func TestURootMiscellaneousSafe(t *testing.T) {
 		mkfifoResult := executeTool(t, registry, "mkfifo", map[string]interface{}{
 			"path": relPath(t, fifoPath),
 		})
-		if mkfifoResult.Error != nil {
+		if runtime.GOOS == "windows" {
+			if mkfifoResult.Error == nil {
+				t.Fatalf("expected mkfifo error on windows")
+			}
+		} else if mkfifoResult.Error != nil {
 			t.Fatalf("expected mkfifo success, got %v", mkfifoResult.Error)
 		}
-		info, err := os.Stat(fifoPath)
-		if err != nil {
-			t.Fatalf("failed to stat fifo: %v", err)
-		}
-		if info.Mode()&os.ModeNamedPipe == 0 {
-			t.Fatalf("expected named pipe, got mode %v", info.Mode())
+		if runtime.GOOS != "windows" {
+			info, err := os.Stat(fifoPath)
+			if err != nil {
+				t.Fatalf("failed to stat fifo: %v", err)
+			}
+			if info.Mode()&os.ModeNamedPipe == 0 {
+				t.Fatalf("expected named pipe, got mode %v", info.Mode())
+			}
 		}
 
 		mktempResult := executeTool(t, registry, "mktemp", map[string]interface{}{})
@@ -783,7 +804,7 @@ func TestURootMiscellaneousSafe(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to stat file: %v", err)
 		}
-		if info.Mode().Perm() != 0o600 {
+		if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 			t.Fatalf("unexpected chmod mode: %v", info.Mode().Perm())
 		}
 	})
