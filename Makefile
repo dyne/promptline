@@ -19,9 +19,6 @@ help:
 build:
 	go build -o promptline ./cmd/promptline
 
-release:
-	go build -ldflags="-s -w" -trimpath -o promptline ./cmd/promptline
-
 # Install the application globally
 install:
 	go install ./cmd/promptline

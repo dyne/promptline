@@ -4,26 +4,84 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-
       - name: Install dependencies
         run: go mod download
-
       - name: Build
         run: go build ./cmd/promptline
-
       - name: Test
         run: |
           make test
           make test-race
           make coverage
+          make benchmarks
+
+  semantic-versioning:
+    name: 🤖 Semantic versioning
+    needs: [build-and-test]
+    runs-on: ubuntu-latest
+    outputs:
+      new_release_published: ${{ steps.semantic-release.outputs.new_release_published }}
+      new_release_version: ${{ steps.semantic-release.outputs.new_release_version }}
+    if: ${{ github.ref_name == 'main' && github.event_name == 'push' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semantic Release
+        uses: cycjimmy/semantic-release-action@v4
+        id: semantic-release
+        with:
+          extra_plugins: |
+            @semantic-release/changelog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  binary-releases:
+    name: Build binary release for ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    needs: [semantic-versioning]
+    if: ${{ needs.semantic-release.outputs.new_release_published == 'true' }}
+    steps:
+      - name: Capture system info
+        id: sysinfo
+        run: |
+          echo "UNAME_S=$(uname -s)" >> $GITHUB_ENV
+          echo "UNAME_M=$(uname -m)" >> $GITHUB_ENV
+          echo "s=$(uname -s)" >> $GITHUB_OUTPUT
+          echo "m=$(uname -m)" >> $GITHUB_OUTPUT
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install go deps
+        run: go mod download
+      - name: Build release
+        run: |
+          go build -ldflags="-s -w -X main.Version=${{ needs.semantic-release.outputs.new_release_version }}" -trimpath -o promptline ./cmd/promptline
+          mv ./promptline ./promptline-${UNAME_S}-${UNAME_M}
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.sysinfo.outputs.s }}-${{ steps.sysinfo.outputs.m }}
+          path: |
+            ./promptline-${UNAME_S}-${UNAME_M}
