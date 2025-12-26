@@ -457,6 +457,7 @@ func (s *Session) processStream(ctx context.Context, stream *openai.ChatCompleti
 	var contentBuilder strings.Builder
 	toolCalls := make(map[string]*openai.ToolCall)
 	argBuilders := make(map[string]*strings.Builder)
+	indexToKey := make(map[int]string)
 	var firstChunk time.Time
 	recvCount := 0
 
@@ -483,7 +484,7 @@ func (s *Session) processStream(ctx context.Context, stream *openai.ChatCompleti
 				continue
 			}
 
-			s.handleStreamChunk(response.Choices[0].Delta, &contentBuilder, toolCalls, argBuilders, events)
+			s.handleStreamChunk(response.Choices[0].Delta, &contentBuilder, toolCalls, argBuilders, indexToKey, events)
 		}
 	}
 }
@@ -498,16 +499,16 @@ func (s *Session) handleStreamEnd(err error, contentBuilder *strings.Builder, to
 	events <- NewErrorEvent(&StreamError{Operation: "receive_chunk", Err: err})
 }
 
-func (s *Session) handleStreamChunk(delta openai.ChatCompletionStreamChoiceDelta, contentBuilder *strings.Builder, toolCalls map[string]*openai.ToolCall, argBuilders map[string]*strings.Builder, events chan<- StreamEvent) {
+func (s *Session) handleStreamChunk(delta openai.ChatCompletionStreamChoiceDelta, contentBuilder *strings.Builder, toolCalls map[string]*openai.ToolCall, argBuilders map[string]*strings.Builder, indexToKey map[int]string, events chan<- StreamEvent) {
 	if delta.Content != "" {
 		contentBuilder.WriteString(delta.Content)
 		events <- NewContentEvent(delta.Content)
 	}
 
 	for _, tc := range delta.ToolCalls {
-		entry := accumulateToolCall(toolCalls, argBuilders, tc)
-		if entry != nil {
-			toolCalls[tc.ID] = entry
+		key, entry := accumulateToolCall(toolCalls, argBuilders, indexToKey, tc)
+		if entry != nil && key != "" {
+			toolCalls[key] = entry
 		}
 	}
 }
@@ -583,8 +584,12 @@ func (s *Session) debugLogError(operation string, err error) {
 }
 
 // accumulateToolCall merges incremental tool call deltas into a stored call.
-func accumulateToolCall(toolCalls map[string]*openai.ToolCall, argBuilders map[string]*strings.Builder, tc openai.ToolCall) *openai.ToolCall {
-	entry, ok := toolCalls[tc.ID]
+func accumulateToolCall(toolCalls map[string]*openai.ToolCall, argBuilders map[string]*strings.Builder, indexToKey map[int]string, tc openai.ToolCall) (string, *openai.ToolCall) {
+	key := toolCallKey(tc, indexToKey)
+	if key == "" {
+		return "", nil
+	}
+	entry, ok := toolCalls[key]
 	if !ok {
 		entry = &openai.ToolCall{
 			ID:   tc.ID,
@@ -593,20 +598,52 @@ func accumulateToolCall(toolCalls map[string]*openai.ToolCall, argBuilders map[s
 				Name: tc.Function.Name,
 			},
 		}
+		if tc.Index != nil {
+			entry.Index = tc.Index
+		}
+		if entry.ID == "" {
+			entry.ID = key
+		}
 	}
 	if entry.Function.Name == "" && tc.Function.Name != "" {
 		entry.Function.Name = tc.Function.Name
 	}
+	if entry.Type == "" && tc.Type != "" {
+		entry.Type = tc.Type
+	}
+	if tc.ID != "" {
+		entry.ID = tc.ID
+	}
+	if tc.Index != nil && entry.Index == nil {
+		entry.Index = tc.Index
+	}
 
-	builder, ok := argBuilders[tc.ID]
+	builder, ok := argBuilders[key]
 	if !ok {
 		builder = &strings.Builder{}
-		argBuilders[tc.ID] = builder
+		argBuilders[key] = builder
 	}
 	builder.WriteString(tc.Function.Arguments)
 	// Don't update Arguments here - wait for finalization to avoid repeated string allocations
 
-	return entry
+	return key, entry
+}
+
+func toolCallKey(tc openai.ToolCall, indexToKey map[int]string) string {
+	if tc.Index != nil {
+		idx := *tc.Index
+		if key, ok := indexToKey[idx]; ok {
+			return key
+		}
+		if tc.ID != "" {
+			indexToKey[idx] = tc.ID
+			return tc.ID
+		}
+		key := fmt.Sprintf("index:%d", idx)
+		indexToKey[idx] = key
+		return key
+	}
+	return tc.ID
 }
 
 // finalizeToolCalls ensures tool calls have names and JSON arguments.

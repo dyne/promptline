@@ -66,9 +66,10 @@ func TestAddToolResultMessageStoresPlainText(t *testing.T) {
 func TestAccumulateToolCall(t *testing.T) {
 	toolCalls := map[string]*openai.ToolCall{}
 	argBuilders := map[string]*strings.Builder{}
+	indexToKey := map[int]string{}
 
 	// first chunk with name
-	entry := accumulateToolCall(toolCalls, argBuilders, openai.ToolCall{
+	key, entry := accumulateToolCall(toolCalls, argBuilders, indexToKey, openai.ToolCall{
 		ID:   "1",
 		Type: openai.ToolTypeFunction,
 		Function: openai.FunctionCall{
@@ -76,19 +77,19 @@ func TestAccumulateToolCall(t *testing.T) {
 			Arguments: `{"path":`,
 		},
 	})
-	toolCalls["1"] = entry
+	toolCalls[key] = entry
 
 	// second chunk with arguments continued
-	entry = accumulateToolCall(toolCalls, argBuilders, openai.ToolCall{
+	key, entry = accumulateToolCall(toolCalls, argBuilders, indexToKey, openai.ToolCall{
 		ID:   "1",
 		Type: openai.ToolTypeFunction,
 		Function: openai.FunctionCall{
 			Arguments: `"."}`,
 		},
 	})
-	toolCalls["1"] = entry
+	toolCalls[key] = entry
 
-	call := toolCalls["1"]
+	call := toolCalls[key]
 	if call == nil {
 		t.Fatal("expected tool call stored")
 	}
@@ -96,16 +97,17 @@ func TestAccumulateToolCall(t *testing.T) {
 		t.Fatalf("expected function name ls, got %s", call.Function.Name)
 	}
 	// Arguments are accumulated in builder, check builder instead
-	if argBuilders["1"].String() != `{"path":"."}` {
-		t.Fatalf("expected merged arguments JSON in builder, got %s", argBuilders["1"].String())
+	if argBuilders[key].String() != `{"path":"."}` {
+		t.Fatalf("expected merged arguments JSON in builder, got %s", argBuilders[key].String())
 	}
 }
 
 func TestAccumulateToolCallMissingNameDefaults(t *testing.T) {
 	toolCalls := map[string]*openai.ToolCall{}
 	argBuilders := map[string]*strings.Builder{}
+	indexToKey := map[int]string{}
 
-	entry := accumulateToolCall(toolCalls, argBuilders, openai.ToolCall{
+	key, entry := accumulateToolCall(toolCalls, argBuilders, indexToKey, openai.ToolCall{
 		ID:   "1",
 		Type: openai.ToolTypeFunction,
 		Function: openai.FunctionCall{
@@ -113,9 +115,9 @@ func TestAccumulateToolCallMissingNameDefaults(t *testing.T) {
 			Arguments: `{"x":1}`,
 		},
 	})
-	toolCalls["1"] = entry
+	toolCalls[key] = entry
 
-	call := toolCalls["1"]
+	call := toolCalls[key]
 	if call == nil {
 		t.Fatal("expected tool call stored")
 	}
@@ -123,17 +125,18 @@ func TestAccumulateToolCallMissingNameDefaults(t *testing.T) {
 		t.Fatalf("expected empty name to remain until finalization, got %s", call.Function.Name)
 	}
 	// Arguments are accumulated in builder, not set on toolCall until finalization (performance optimization)
-	if argBuilders["1"].String() != `{"x":1}` {
-		t.Fatalf("expected arguments in builder, got %s", argBuilders["1"].String())
+	if argBuilders[key].String() != `{"x":1}` {
+		t.Fatalf("expected arguments in builder, got %s", argBuilders[key].String())
 	}
 }
 
 func TestFinalizeToolCallsEnsuresNameAndJSONArgs(t *testing.T) {
 	toolCalls := map[string]*openai.ToolCall{}
 	argBuilders := map[string]*strings.Builder{}
+	indexToKey := map[int]string{}
 
 	// Empty name and args should be discarded.
-	entry := accumulateToolCall(toolCalls, argBuilders, openai.ToolCall{
+	key, entry := accumulateToolCall(toolCalls, argBuilders, indexToKey, openai.ToolCall{
 		ID:   "1",
 		Type: openai.ToolTypeFunction,
 		Function: openai.FunctionCall{
@@ -141,10 +144,10 @@ func TestFinalizeToolCallsEnsuresNameAndJSONArgs(t *testing.T) {
 			Arguments: "",
 		},
 	})
-	toolCalls["1"] = entry
+	toolCalls[key] = entry
 
 	// Another call with args but missing name should be kept and normalized.
-	entry2 := accumulateToolCall(toolCalls, argBuilders, openai.ToolCall{
+	key, entry2 := accumulateToolCall(toolCalls, argBuilders, indexToKey, openai.ToolCall{
 		ID:   "2",
 		Type: openai.ToolTypeFunction,
 		Function: openai.FunctionCall{
@@ -152,7 +155,7 @@ func TestFinalizeToolCallsEnsuresNameAndJSONArgs(t *testing.T) {
 			Arguments: `{"x":1}`,
 		},
 	})
-	toolCalls["2"] = entry2
+	toolCalls[key] = entry2
 
 	final := finalizeToolCalls(toolCalls, argBuilders)
 	if len(final) != 1 {
@@ -167,7 +170,7 @@ func TestFinalizeToolCallsEnsuresNameAndJSONArgs(t *testing.T) {
 	}
 
 	// When name exists but args are empty, preserve empty args.
-	entry3 := accumulateToolCall(toolCalls, argBuilders, openai.ToolCall{
+	key, entry3 := accumulateToolCall(toolCalls, argBuilders, indexToKey, openai.ToolCall{
 		ID:   "3",
 		Type: openai.ToolTypeFunction,
 		Function: openai.FunctionCall{
@@ -175,7 +178,7 @@ func TestFinalizeToolCallsEnsuresNameAndJSONArgs(t *testing.T) {
 			Arguments: "",
 		},
 	})
-	toolCalls["3"] = entry3
+	toolCalls[key] = entry3
 	final = finalizeToolCalls(toolCalls, argBuilders)
 	foundEmpty := false
 	for _, c := range final {
@@ -388,7 +391,7 @@ func TestSessionConcurrentOperations(t *testing.T) {
 	}
 	session := NewSession(cfg)
 	done := make(chan bool)
-	
+
 	// Spawn multiple writers
 	for i := 0; i < 10; i++ {
 		go func(n int) {
@@ -399,7 +402,7 @@ func TestSessionConcurrentOperations(t *testing.T) {
 			done <- true
 		}(i)
 	}
-	
+
 	// Spawn multiple readers
 	for i := 0; i < 10; i++ {
 		go func() {
@@ -409,12 +412,12 @@ func TestSessionConcurrentOperations(t *testing.T) {
 			done <- true
 		}()
 	}
-	
+
 	// Wait for all goroutines
 	for i := 0; i < 20; i++ {
 		<-done
 	}
-	
+
 	// Verify final state
 	snapshot := session.MessagesSnapshot()
 	if len(snapshot) < 1001 { // 1 system + 1000 user/assistant messages

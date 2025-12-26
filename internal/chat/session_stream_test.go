@@ -83,6 +83,7 @@ func TestStreamEventCreation(t *testing.T) {
 func TestAccumulateToolCallWithEmptyID(t *testing.T) {
 	toolCalls := make(map[string]*openai.ToolCall)
 	argBuilders := make(map[string]*strings.Builder)
+	indexToKey := make(map[int]string)
 
 	tc := openai.ToolCall{
 		ID:   "call_123",
@@ -93,7 +94,7 @@ func TestAccumulateToolCallWithEmptyID(t *testing.T) {
 		},
 	}
 
-	result := accumulateToolCall(toolCalls, argBuilders, tc)
+	_, result := accumulateToolCall(toolCalls, argBuilders, indexToKey, tc)
 
 	if result == nil {
 		t.Fatal("Expected non-nil result")
@@ -111,6 +112,7 @@ func TestAccumulateToolCallWithEmptyID(t *testing.T) {
 func TestAccumulateToolCallMultipleTimes(t *testing.T) {
 	toolCalls := make(map[string]*openai.ToolCall)
 	argBuilders := make(map[string]*strings.Builder)
+	indexToKey := make(map[int]string)
 
 	// First call
 	tc1 := openai.ToolCall{
@@ -122,7 +124,7 @@ func TestAccumulateToolCallMultipleTimes(t *testing.T) {
 		},
 	}
 
-	accumulateToolCall(toolCalls, argBuilders, tc1)
+	accumulateToolCall(toolCalls, argBuilders, indexToKey, tc1)
 
 	// Second call with same ID (accumulate arguments)
 	tc2 := openai.ToolCall{
@@ -132,11 +134,11 @@ func TestAccumulateToolCallMultipleTimes(t *testing.T) {
 		},
 	}
 
-	result := accumulateToolCall(toolCalls, argBuilders, tc2)
+	resultKey, result := accumulateToolCall(toolCalls, argBuilders, indexToKey, tc2)
 
 	// Arguments are accumulated in builder, not in the toolCall struct (performance optimization)
-	if argBuilders["call_123"].String() != "part1_part2" {
-		t.Errorf("Expected 'part1_part2', got %s", argBuilders["call_123"].String())
+	if argBuilders[resultKey].String() != "part1_part2" {
+		t.Errorf("Expected 'part1_part2', got %s", argBuilders[resultKey].String())
 	}
 	// Result pointer should be the same entry
 	if result == nil {
@@ -401,9 +403,10 @@ func TestHandleStreamChunk(t *testing.T) {
 			var contentBuilder strings.Builder
 			toolCalls := make(map[string]*openai.ToolCall)
 			argBuilders := make(map[string]*strings.Builder)
+			indexToKey := make(map[int]string)
 			events := make(chan StreamEvent, 10)
 
-			session.handleStreamChunk(tt.delta, &contentBuilder, toolCalls, argBuilders, events)
+			session.handleStreamChunk(tt.delta, &contentBuilder, toolCalls, argBuilders, indexToKey, events)
 
 			if contentBuilder.Len() != tt.wantContentLen {
 				t.Errorf("Expected content length %d, got %d", tt.wantContentLen, contentBuilder.Len())
@@ -466,85 +469,85 @@ func TestEmitToolCalls(t *testing.T) {
 }
 
 func TestFinalizeToolCallsEnsuresTypeField(t *testing.T) {
-toolCalls := map[string]*openai.ToolCall{
-"call1": {
-ID:   "call1",
-Type: "", // Empty type should be set to function
-Function: openai.FunctionCall{
-Name: "test_tool",
-},
-},
-}
-argBuilders := map[string]*strings.Builder{
-"call1": func() *strings.Builder {
-b := &strings.Builder{}
-b.WriteString(`{"arg":"value"}`)
-return b
-}(),
-}
+	toolCalls := map[string]*openai.ToolCall{
+		"call1": {
+			ID:   "call1",
+			Type: "", // Empty type should be set to function
+			Function: openai.FunctionCall{
+				Name: "test_tool",
+			},
+		},
+	}
+	argBuilders := map[string]*strings.Builder{
+		"call1": func() *strings.Builder {
+			b := &strings.Builder{}
+			b.WriteString(`{"arg":"value"}`)
+			return b
+		}(),
+	}
 
-result := finalizeToolCalls(toolCalls, argBuilders)
+	result := finalizeToolCalls(toolCalls, argBuilders)
 
-if len(result) != 1 {
-t.Fatalf("Expected 1 tool call, got %d", len(result))
-}
+	if len(result) != 1 {
+		t.Fatalf("Expected 1 tool call, got %d", len(result))
+	}
 
-if result[0].Type != openai.ToolTypeFunction {
-t.Errorf("Expected Type to be %q, got %q", openai.ToolTypeFunction, result[0].Type)
-}
+	if result[0].Type != openai.ToolTypeFunction {
+		t.Errorf("Expected Type to be %q, got %q", openai.ToolTypeFunction, result[0].Type)
+	}
 }
 
 func TestStreamEventHelpers(t *testing.T) {
-t.Run("NewContentEvent", func(t *testing.T) {
-event := NewContentEvent("test content")
-if event.Type != StreamEventContent {
-t.Errorf("expected StreamEventContent, got %v", event.Type)
-}
-if event.Content != "test content" {
-t.Errorf("expected 'test content', got %s", event.Content)
-}
-if event.ToolCall != nil {
-t.Error("expected ToolCall to be nil")
-}
-if event.Err != nil {
-t.Error("expected Err to be nil")
-}
-})
+	t.Run("NewContentEvent", func(t *testing.T) {
+		event := NewContentEvent("test content")
+		if event.Type != StreamEventContent {
+			t.Errorf("expected StreamEventContent, got %v", event.Type)
+		}
+		if event.Content != "test content" {
+			t.Errorf("expected 'test content', got %s", event.Content)
+		}
+		if event.ToolCall != nil {
+			t.Error("expected ToolCall to be nil")
+		}
+		if event.Err != nil {
+			t.Error("expected Err to be nil")
+		}
+	})
 
-t.Run("NewToolCallEvent", func(t *testing.T) {
-toolCall := &openai.ToolCall{
-ID:   "test-id",
-Type: openai.ToolTypeFunction,
-}
-event := NewToolCallEvent(toolCall)
-if event.Type != StreamEventToolCall {
-t.Errorf("expected StreamEventToolCall, got %v", event.Type)
-}
-if event.ToolCall != toolCall {
-t.Error("expected ToolCall to match")
-}
-if event.Content != "" {
-t.Error("expected Content to be empty")
-}
-if event.Err != nil {
-t.Error("expected Err to be nil")
-}
-})
+	t.Run("NewToolCallEvent", func(t *testing.T) {
+		toolCall := &openai.ToolCall{
+			ID:   "test-id",
+			Type: openai.ToolTypeFunction,
+		}
+		event := NewToolCallEvent(toolCall)
+		if event.Type != StreamEventToolCall {
+			t.Errorf("expected StreamEventToolCall, got %v", event.Type)
+		}
+		if event.ToolCall != toolCall {
+			t.Error("expected ToolCall to match")
+		}
+		if event.Content != "" {
+			t.Error("expected Content to be empty")
+		}
+		if event.Err != nil {
+			t.Error("expected Err to be nil")
+		}
+	})
 
-t.Run("NewErrorEvent", func(t *testing.T) {
-testErr := errors.New("test error")
-event := NewErrorEvent(testErr)
-if event.Type != StreamEventError {
-t.Errorf("expected StreamEventError, got %v", event.Type)
-}
-if event.Err != testErr {
-t.Error("expected Err to match")
-}
-if event.Content != "" {
-t.Error("expected Content to be empty")
-}
-if event.ToolCall != nil {
-t.Error("expected ToolCall to be nil")
-}
-})
+	t.Run("NewErrorEvent", func(t *testing.T) {
+		testErr := errors.New("test error")
+		event := NewErrorEvent(testErr)
+		if event.Type != StreamEventError {
+			t.Errorf("expected StreamEventError, got %v", event.Type)
+		}
+		if event.Err != testErr {
+			t.Error("expected Err to match")
+		}
+		if event.Content != "" {
+			t.Error("expected Content to be empty")
+		}
+		if event.ToolCall != nil {
+			t.Error("expected ToolCall to be nil")
+		}
+	})
 }
