@@ -22,7 +22,6 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/pterm/pterm"
 	"github.com/rs/zerolog"
 	"promptline/internal/chat"
 	"promptline/internal/tools"
@@ -102,7 +101,6 @@ func showHelp() {
 		fmt.Printf("  /%-12s - %s\n", cmd.Name, cmd.Description)
 	}
 	fmt.Println("\nKeyboard Shortcuts:")
-	fmt.Println("  Ctrl+R       - Search conversation history (fuzzy search)")
 	fmt.Println("  Ctrl+↑/↓     - Navigate command history")
 	fmt.Println("  Tab          - Auto-complete commands")
 	fmt.Println()
@@ -154,58 +152,4 @@ func showPermissions(session *chat.Session) {
 	}
 	w.Flush()
 	fmt.Println()
-}
-
-// searchConversationHistory shows an interactive fuzzy search of conversation history
-func searchConversationHistory(session *chat.Session, logger zerolog.Logger) string {
-	history := session.GetHistory()
-	if len(history) == 0 {
-		fmt.Println("\nNo conversation history available")
-		return ""
-	}
-
-	// Build list of user messages only
-	var userMessages []string
-	for _, msg := range history {
-		if msg.Role == "user" && msg.Content != "" {
-			userMessages = append(userMessages, msg.Content)
-		}
-	}
-
-	if len(userMessages) == 0 {
-		fmt.Println("\nNo user messages in history")
-		return ""
-	}
-
-	// Deduplicate and reverse (most recent first)
-	seen := make(map[string]bool)
-	var uniqueMessages []string
-	for i := len(userMessages) - 1; i >= 0; i-- {
-		msg := userMessages[i]
-		if !seen[msg] {
-			seen[msg] = true
-			uniqueMessages = append(uniqueMessages, msg)
-		}
-	}
-
-	if len(uniqueMessages) == 0 {
-		return ""
-	}
-
-	// Show interactive selector
-	fmt.Println() // newline before selector
-	fmt.Println("Search History (Ctrl-C to cancel, arrows to navigate):")
-
-	selected, err := pterm.DefaultInteractiveSelect.
-		WithOptions(uniqueMessages).
-		WithDefaultText("Select a previous prompt").
-		WithFilter(true). // Enable fuzzy search
-		Show()
-
-	if err != nil {
-		logger.Debug().Err(err).Msg("History search cancelled")
-		return ""
-	}
-
-	return selected
 }

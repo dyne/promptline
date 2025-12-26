@@ -55,20 +55,6 @@ func runTUIMode(logger zerolog.Logger) {
 	}
 	defer rl.Close()
 
-	// Set up Ctrl-R handler for history search
-	rl.Config.FuncFilterInputRune = func(r rune) (rune, bool) {
-		if r == 18 { // Ctrl-R
-			// Trigger history search
-			selected := searchConversationHistory(session, logger)
-			if selected != "" {
-				// Write the selected text to readline buffer
-				rl.WriteStdin([]byte(selected))
-			}
-			return 0, false
-		}
-		return r, true
-	}
-
 	// Display header
 	fmt.Println("Promptline by Dyne.org")
 	fmt.Printf("Connected to: %s\n", session.BaseURL)

@@ -233,42 +233,6 @@ func TestGetCommandCompleter(t *testing.T) {
 	}
 }
 
-func TestSearchConversationHistoryEmpty(t *testing.T) {
-	cfg := &config.Config{
-		APIKey: "test-key",
-		Model:  "gpt-4o-mini",
-	}
-
-	session := chat.NewSession(cfg)
-	logger := zerolog.Nop()
-
-	// Should return empty string for empty history
-	result := searchConversationHistory(session, logger)
-
-	if result != "" {
-		t.Errorf("Expected empty result for empty history, got: %s", result)
-	}
-}
-
-func TestSearchConversationHistoryOnlySystemMessages(t *testing.T) {
-	cfg := &config.Config{
-		APIKey: "test-key",
-		Model:  "gpt-4o-mini",
-	}
-
-	session := chat.NewSession(cfg)
-	session.AddMessage("assistant", "Response without user message")
-
-	logger := zerolog.Nop()
-
-	// Should return empty string when no user messages
-	result := searchConversationHistory(session, logger)
-
-	if result != "" {
-		t.Errorf("Expected empty result for no user messages, got: %s", result)
-	}
-}
-
 func TestCommandStructure(t *testing.T) {
 	cmd := Command{
 		Name:        "test",
