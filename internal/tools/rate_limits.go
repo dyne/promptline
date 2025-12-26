@@ -33,9 +33,7 @@ type RateLimitConfig struct {
 func DefaultRateLimitConfig() RateLimitConfig {
 	return RateLimitConfig{
 		DefaultPerMinute: 60,
-		Cooldowns: map[string]time.Duration{
-			"execute_shell_command": 2 * time.Second,
-		},
+		Cooldowns:        map[string]time.Duration{},
 	}
 }
 

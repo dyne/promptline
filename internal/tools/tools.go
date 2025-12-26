@@ -101,6 +101,7 @@ func NewRegistryWithPolicy(policy Policy) *Registry {
 
 	// Register all built-in tools
 	registerBuiltInTools(r)
+	registerURootTools(r)
 	r.applyPolicy(DefaultPolicy())
 	r.applyPolicy(policy)
 

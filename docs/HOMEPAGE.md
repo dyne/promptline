@@ -39,7 +39,7 @@ echo "explain this" | ./promptline -
 Real-time text streaming with full terminal scrollback.
 
 **Tools**
-AI calls functions to read/write files, execute commands.
+AI calls functions to read/write files.
 Permission control for safety.
 
 **Batch Mode**
@@ -75,7 +75,7 @@ Clean separation: chat session, tool registry, config.
   "model": "gpt-4o-mini",
   "tools": {
     "allow": ["read_file", "ls"],
-    "ask": ["write_file", "execute_shell_command"]
+    "ask": ["write_file"]
   },
   "tool_limits": {
     "max_file_size_bytes": 10485760,
@@ -85,15 +85,11 @@ Clean separation: chat session, tool registry, config.
   "tool_rate_limits": {
     "default_per_minute": 60,
     "per_tool": {},
-    "cooldown_seconds": {
-      "execute_shell_command": 2
-    }
+    "cooldown_seconds": {}
   },
   "tool_timeouts": {
     "default_seconds": 0,
-    "per_tool_seconds": {
-      "execute_shell_command": 5
-    }
+    "per_tool_seconds": {}
   }
 }
 ```

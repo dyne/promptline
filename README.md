@@ -22,7 +22,7 @@ Requires Go 1.22+ and `OPENAI_API_KEY` set.
   "model": "gpt-4o-mini",
   "tools": {
     "allow": ["read_file", "ls"],
-    "ask": ["write_file", "execute_shell_command"]
+    "ask": ["write_file"]
   },
   "tool_limits": {
     "max_file_size_bytes": 10485760,
@@ -32,15 +32,11 @@ Requires Go 1.22+ and `OPENAI_API_KEY` set.
   "tool_rate_limits": {
     "default_per_minute": 60,
     "per_tool": {},
-    "cooldown_seconds": {
-      "execute_shell_command": 2
-    }
+    "cooldown_seconds": {}
   },
   "tool_timeouts": {
     "default_seconds": 0,
-    "per_tool_seconds": {
-      "execute_shell_command": 5
-    }
+    "per_tool_seconds": {}
   }
 }
 ```
@@ -59,11 +55,11 @@ Keys: `Ctrl+↑/↓` history, `Ctrl+C` exit
 
 ## Tools
 
-AI can call functions to read/write files, run commands. Permissions in config control allow/ask/deny behavior.
+AI can call functions to read/write files and perform safe operations. Promptline does not execute system binaries. Permissions in config control allow/ask/deny behavior.
 
-Built-in: `ls` `read_file` `write_file` `execute_shell_command` `get_current_datetime`
+Built-in includes core file and system tools (u-root based). Full list and descriptions in `docs/TOOLS.md`.
 
-Add your own in `internal/tools/builtin.go` - see `docs/`.
+Add your own in `internal/tools/builtin.go` or `internal/tools/builtin_uroot.go` - see `docs/`.
 
 ## Docs
 

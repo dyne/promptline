@@ -37,7 +37,7 @@
         "cooldown_seconds": {
           "type": "object",
           "additionalProperties": { "type": "number" },
-          "default": { "execute_shell_command": 2 }
+          "default": {}
         }
       }
     },
@@ -48,7 +48,7 @@
         "per_tool_seconds": {
           "type": "object",
           "additionalProperties": { "type": "number" },
-          "default": { "execute_shell_command": 5 }
+          "default": {}
         }
       }
     },

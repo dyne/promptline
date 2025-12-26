@@ -13,11 +13,31 @@ AI calls functions to interact with system. OpenAI tool-calling protocol.
 
 ## Built-in
 
+Promptline ships with safe, Go-native tools (including u-root implementations). It does not execute system binaries.
+
+Core:
 - `get_current_datetime` - RFC3339 timestamp
-- `ls` - list directory (path, recursive, show_hidden)
 - `read_file` - read from disk
 - `write_file` - write to disk
-- `execute_shell_command` - run shell command
+- `ls` - list directory (path, recursive, show_hidden)
+
+File operations:
+- `cat` `cp` `mv` `rm` `ln` `touch` `truncate` `readlink` `realpath`
+
+Directory operations:
+- `mkdir` `pwd` `dirname` `basename`
+
+Text processing:
+- `grep` `head` `tail` `sort` `uniq` `wc` `tr` `tee` `comm` `strings` `more`
+
+File viewing/analysis:
+- `hexdump` `cmp` `md5sum` `shasum` `base64`
+
+System information:
+- `uname` `hostname` `uptime` `free` `df` `du` `ps` `pidof` `id`
+
+Misc safe:
+- `echo` `seq` `printenv` `tty` `which` `mkfifo` `mktemp` `find` `chmod` `date`
 
 ## Permissions
 
@@ -31,7 +51,7 @@ Override in `config.json`:
   "tools": {
     "allow": ["ls", "read_file"],
     "ask": ["write_file"],
-    "deny": ["execute_shell_command"]
+    "deny": []
   }
 }
 ```
@@ -52,15 +72,11 @@ Defaults applied when not set in `config.json`:
   "tool_rate_limits": {
     "default_per_minute": 60,
     "per_tool": {},
-    "cooldown_seconds": {
-      "execute_shell_command": 2
-    }
+    "cooldown_seconds": {}
   },
   "tool_timeouts": {
     "default_seconds": 0,
-    "per_tool_seconds": {
-      "execute_shell_command": 5
-    }
+    "per_tool_seconds": {}
   }
 }
 ```
@@ -69,7 +85,7 @@ Defaults applied when not set in `config.json`:
 
 ## Adding Tools
 
-Edit `internal/tools/builtin.go`:
+Edit `internal/tools/builtin.go` or `internal/tools/builtin_uroot.go`. Avoid `exec.Command`; tools must not shell out to system binaries.
 
 ```go
 // implement
@@ -134,58 +150,24 @@ if err != nil {
 
 ### Security
 
-Tools that execute commands, access filesystem, network, modify data need:
+Tools that access filesystem, network, or modify data require:
 - Input validation/sanitization
 - Path restrictions
-- Command allowlists
 - Rate limiting
 - User approval
 
+Security model:
+- Promptline does not execute system binaries.
+- All built-in tools are implemented in Go (u-root or stdlib).
+
 Default policy asks before running any tool unless configured otherwise.
-
-## Example
-
-```go
-// list_directory tool
-func listDirectory(args map[string]interface{}) (string, error) {
-    path, ok := args["path"].(string)
-    if !ok || path == "" {
-        path = "."
-    }
-    
-    cmd := exec.Command("ls", "-lh", path)
-    output, err := cmd.Output()
-    if err != nil {
-        return "", fmt.Errorf("failed to list '%s': %v", path, err)
-    }
-    
-    return string(output), nil
-}
-
-// register
-r.RegisterTool(&Tool{
-    Name:        "list_directory",
-    Description: "List files in directory",
-    Parameters:  "path: string - directory path (default: current)",
-    Executor:    listDirectory,
-})
-```
 
 ## Structure
 
 ```
 internal/tools/
-├── tools.go         # framework (don't touch)
-│   ├── ExecutorFunc
-│   ├── Tool struct
-│   ├── Registry
-│   └── parsing/execution
-│
-└── builtin.go       # implementations (add here)
-    ├── registerBuiltInTools()
-    ├── getCurrentDatetime()
-    ├── executeShellCommand()
-    ├── readFile()
-    ├── writeFile()
-    └── [your tool]()
+├── tools.go           # registry and execution
+├── builtin.go         # core tools
+├── builtin_uroot.go   # u-root implementations
+└── [your tool files]
 ```

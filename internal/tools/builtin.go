@@ -20,9 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -46,24 +44,6 @@ func registerBuiltInTools(r *Registry) {
 			"properties": map[string]interface{}{},
 		},
 		ExecuteFunc:  getCurrentDatetime,
-		VersionValue: builtinToolVersion,
-	})
-
-	register(&ToolDefinition{
-		NameValue:        "execute_shell_command",
-		DescriptionValue: "Execute a shell command and return its output (do not use for writing files; use write_file)",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"command": map[string]interface{}{
-					"type":        "string",
-					"description": "The shell command to execute",
-				},
-			},
-			"required": []string{"command"},
-		},
-		ExecuteFunc:  executeShellCommand,
-		ValidateFunc: RequireStringArg("command", "missing or invalid 'command' parameter (use write_file for file writes)"),
 		VersionValue: builtinToolVersion,
 	})
 
@@ -110,72 +90,19 @@ func registerBuiltInTools(r *Registry) {
 		VersionValue: builtinToolVersion,
 	})
 
-	register(&ToolDefinition{
-		NameValue:        "ls",
-		DescriptionValue: "List directory contents with detailed information. Can recursively traverse directories.",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Directory path to list (default: current directory)",
-				},
-				"recursive": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Whether to list recursively (default: false)",
-				},
-				"show_hidden": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Whether to show hidden files (default: false)",
-				},
-			},
-		},
-		ExecuteFunc:  listDirectory,
-		VersionValue: builtinToolVersion,
-	})
 }
 
 const builtinToolVersion = "1.0.0"
 
 // Security constants for validation
 const (
-	maxCommandLength = 10000
-	maxPathLength    = 4096
+	maxPathLength = 4096
 )
 
 // Dangerous path patterns that should be blocked
 var dangerousPaths = []string{
 	"/etc/", "/sys/", "/proc/", "/dev/",
 	"/boot/", "/root/", "/var/run/", "/var/lib/",
-}
-
-// Command injection patterns to block
-var dangerousPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`[;&|]\s*rm\s`),         // rm after separator
-	regexp.MustCompile(`[;&|]\s*dd\s`),         // dd after separator
-	regexp.MustCompile(`>\s*/dev/`),            // redirect to /dev
-	regexp.MustCompile(`/etc/(passwd|shadow)`), // system files
-	regexp.MustCompile(`curl.*\|\s*(sh|bash)`), // curl pipe to shell
-	regexp.MustCompile(`wget.*\|\s*(sh|bash)`), // wget pipe to shell
-}
-
-// validateCommand checks for dangerous patterns and length limits
-func validateCommand(command string) error {
-	if len(command) > maxCommandLength {
-		return fmt.Errorf("command exceeds maximum length of %d characters", maxCommandLength)
-	}
-
-	if strings.TrimSpace(command) == "" {
-		return fmt.Errorf("command cannot be empty")
-	}
-
-	for _, pattern := range dangerousPatterns {
-		if pattern.MatchString(command) {
-			return fmt.Errorf("command contains potentially dangerous pattern: %s", pattern.String())
-		}
-	}
-
-	return nil
 }
 
 // validatePath checks if a path is safe to access
@@ -208,42 +135,6 @@ func getCurrentDatetime(ctx context.Context, args map[string]interface{}) (strin
 		return "", err
 	}
 	return time.Now().Format(time.RFC3339), nil
-}
-
-func executeShellCommand(ctx context.Context, args map[string]interface{}) (string, error) {
-	command, ok := args["command"].(string)
-	if !ok {
-		return "", fmt.Errorf("missing or invalid 'command' parameter (use write_file for file writes)")
-	}
-
-	// Validate command for security
-	if err := validateCommand(command); err != nil {
-		return "", fmt.Errorf("command validation failed: %v", err)
-	}
-
-	if err := ensureContext(ctx); err != nil {
-		return "", err
-	}
-
-	return executeShellCommandHost(ctx, command)
-}
-
-func executeShellCommandHost(ctx context.Context, command string) (string, error) {
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	output, err := cmd.CombinedOutput()
-
-	if ctx.Err() == context.DeadlineExceeded {
-		return string(output), fmt.Errorf("command timed out")
-	}
-	if ctx.Err() == context.Canceled {
-		return string(output), fmt.Errorf("command canceled")
-	}
-
-	if err != nil {
-		return string(output), fmt.Errorf("command failed: %v", err)
-	}
-
-	return string(output), nil
 }
 
 func readFile(ctx context.Context, args map[string]interface{}) (string, error) {

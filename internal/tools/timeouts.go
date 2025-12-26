@@ -27,9 +27,7 @@ type TimeoutConfig struct {
 // DefaultTimeoutConfig returns the default timeout configuration.
 func DefaultTimeoutConfig() TimeoutConfig {
 	return TimeoutConfig{
-		PerTool: map[string]time.Duration{
-			"execute_shell_command": 5 * time.Second,
-		},
+		PerTool: map[string]time.Duration{},
 	}
 }
 

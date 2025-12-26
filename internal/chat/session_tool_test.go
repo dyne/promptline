@@ -243,7 +243,7 @@ func TestExecuteToolCallWithApprovalSkipsPromptOnInvalidArgs(t *testing.T) {
 		ID:   "call-invalid-1",
 		Type: openai.ToolTypeFunction,
 		Function: openai.FunctionCall{
-			Name:      "execute_shell_command",
+			Name:      "read_file",
 			Arguments: "{}",
 		},
 	}

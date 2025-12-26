@@ -169,7 +169,7 @@ func TestToolRateLimitsCustom(t *testing.T) {
 				"read_file": 2
 			},
 			"cooldown_seconds": {
-				"execute_shell_command": 7
+				"read_file": 7
 			}
 		}
 	}`
@@ -184,8 +184,8 @@ func TestToolRateLimitsCustom(t *testing.T) {
 	if cfg.ToolRateLimits.PerTool["read_file"] != 2 {
 		t.Fatalf("expected read_file rate 2, got %d", cfg.ToolRateLimits.PerTool["read_file"])
 	}
-	if cfg.ToolRateLimits.CooldownSeconds["execute_shell_command"] != 7 {
-		t.Fatalf("expected execute_shell_command cooldown 7, got %d", cfg.ToolRateLimits.CooldownSeconds["execute_shell_command"])
+	if cfg.ToolRateLimits.CooldownSeconds["read_file"] != 7 {
+		t.Fatalf("expected read_file cooldown 7, got %d", cfg.ToolRateLimits.CooldownSeconds["read_file"])
 	}
 }
 
@@ -195,7 +195,7 @@ func TestToolTimeoutsCustom(t *testing.T) {
 		"tool_timeouts": {
 			"default_seconds": 3,
 			"per_tool_seconds": {
-				"execute_shell_command": 9
+				"read_file": 9
 			}
 		}
 	}`
@@ -207,8 +207,8 @@ func TestToolTimeoutsCustom(t *testing.T) {
 	if cfg.ToolTimeouts.DefaultSeconds != 3 {
 		t.Fatalf("expected default_seconds 3, got %d", cfg.ToolTimeouts.DefaultSeconds)
 	}
-	if cfg.ToolTimeouts.PerToolSeconds["execute_shell_command"] != 9 {
-		t.Fatalf("expected execute_shell_command timeout 9, got %d", cfg.ToolTimeouts.PerToolSeconds["execute_shell_command"])
+	if cfg.ToolTimeouts.PerToolSeconds["read_file"] != 9 {
+		t.Fatalf("expected read_file timeout 9, got %d", cfg.ToolTimeouts.PerToolSeconds["read_file"])
 	}
 }
 

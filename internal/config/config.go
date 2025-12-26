@@ -92,14 +92,10 @@ func DefaultConfig() *Config {
 	}
 	defaultToolRateLimits := ToolRateLimits{
 		DefaultPerMinute: tools.DefaultRateLimitConfig().DefaultPerMinute,
-		CooldownSeconds: map[string]int{
-			"execute_shell_command": int(tools.DefaultRateLimitConfig().Cooldowns["execute_shell_command"].Seconds()),
-		},
+		CooldownSeconds: map[string]int{},
 	}
 	defaultToolTimeouts := ToolTimeouts{
-		PerToolSeconds: map[string]int{
-			"execute_shell_command": int(tools.DefaultTimeoutConfig().PerTool["execute_shell_command"].Seconds()),
-		},
+		PerToolSeconds: map[string]int{},
 	}
 	defaultToolOutputFilters := ToolOutputFilters{
 		MaxChars:     tools.DefaultOutputFilterConfig().MaxChars,

@@ -31,8 +31,8 @@ func TestToolExecutionError(t *testing.T) {
 	}{
 		{
 			name:     "with operation",
-			err:      NewToolExecutionError("execute_shell_command", "run", baseErr),
-			expected: "tool execute_shell_command failed during run: execution failed",
+			err:      NewToolExecutionError("get_current_datetime", "run", baseErr),
+			expected: "tool get_current_datetime failed during run: execution failed",
 		},
 		{
 			name:     "without operation",

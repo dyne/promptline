@@ -48,6 +48,10 @@ coverage:
 	@echo ""
 	@echo "For detailed HTML report, run: go tool cover -html=coverage.out"
 
+benchmarks:
+	$(info Running tool benchmarks...)
+	go test -run '^$$' -bench BenchmarkURoot -benchmem ./internal/tools
+
 # Format code
 fmt:
 	go fmt ./...

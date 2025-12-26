@@ -83,14 +83,14 @@ func TestExecuteOpenAIToolCallWriteReadIntegration(t *testing.T) {
 func TestExecuteOpenAIToolCallRequiresConfirmationIntegration(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
 		Ask: map[string]bool{
-			"execute_shell_command": true,
+			"get_current_datetime": true,
 		},
 	})
 
 	call := openai.ToolCall{
 		Function: openai.FunctionCall{
-			Name:      "execute_shell_command",
-			Arguments: `{"command":"printf 'hello'"}`,
+			Name:      "get_current_datetime",
+			Arguments: `{}`,
 		},
 	}
 	result := registry.ExecuteOpenAIToolCall(call)
