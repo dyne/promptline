@@ -65,7 +65,7 @@ User → Streaming Session → API
       Response
 ```
 
-Clean separation: chat session, tool registry, config, theme.
+Clean separation: chat session, tool registry, config.
 
 ## Config
 
@@ -76,6 +76,24 @@ Clean separation: chat session, tool registry, config, theme.
   "tools": {
     "allow": ["read_file", "ls"],
     "ask": ["write_file", "execute_shell_command"]
+  },
+  "tool_limits": {
+    "max_file_size_bytes": 10485760,
+    "max_directory_depth": 8,
+    "max_directory_entries": 2000
+  },
+  "tool_rate_limits": {
+    "default_per_minute": 60,
+    "per_tool": {},
+    "cooldown_seconds": {
+      "execute_shell_command": 2
+    }
+  },
+  "tool_timeouts": {
+    "default_seconds": 0,
+    "per_tool_seconds": {
+      "execute_shell_command": 5
+    }
   }
 }
 ```

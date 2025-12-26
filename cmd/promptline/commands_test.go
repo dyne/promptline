@@ -55,11 +55,10 @@ func TestHandleCommandHelp(t *testing.T) {
 
 	session := chat.NewSession(cfg)
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 	debugMode := false
 
 	// Help command should not quit
-	shouldQuit := handleCommand("/help", session, colors, logger, &debugMode)
+	shouldQuit := handleCommand("/help", session, logger, &debugMode)
 
 	if shouldQuit {
 		t.Error("Help command should not trigger quit")
@@ -76,10 +75,9 @@ func TestHandleCommandClear(t *testing.T) {
 	session.AddMessage("user", "Test message")
 
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 	debugMode := false
 
-	shouldQuit := handleCommand("/clear", session, colors, logger, &debugMode)
+	shouldQuit := handleCommand("/clear", session, logger, &debugMode)
 
 	if shouldQuit {
 		t.Error("Clear command should not trigger quit")
@@ -100,18 +98,17 @@ func TestHandleCommandQuit(t *testing.T) {
 
 	session := chat.NewSession(cfg)
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 	debugMode := false
 
 	// Quit command should return true
-	shouldQuit := handleCommand("/quit", session, colors, logger, &debugMode)
+	shouldQuit := handleCommand("/quit", session, logger, &debugMode)
 
 	if !shouldQuit {
 		t.Error("Quit command should trigger quit")
 	}
 
 	// Exit should also trigger quit
-	shouldQuit = handleCommand("/exit", session, colors, logger, &debugMode)
+	shouldQuit = handleCommand("/exit", session, logger, &debugMode)
 
 	if !shouldQuit {
 		t.Error("Exit command should trigger quit")
@@ -126,11 +123,10 @@ func TestHandleCommandDebug(t *testing.T) {
 
 	session := chat.NewSession(cfg)
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 	debugMode := false
 
 	// Toggle debug on
-	shouldQuit := handleCommand("/debug", session, colors, logger, &debugMode)
+	shouldQuit := handleCommand("/debug", session, logger, &debugMode)
 
 	if shouldQuit {
 		t.Error("Debug command should not trigger quit")
@@ -141,7 +137,7 @@ func TestHandleCommandDebug(t *testing.T) {
 	}
 
 	// Toggle debug off
-	handleCommand("/debug", session, colors, logger, &debugMode)
+	handleCommand("/debug", session, logger, &debugMode)
 
 	if debugMode {
 		t.Error("Debug mode should be disabled")
@@ -156,11 +152,10 @@ func TestHandleCommandUnknown(t *testing.T) {
 
 	session := chat.NewSession(cfg)
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 	debugMode := false
 
 	// Unknown command should not quit
-	shouldQuit := handleCommand("/nonexistent", session, colors, logger, &debugMode)
+	shouldQuit := handleCommand("/nonexistent", session, logger, &debugMode)
 
 	if shouldQuit {
 		t.Error("Unknown command should not trigger quit")
@@ -175,11 +170,10 @@ func TestHandleCommandCaseInsensitive(t *testing.T) {
 
 	session := chat.NewSession(cfg)
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 	debugMode := false
 
 	// Should handle uppercase
-	shouldQuit := handleCommand("/QUIT", session, colors, logger, &debugMode)
+	shouldQuit := handleCommand("/QUIT", session, logger, &debugMode)
 
 	if !shouldQuit {
 		t.Error("QUIT (uppercase) should trigger quit")
@@ -193,10 +187,9 @@ func TestShowHistoryEmpty(t *testing.T) {
 	}
 
 	session := chat.NewSession(cfg)
-	colors := testColorScheme()
 
 	// Should not panic on empty history
-	showHistory(session, colors)
+	showHistory(session)
 }
 
 func TestShowHistoryWithMessages(t *testing.T) {
@@ -209,10 +202,8 @@ func TestShowHistoryWithMessages(t *testing.T) {
 	session.AddMessage("user", "Hello")
 	session.AddMessage("assistant", "Hi")
 
-	colors := testColorScheme()
-
 	// Should not panic with messages
-	showHistory(session, colors)
+	showHistory(session)
 }
 
 func TestShowPermissions(t *testing.T) {
@@ -222,10 +213,9 @@ func TestShowPermissions(t *testing.T) {
 	}
 
 	session := chat.NewSession(cfg)
-	colors := testColorScheme()
 
 	// Should not panic
-	showPermissions(session, colors)
+	showPermissions(session)
 }
 
 func TestGetCommandCompleter(t *testing.T) {
@@ -251,10 +241,9 @@ func TestSearchConversationHistoryEmpty(t *testing.T) {
 
 	session := chat.NewSession(cfg)
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 
 	// Should return empty string for empty history
-	result := searchConversationHistory(session, colors, logger)
+	result := searchConversationHistory(session, logger)
 
 	if result != "" {
 		t.Errorf("Expected empty result for empty history, got: %s", result)
@@ -271,10 +260,9 @@ func TestSearchConversationHistoryOnlySystemMessages(t *testing.T) {
 	session.AddMessage("assistant", "Response without user message")
 
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 
 	// Should return empty string when no user messages
-	result := searchConversationHistory(session, colors, logger)
+	result := searchConversationHistory(session, logger)
 
 	if result != "" {
 		t.Errorf("Expected empty result for no user messages, got: %s", result)
@@ -297,10 +285,8 @@ func TestCommandStructure(t *testing.T) {
 }
 
 func TestShowHelp(t *testing.T) {
-	colors := testColorScheme()
-
 	// Should not panic
-	showHelp(colors)
+	showHelp()
 }
 
 func TestHandleCommandTrimming(t *testing.T) {
@@ -311,11 +297,10 @@ func TestHandleCommandTrimming(t *testing.T) {
 
 	session := chat.NewSession(cfg)
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 	debugMode := false
 
 	// Should handle commands with whitespace - note the slash should not have spaces before it
-	shouldQuit := handleCommand("/quit  ", session, colors, logger, &debugMode)
+	shouldQuit := handleCommand("/quit  ", session, logger, &debugMode)
 
 	if !shouldQuit {
 		t.Error("Quit with trailing whitespace should trigger quit")
@@ -332,10 +317,9 @@ func TestHandleHistoryCommand(t *testing.T) {
 	session.AddMessage("user", "Test")
 
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 	debugMode := false
 
-	shouldQuit := handleCommand("/history", session, colors, logger, &debugMode)
+	shouldQuit := handleCommand("/history", session, logger, &debugMode)
 
 	if shouldQuit {
 		t.Error("History command should not trigger quit")
@@ -350,10 +334,9 @@ func TestHandlePermissionsCommand(t *testing.T) {
 
 	session := chat.NewSession(cfg)
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 	debugMode := false
 
-	shouldQuit := handleCommand("/permissions", session, colors, logger, &debugMode)
+	shouldQuit := handleCommand("/permissions", session, logger, &debugMode)
 
 	if shouldQuit {
 		t.Error("Permissions command should not trigger quit")

@@ -26,24 +26,33 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"promptline/internal/paths"
 )
 
 // registerBuiltInTools registers all built-in tools to the registry
 func registerBuiltInTools(r *Registry) {
-	r.RegisterTool(&Tool{
-		Name:        "get_current_datetime",
-		Description: "Get the current date and time in ISO 8601 format",
-		Parameters: map[string]interface{}{
+	register := func(tool Tool) {
+		if err := r.RegisterTool(tool); err != nil {
+			panic(err)
+		}
+	}
+
+	register(&ToolDefinition{
+		NameValue:        "get_current_datetime",
+		DescriptionValue: "Get the current date and time in ISO 8601 format",
+		ParametersValue: map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},
 		},
-		Executor: getCurrentDatetime,
+		ExecuteFunc:  getCurrentDatetime,
+		VersionValue: builtinToolVersion,
 	})
 
-	r.RegisterTool(&Tool{
-		Name:        "execute_shell_command",
-		Description: "Execute a shell command and return its output (do not use for writing files; use write_file)",
-		Parameters: map[string]interface{}{
+	register(&ToolDefinition{
+		NameValue:        "execute_shell_command",
+		DescriptionValue: "Execute a shell command and return its output (do not use for writing files; use write_file)",
+		ParametersValue: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"command": map[string]interface{}{
@@ -53,13 +62,15 @@ func registerBuiltInTools(r *Registry) {
 			},
 			"required": []string{"command"},
 		},
-		Executor: executeShellCommand,
+		ExecuteFunc:  executeShellCommand,
+		ValidateFunc: RequireStringArg("command", "missing or invalid 'command' parameter (use write_file for file writes)"),
+		VersionValue: builtinToolVersion,
 	})
 
-	r.RegisterTool(&Tool{
-		Name:        "read_file",
-		Description: "Read the contents of a file",
-		Parameters: map[string]interface{}{
+	register(&ToolDefinition{
+		NameValue:        "read_file",
+		DescriptionValue: "Read the contents of a file",
+		ParametersValue: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"path": map[string]interface{}{
@@ -69,13 +80,15 @@ func registerBuiltInTools(r *Registry) {
 			},
 			"required": []string{"path"},
 		},
-		Executor: readFile,
+		ExecuteFunc:  readFile,
+		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
+		VersionValue: builtinToolVersion,
 	})
 
-	r.RegisterTool(&Tool{
-		Name:        "write_file",
-		Description: "Create or overwrite a text file (preferred for file writes)",
-		Parameters: map[string]interface{}{
+	register(&ToolDefinition{
+		NameValue:        "write_file",
+		DescriptionValue: "Create or overwrite a text file (preferred for file writes)",
+		ParametersValue: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"path": map[string]interface{}{
@@ -89,13 +102,18 @@ func registerBuiltInTools(r *Registry) {
 			},
 			"required": []string{"path", "content"},
 		},
-		Executor: writeFile,
+		ExecuteFunc: writeFile,
+		ValidateFunc: ChainValidation(
+			RequireStringArg("path", "missing or invalid 'path' or 'content' parameter"),
+			RequireStringArg("content", "missing or invalid 'path' or 'content' parameter"),
+		),
+		VersionValue: builtinToolVersion,
 	})
 
-	r.RegisterTool(&Tool{
-		Name:        "ls",
-		Description: "List directory contents with detailed information. Can recursively traverse directories.",
-		Parameters: map[string]interface{}{
+	register(&ToolDefinition{
+		NameValue:        "ls",
+		DescriptionValue: "List directory contents with detailed information. Can recursively traverse directories.",
+		ParametersValue: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"path": map[string]interface{}{
@@ -112,15 +130,17 @@ func registerBuiltInTools(r *Registry) {
 				},
 			},
 		},
-		Executor: listDirectory,
+		ExecuteFunc:  listDirectory,
+		VersionValue: builtinToolVersion,
 	})
 }
+
+const builtinToolVersion = "1.0.0"
 
 // Security constants for validation
 const (
 	maxCommandLength = 10000
 	maxPathLength    = 4096
-	commandTimeout   = 5 * time.Second
 )
 
 // Dangerous path patterns that should be blocked
@@ -160,12 +180,8 @@ func validateCommand(command string) error {
 
 // validatePath checks if a path is safe to access
 func validatePath(path string) error {
-	if len(path) > maxPathLength {
-		return fmt.Errorf("path exceeds maximum length of %d characters", maxPathLength)
-	}
-
-	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("path cannot be empty")
+	if err := paths.ValidatePathString(path, maxPathLength); err != nil {
+		return err
 	}
 
 	// Clean and get absolute path
@@ -187,11 +203,14 @@ func validatePath(path string) error {
 
 // Tool implementations
 
-func getCurrentDatetime(args map[string]interface{}) (string, error) {
+func getCurrentDatetime(ctx context.Context, args map[string]interface{}) (string, error) {
+	if err := ensureContext(ctx); err != nil {
+		return "", err
+	}
 	return time.Now().Format(time.RFC3339), nil
 }
 
-func executeShellCommand(args map[string]interface{}) (string, error) {
+func executeShellCommand(ctx context.Context, args map[string]interface{}) (string, error) {
 	command, ok := args["command"].(string)
 	if !ok {
 		return "", fmt.Errorf("missing or invalid 'command' parameter (use write_file for file writes)")
@@ -202,9 +221,9 @@ func executeShellCommand(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("command validation failed: %v", err)
 	}
 
-	// Execute with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-	defer cancel()
+	if err := ensureContext(ctx); err != nil {
+		return "", err
+	}
 
 	return executeShellCommandHost(ctx, command)
 }
@@ -214,7 +233,10 @@ func executeShellCommandHost(ctx context.Context, command string) (string, error
 	output, err := cmd.CombinedOutput()
 
 	if ctx.Err() == context.DeadlineExceeded {
-		return string(output), fmt.Errorf("command timed out after %v", commandTimeout)
+		return string(output), fmt.Errorf("command timed out")
+	}
+	if ctx.Err() == context.Canceled {
+		return string(output), fmt.Errorf("command canceled")
 	}
 
 	if err != nil {
@@ -224,7 +246,11 @@ func executeShellCommandHost(ctx context.Context, command string) (string, error
 	return string(output), nil
 }
 
-func readFile(args map[string]interface{}) (string, error) {
+func readFile(ctx context.Context, args map[string]interface{}) (string, error) {
+	if err := ensureContext(ctx); err != nil {
+		return "", err
+	}
+
 	path, err := extractPathArg(args)
 	if err != nil {
 		return "", err
@@ -237,6 +263,19 @@ func readFile(args map[string]interface{}) (string, error) {
 
 	resolved, err := resolvePathWithinBase(path, workdir)
 	if err != nil {
+		return "", err
+	}
+
+	limits := getLimits()
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %v", err)
+	}
+	if info.Size() > limits.MaxFileSizeBytes {
+		return "", fmt.Errorf("file exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
+	}
+
+	if err := ensureContext(ctx); err != nil {
 		return "", err
 	}
 
@@ -253,7 +292,11 @@ func readFile(args map[string]interface{}) (string, error) {
 	return string(content), nil
 }
 
-func writeFile(args map[string]interface{}) (string, error) {
+func writeFile(ctx context.Context, args map[string]interface{}) (string, error) {
+	if err := ensureContext(ctx); err != nil {
+		return "", err
+	}
+
 	path, err := extractPathArg(args)
 	if err != nil {
 		return "", err
@@ -262,6 +305,11 @@ func writeFile(args map[string]interface{}) (string, error) {
 	content, ok := args["content"].(string)
 	if !ok {
 		return "", fmt.Errorf("missing or invalid 'content' parameter")
+	}
+
+	limits := getLimits()
+	if int64(len(content)) > limits.MaxFileSizeBytes {
+		return "", fmt.Errorf("content exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
 	}
 
 	if !isTextContent([]byte(content)) {
@@ -282,6 +330,10 @@ func writeFile(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("path '%s' is a directory", resolved)
 	}
 
+	if err := ensureContext(ctx); err != nil {
+		return "", err
+	}
+
 	// Use os.WriteFile instead of exec for better security
 	if err := os.WriteFile(resolved, []byte(content), 0644); err != nil {
 		return "", fmt.Errorf("failed to write file: %v", err)
@@ -290,7 +342,11 @@ func writeFile(args map[string]interface{}) (string, error) {
 	return fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), resolved), nil
 }
 
-func listDirectory(args map[string]interface{}) (string, error) {
+func listDirectory(ctx context.Context, args map[string]interface{}) (string, error) {
+	if err := ensureContext(ctx); err != nil {
+		return "", err
+	}
+
 	path := getPathArg(args)
 	if err := validateDirectoryPath(path); err != nil {
 		return "", err
@@ -298,14 +354,15 @@ func listDirectory(args map[string]interface{}) (string, error) {
 
 	recursive := getBoolArg(args, "recursive")
 	showHidden := getBoolArg(args, "show_hidden")
+	limits := getLimits()
 
 	var result strings.Builder
 	var err error
 
 	if recursive {
-		err = walkDirectory(path, showHidden, &result)
+		err = walkDirectory(ctx, path, showHidden, limits, &result)
 	} else {
-		err = listDirectoryNonRecursive(path, showHidden, &result)
+		err = listDirectoryNonRecursive(ctx, path, showHidden, limits, &result)
 	}
 
 	if err != nil {
@@ -352,11 +409,8 @@ func validateDirectoryPath(path string) error {
 }
 
 func validatePathWithinWorkdir(path string) (string, error) {
-	if len(path) > maxPathLength {
-		return "", fmt.Errorf("path exceeds maximum length of %d characters", maxPathLength)
-	}
-	if strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("path cannot be empty")
+	if err := paths.ValidatePathString(path, maxPathLength); err != nil {
+		return "", err
 	}
 
 	cleanPath := filepath.Clean(path)
@@ -372,18 +426,35 @@ func validatePathWithinWorkdir(path string) (string, error) {
 		}
 	}
 
+	baseAbs, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine working directory: %v", err)
+	}
+	baseResolved, err := filepath.EvalSymlinks(baseAbs)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve base directory: %v", err)
+	}
+	if err := validatePathWhitelist(absPath, baseResolved); err != nil {
+		return "", err
+	}
+
 	return absPath, nil
 }
 
 func resolvePathWithinBase(path, baseDir string) (string, error) {
-	if len(path) > maxPathLength {
-		return "", fmt.Errorf("path exceeds maximum length of %d characters", maxPathLength)
+	if err := paths.ValidatePathString(path, maxPathLength); err != nil {
+		return "", err
 	}
-	if strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("path cannot be empty")
+
+	resolved, err := paths.ResolveWithinBase(path, baseDir)
+	if err != nil {
+		return "", err
 	}
-	if filepath.IsAbs(path) {
-		return "", fmt.Errorf("absolute paths are not allowed")
+
+	for _, dangerous := range dangerousPaths {
+		if strings.HasPrefix(resolved, dangerous) {
+			return "", fmt.Errorf("access to %s is restricted for security", dangerous)
+		}
 	}
 
 	baseAbs, err := filepath.Abs(baseDir)
@@ -394,59 +465,33 @@ func resolvePathWithinBase(path, baseDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve base directory: %v", err)
 	}
-
-	cleanRel := filepath.Clean(path)
-	absPath := filepath.Clean(filepath.Join(baseResolved, cleanRel))
-	if !hasPathPrefix(absPath, baseResolved) {
-		return "", fmt.Errorf("path escapes working directory")
-	}
-
-	for _, dangerous := range dangerousPaths {
-		if strings.HasPrefix(absPath, dangerous) {
-			return "", fmt.Errorf("access to %s is restricted for security", dangerous)
-		}
-	}
-
-	resolved, err := resolveSymlinkedPath(absPath, baseResolved)
-	if err != nil {
+	if err := validatePathWhitelist(resolved, baseResolved); err != nil {
 		return "", err
-	}
-
-	if !hasPathPrefix(resolved, baseResolved) {
-		return "", fmt.Errorf("path escapes working directory")
 	}
 
 	return resolved, nil
 }
 
-func resolveSymlinkedPath(path, baseResolved string) (string, error) {
-	if _, err := os.Lstat(path); err == nil {
-		resolved, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			return "", fmt.Errorf("failed to resolve path: %v", err)
+func validatePathWhitelist(absPath, baseResolved string) error {
+	whitelist := getPathWhitelist()
+	if len(whitelist) == 0 {
+		return nil
+	}
+
+	for _, entry := range whitelist {
+		if strings.TrimSpace(entry) == "" {
+			continue
 		}
-		return resolved, nil
-	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("failed to stat path: %v", err)
+		allowed, err := paths.ResolveWhitelistEntry(entry, baseResolved)
+		if err != nil {
+			return err
+		}
+		if paths.HasPathPrefix(absPath, allowed) {
+			return nil
+		}
 	}
 
-	parent := filepath.Dir(path)
-	parentResolved, err := filepath.EvalSymlinks(parent)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve parent path: %v", err)
-	}
-	if !hasPathPrefix(parentResolved, baseResolved) {
-		return "", fmt.Errorf("path escapes working directory")
-	}
-	return filepath.Join(parentResolved, filepath.Base(path)), nil
-}
-
-func hasPathPrefix(path, base string) bool {
-	rel, err := filepath.Rel(base, path)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (!strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && rel != "..")
+	return fmt.Errorf("path is outside allowed tool base directories")
 }
 
 func isTextContent(data []byte) bool {
@@ -480,10 +525,32 @@ func isTextContent(data []byte) bool {
 	return nonPrintable*20 < limit
 }
 
-func walkDirectory(path string, showHidden bool, result *strings.Builder) error {
+func walkDirectory(ctx context.Context, path string, showHidden bool, limits Limits, result *strings.Builder) error {
+	dirEntryCounts := make(map[string]int)
 	return filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+		if ctxErr := ensureContext(ctx); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			return err
+		}
+
+		depth, err := depthFromBase(path, filePath)
+		if err != nil {
+			return err
+		}
+		if depth > limits.MaxDirectoryDepth {
+			if info.IsDir() {
+				return fmt.Errorf("directory depth exceeds maximum of %d", limits.MaxDirectoryDepth)
+			}
+			return nil
+		}
+
+		if filePath != path {
+			parent := filepath.Dir(filePath)
+			if err := bumpDirectoryCount(dirEntryCounts, parent, limits.MaxDirectoryEntries); err != nil {
+				return err
+			}
 		}
 
 		if shouldSkipHidden(filePath, info, path, showHidden) {
@@ -498,13 +565,19 @@ func walkDirectory(path string, showHidden bool, result *strings.Builder) error 
 	})
 }
 
-func listDirectoryNonRecursive(path string, showHidden bool, result *strings.Builder) error {
+func listDirectoryNonRecursive(ctx context.Context, path string, showHidden bool, limits Limits, result *strings.Builder) error {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return fmt.Errorf("failed to read directory: %v", err)
 	}
+	if len(entries) > limits.MaxDirectoryEntries {
+		return fmt.Errorf("directory contains more than %d entries", limits.MaxDirectoryEntries)
+	}
 
 	for _, entry := range entries {
+		if err := ensureContext(ctx); err != nil {
+			return err
+		}
 		if !showHidden && isHidden(entry.Name()) {
 			continue
 		}
@@ -522,12 +595,46 @@ func listDirectoryNonRecursive(path string, showHidden bool, result *strings.Bui
 	return nil
 }
 
+func depthFromBase(basePath, filePath string) (int, error) {
+	rel, err := filepath.Rel(basePath, filePath)
+	if err != nil {
+		return 0, fmt.Errorf("failed to compute relative path: %v", err)
+	}
+	if rel == "." {
+		return 0, nil
+	}
+	return strings.Count(rel, string(os.PathSeparator)) + 1, nil
+}
+
+func bumpDirectoryCount(dirEntryCounts map[string]int, dir string, limit int) error {
+	if limit <= 0 {
+		return nil
+	}
+	dirEntryCounts[dir]++
+	if dirEntryCounts[dir] > limit {
+		return fmt.Errorf("directory contains more than %d entries", limit)
+	}
+	return nil
+}
+
 func shouldSkipHidden(filePath string, info os.FileInfo, basePath string, showHidden bool) bool {
 	return !showHidden && isHidden(filepath.Base(filePath)) && filePath != basePath
 }
 
 func isHidden(name string) bool {
 	return strings.HasPrefix(name, ".")
+}
+
+func ensureContext(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
 }
 
 // extractPathArg accepts a variety of shapes for the path argument and normalizes to string.

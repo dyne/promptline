@@ -17,26 +17,20 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sashabaranov/go-openai"
 )
 
 // Default permissions are ask unless explicitly set by policy.
 
-// ExecutorFunc is the function signature for tool implementations
-type ExecutorFunc func(args map[string]interface{}) (string, error)
-
-// Tool represents a callable tool/function with its implementation
-type Tool struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
-	Executor    ExecutorFunc           `json:"-"` // Function to execute the tool
-}
+// ExecutorFunc is the function signature for tool implementations.
+type ExecutorFunc func(ctx context.Context, args map[string]interface{}) (string, error)
 
 // ToolResult represents the result of a tool execution
 type ToolResult struct {
@@ -70,6 +64,8 @@ type Policy struct {
 type ExecuteOptions struct {
 	// Force bypasses policy checks and confirmation requirements (use only after explicit user consent).
 	Force bool
+	// DryRun validates tool arguments but skips execution.
+	DryRun bool
 }
 
 // Registry holds all available tools with their implementations.
@@ -80,9 +76,12 @@ type ExecuteOptions struct {
 // use RLock for concurrent reads. Write operations (RegisterTool, applyPolicy,
 // AllowTool, SetAllowed, SetRequireConfirmation) use Lock for exclusive access.
 type Registry struct {
-	mu          sync.RWMutex
-	tools       map[string]*Tool
-	permissions map[string]Permission
+	mu           sync.RWMutex
+	tools        map[string]Tool
+	permissions  map[string]Permission
+	rateLimits   RateLimitConfig
+	rateLimiters map[string]*toolRateLimiter
+	timeouts     TimeoutConfig
 }
 
 // NewRegistry creates a new tool registry and registers all built-in tools
@@ -93,8 +92,11 @@ func NewRegistry() *Registry {
 // NewRegistryWithPolicy creates a registry with the provided policy.
 func NewRegistryWithPolicy(policy Policy) *Registry {
 	r := &Registry{
-		tools:       make(map[string]*Tool),
-		permissions: make(map[string]Permission),
+		tools:        make(map[string]Tool),
+		permissions:  make(map[string]Permission),
+		rateLimits:   DefaultRateLimitConfig(),
+		rateLimiters: make(map[string]*toolRateLimiter),
+		timeouts:     DefaultTimeoutConfig(),
 	}
 
 	// Register all built-in tools
@@ -106,14 +108,49 @@ func NewRegistryWithPolicy(policy Policy) *Registry {
 }
 
 // RegisterTool adds a new tool with its implementation to the registry
-func (r *Registry) RegisterTool(tool *Tool) {
+func (r *Registry) RegisterTool(tool Tool) error {
+	if tool == nil {
+		return fmt.Errorf("tool is nil")
+	}
+	name := tool.Name()
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("tool name is required")
+	}
+	if strings.TrimSpace(tool.Version()) == "" {
+		return fmt.Errorf("tool %q must declare a version", name)
+	}
+	if !tool.CompatibleWith(HostAPIVersion) {
+		return fmt.Errorf("tool %q is incompatible with host API %s", name, HostAPIVersion)
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.tools[tool.Name] = tool
-	if _, ok := r.permissions[tool.Name]; !ok {
+	r.tools[name] = tool
+	if _, ok := r.permissions[name]; !ok {
 		// Default to ask unless configured otherwise.
-		r.permissions[tool.Name] = Permission{Level: PermissionAsk}
+		r.permissions[name] = Permission{Level: PermissionAsk}
 	}
+	return nil
+}
+
+// RegisterPlugin registers all tools from a plugin.
+func (r *Registry) RegisterPlugin(plugin ToolPlugin) error {
+	if plugin == nil {
+		return fmt.Errorf("plugin is nil")
+	}
+	if strings.TrimSpace(plugin.Name()) == "" {
+		return fmt.Errorf("plugin name is required")
+	}
+	if strings.TrimSpace(plugin.Version()) == "" {
+		return fmt.Errorf("plugin %q must declare a version", plugin.Name())
+	}
+
+	for _, tool := range plugin.Tools() {
+		if err := r.RegisterTool(tool); err != nil {
+			return fmt.Errorf("plugin %q failed to register tool: %w", plugin.Name(), err)
+		}
+	}
+	return nil
 }
 
 // applyPolicy merges the provided policy into the registry permissions.
@@ -168,14 +205,14 @@ func (r *Registry) GetToolNames() []string {
 }
 
 // GetTools returns a copy of all registered tools (thread-safe)
-func (r *Registry) GetTools() []*Tool {
+func (r *Registry) GetTools() []Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	tools := make([]*Tool, 0, len(r.tools))
+	list := make([]Tool, 0, len(r.tools))
 	for _, tool := range r.tools {
-		tools = append(tools, tool)
+		list = append(list, tool)
 	}
-	return tools
+	return list
 }
 
 // OpenAITools returns the registry as OpenAI tool definitions.
@@ -187,9 +224,9 @@ func (r *Registry) OpenAITools() []openai.Tool {
 		defs = append(defs, openai.Tool{
 			Type: openai.ToolTypeFunction,
 			Function: &openai.FunctionDefinition{
-				Name:        tool.Name,
-				Description: tool.Description,
-				Parameters:  tool.Parameters,
+				Name:        tool.Name(),
+				Description: tool.Description(),
+				Parameters:  tool.Parameters(),
 			},
 		})
 	}
@@ -234,7 +271,31 @@ func (r *Registry) ExecuteWithOptions(function string, args map[string]interface
 		}
 	}
 
-	result.Result, result.Error = tool.Executor(args)
+	if err := r.checkRateLimit(function); err != nil {
+		result.Error = err
+		result.Result = fmt.Sprintf("Error: %v", err)
+		return result
+	}
+
+	ctx := context.Background()
+	timeout := r.getTimeout(function)
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	if opts.DryRun {
+		if err := tool.Validate(args); err != nil {
+			result.Error = fmt.Errorf("%w: %v", ErrInvalidArguments, err)
+			result.Result = fmt.Sprintf("Error: %v", result.Error)
+			return result
+		}
+		result.Result = formatDryRunResult(function, args)
+		return result
+	}
+
+	result.Result, result.Error = tool.Execute(ctx, args)
 	return result
 }
 
@@ -310,8 +371,28 @@ func (r *Registry) GetPermission(name string) Permission {
 	return r.getPermission(name)
 }
 
+// ConfigureRateLimits updates rate limiting configuration for the registry.
+func (r *Registry) ConfigureRateLimits(config RateLimitConfig) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, limiter := range r.rateLimiters {
+		if limiter != nil {
+			limiter.Stop()
+		}
+	}
+	r.rateLimits = config
+	r.rateLimiters = make(map[string]*toolRateLimiter)
+}
+
+// ConfigureTimeouts updates tool execution timeouts.
+func (r *Registry) ConfigureTimeouts(config TimeoutConfig) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.timeouts = config
+}
+
 // getTool safely retrieves a tool definition.
-func (r *Registry) getTool(name string) (*Tool, bool) {
+func (r *Registry) getTool(name string) (Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	tool, ok := r.tools[name]
@@ -327,6 +408,46 @@ func (r *Registry) getPermission(name string) Permission {
 	}
 	// Default for unknown tools: ask.
 	return Permission{Level: PermissionAsk}
+}
+
+func (r *Registry) checkRateLimit(name string) error {
+	limiter := r.getRateLimiter(name)
+	if limiter == nil {
+		return nil
+	}
+	return limiter.Allow()
+}
+
+func (r *Registry) getRateLimiter(name string) *toolRateLimiter {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if limiter, ok := r.rateLimiters[name]; ok {
+		return limiter
+	}
+
+	rate := r.rateLimits.DefaultPerMinute
+	if r.rateLimits.PerTool != nil {
+		if perTool, ok := r.rateLimits.PerTool[name]; ok {
+			rate = perTool
+		}
+	}
+
+	var cooldown time.Duration
+	if r.rateLimits.Cooldowns != nil {
+		if perTool, ok := r.rateLimits.Cooldowns[name]; ok {
+			cooldown = perTool
+		}
+	}
+
+	limiter := newToolRateLimiter(rate, cooldown)
+	r.rateLimiters[name] = limiter
+	return limiter
+}
+
+func (r *Registry) getTimeout(name string) time.Duration {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.timeouts.TimeoutForTool(name)
 }
 
 func applyPolicyLevel(current PermissionLevel, name string, policy Policy) PermissionLevel {
@@ -357,7 +478,8 @@ func FormatToolResult(toolCall openai.ToolCall, result *ToolResult, truncate boo
 		}
 	}
 
-	var sb strings.Builder
+	sb := getBuilder()
+	defer putBuilder(sb)
 	if argsStr != "" {
 		sb.WriteString(fmt.Sprintf("🔧 Executed: %s(%s)\n", toolCall.Function.Name, argsStr))
 	} else {
@@ -367,11 +489,27 @@ func FormatToolResult(toolCall openai.ToolCall, result *ToolResult, truncate boo
 	if result.Error != nil {
 		sb.WriteString(fmt.Sprintf("❌ Error: %v\n", result.Error))
 	} else {
-		displayResult := result.Result
-		if truncate && len(displayResult) > 200 {
-			displayResult = displayResult[:200] + "..."
+		displayResult, truncated := sanitizeToolOutput(result.Result)
+		if truncate {
+			var shortTruncated bool
+			displayResult, shortTruncated = truncateString(displayResult, 200)
+			truncated = truncated || shortTruncated
+		}
+		if truncated {
+			displayResult += "..."
 		}
 		sb.WriteString(fmt.Sprintf("✓ Result:\n%s\n", displayResult))
 	}
 	return sb.String()
+}
+
+func formatDryRunResult(function string, args map[string]interface{}) string {
+	if len(args) == 0 {
+		return fmt.Sprintf("Dry run: %s()", function)
+	}
+	encoded, err := json.Marshal(args)
+	if err != nil {
+		return fmt.Sprintf("Dry run: %s(%v)", function, args)
+	}
+	return fmt.Sprintf("Dry run: %s(%s)", function, string(encoded))
 }

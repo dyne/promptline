@@ -47,8 +47,9 @@ func runBatch(logger zerolog.Logger) error {
 	// Create chat session
 	session := chat.NewSession(cfg)
 	defer session.Close()
-	session.ToolApprover = newToolApprover(nil)
+	session.ToolApprover = newToolApprover()
 	session.Logger = &logger
+	session.DryRun = *dryRun
 
 	// Read input from stdin
 	scanner := bufio.NewScanner(os.Stdin)

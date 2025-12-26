@@ -38,6 +38,35 @@ Override in `config.json`:
 
 New tools are asked by default.
 
+## Limits and Timeouts
+
+Defaults applied when not set in `config.json`:
+
+```json
+{
+  "tool_limits": {
+    "max_file_size_bytes": 10485760,
+    "max_directory_depth": 8,
+    "max_directory_entries": 2000
+  },
+  "tool_rate_limits": {
+    "default_per_minute": 60,
+    "per_tool": {},
+    "cooldown_seconds": {
+      "execute_shell_command": 2
+    }
+  },
+  "tool_timeouts": {
+    "default_seconds": 0,
+    "per_tool_seconds": {
+      "execute_shell_command": 5
+    }
+  }
+}
+```
+
+- `default_seconds` of `0` means no default timeout; per-tool overrides still apply.
+
 ## Adding Tools
 
 Edit `internal/tools/builtin.go`:

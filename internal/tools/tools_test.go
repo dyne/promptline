@@ -18,6 +18,7 @@ package tools
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -375,6 +376,327 @@ func TestExecuteWriteAndReadFile(t *testing.T) {
 	}
 }
 
+func TestReadFileSizeLimit(t *testing.T) {
+	defaults := DefaultLimits()
+	ConfigureLimits(Limits{
+		MaxFileSizeBytes:    4,
+		MaxDirectoryDepth:   defaults.MaxDirectoryDepth,
+		MaxDirectoryEntries: defaults.MaxDirectoryEntries,
+	})
+	t.Cleanup(func() {
+		ConfigureLimits(defaults)
+	})
+
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"read_file": true,
+		},
+	})
+	absDir, relDir := tempDirInCwd(t)
+	filePath := filepath.Join(absDir, "big.txt")
+	if err := os.WriteFile(filePath, []byte("12345"), 0o644); err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+
+	result := registry.Execute("read_file", map[string]interface{}{
+		"path": filepath.Join(relDir, "big.txt"),
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for file size limit")
+	}
+	if !strings.Contains(result.Error.Error(), "file exceeds maximum size") {
+		t.Fatalf("expected size limit error, got %v", result.Error)
+	}
+}
+
+func TestWriteFileSizeLimit(t *testing.T) {
+	defaults := DefaultLimits()
+	ConfigureLimits(Limits{
+		MaxFileSizeBytes:    4,
+		MaxDirectoryDepth:   defaults.MaxDirectoryDepth,
+		MaxDirectoryEntries: defaults.MaxDirectoryEntries,
+	})
+	t.Cleanup(func() {
+		ConfigureLimits(defaults)
+	})
+
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"write_file": true,
+		},
+	})
+	_, relDir := tempDirInCwd(t)
+	result := registry.Execute("write_file", map[string]interface{}{
+		"path":    filepath.Join(relDir, "big.txt"),
+		"content": "12345",
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for content size limit")
+	}
+	if !strings.Contains(result.Error.Error(), "content exceeds maximum size") {
+		t.Fatalf("expected size limit error, got %v", result.Error)
+	}
+}
+
+func TestWriteFileRejectsNullBytePath(t *testing.T) {
+	defaults := DefaultLimits()
+	ConfigureLimits(defaults)
+	t.Cleanup(func() {
+		ConfigureLimits(defaults)
+	})
+
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"write_file": true,
+		},
+	})
+	result := registry.Execute("write_file", map[string]interface{}{
+		"path":    "bad\x00path.txt",
+		"content": "data",
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for null byte path")
+	}
+	if !strings.Contains(result.Error.Error(), "null byte") {
+		t.Fatalf("expected null byte error, got %v", result.Error)
+	}
+}
+
+func TestWriteFileRejectsCombiningMarkPath(t *testing.T) {
+	defaults := DefaultLimits()
+	ConfigureLimits(defaults)
+	t.Cleanup(func() {
+		ConfigureLimits(defaults)
+	})
+
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"write_file": true,
+		},
+	})
+	result := registry.Execute("write_file", map[string]interface{}{
+		"path":    "e\u0301.txt",
+		"content": "data",
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for combining mark path")
+	}
+	if !strings.Contains(result.Error.Error(), "combining mark") {
+		t.Fatalf("expected combining mark error, got %v", result.Error)
+	}
+}
+
+func TestWriteFileRespectsPathWhitelist(t *testing.T) {
+	defaults := DefaultLimits()
+	ConfigureLimits(defaults)
+	absAllowed, relAllowed := tempDirInCwd(t)
+	_, relBlocked := tempDirInCwd(t)
+	ConfigurePathWhitelist([]string{relAllowed})
+	t.Cleanup(func() {
+		ConfigurePathWhitelist(nil)
+	})
+
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"write_file": true,
+		},
+	})
+	allowedResult := registry.Execute("write_file", map[string]interface{}{
+		"path":    filepath.Join(relAllowed, "ok.txt"),
+		"content": "ok",
+	})
+	if allowedResult.Error != nil {
+		t.Fatalf("expected whitelist write to succeed, got %v", allowedResult.Error)
+	}
+
+	blockedResult := registry.Execute("write_file", map[string]interface{}{
+		"path":    filepath.Join(relBlocked, "nope.txt"),
+		"content": "nope",
+	})
+	if blockedResult.Error == nil {
+		t.Fatal("expected error for path outside whitelist")
+	}
+	if !strings.Contains(blockedResult.Error.Error(), "outside allowed tool base directories") {
+		t.Fatalf("expected whitelist error, got %v", blockedResult.Error)
+	}
+
+	if _, err := os.Stat(filepath.Join(absAllowed, "ok.txt")); err != nil {
+		t.Fatalf("expected allowed file to be created, got %v", err)
+	}
+}
+
+func TestListDirectoryEntryLimit(t *testing.T) {
+	defaults := DefaultLimits()
+	ConfigureLimits(Limits{
+		MaxFileSizeBytes:    defaults.MaxFileSizeBytes,
+		MaxDirectoryDepth:   defaults.MaxDirectoryDepth,
+		MaxDirectoryEntries: 2,
+	})
+	t.Cleanup(func() {
+		ConfigureLimits(defaults)
+	})
+
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"ls": true,
+		},
+	})
+	dir := t.TempDir()
+	for i := 0; i < 3; i++ {
+		path := filepath.Join(dir, fmt.Sprintf("file-%d.txt", i))
+		if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+			t.Fatalf("failed to create temp file: %v", err)
+		}
+	}
+
+	result := registry.Execute("ls", map[string]interface{}{
+		"path": dir,
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for directory entry limit")
+	}
+	if !strings.Contains(result.Error.Error(), "directory contains more than") {
+		t.Fatalf("expected entry limit error, got %v", result.Error)
+	}
+}
+
+func TestListDirectoryDepthLimit(t *testing.T) {
+	defaults := DefaultLimits()
+	ConfigureLimits(Limits{
+		MaxFileSizeBytes:    defaults.MaxFileSizeBytes,
+		MaxDirectoryDepth:   1,
+		MaxDirectoryEntries: defaults.MaxDirectoryEntries,
+	})
+	t.Cleanup(func() {
+		ConfigureLimits(defaults)
+	})
+
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"ls": true,
+		},
+	})
+	dir := t.TempDir()
+	levelOne := filepath.Join(dir, "level1")
+	levelTwo := filepath.Join(levelOne, "level2")
+	if err := os.MkdirAll(levelTwo, 0o755); err != nil {
+		t.Fatalf("failed to create nested dirs: %v", err)
+	}
+	filePath := filepath.Join(levelTwo, "deep.txt")
+	if err := os.WriteFile(filePath, []byte("data"), 0o644); err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+
+	result := registry.Execute("ls", map[string]interface{}{
+		"path":      dir,
+		"recursive": true,
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for directory depth limit")
+	}
+	if !strings.Contains(result.Error.Error(), "directory depth exceeds maximum") {
+		t.Fatalf("expected depth limit error, got %v", result.Error)
+	}
+}
+
+func TestToolRateLimitExceeded(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"get_current_datetime": true,
+		},
+	})
+	registry.ConfigureRateLimits(RateLimitConfig{
+		DefaultPerMinute: 1,
+	})
+
+	first := registry.Execute("get_current_datetime", map[string]interface{}{})
+	if first.Error != nil {
+		t.Fatalf("expected first call to succeed, got %v", first.Error)
+	}
+
+	second := registry.Execute("get_current_datetime", map[string]interface{}{})
+	if second.Error == nil {
+		t.Fatal("expected rate limit error")
+	}
+	if !errors.Is(second.Error, ErrToolRateLimited) {
+		t.Fatalf("expected ErrToolRateLimited, got %v", second.Error)
+	}
+}
+
+func TestToolCooldownEnforced(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"get_current_datetime": true,
+		},
+	})
+	registry.ConfigureRateLimits(RateLimitConfig{
+		DefaultPerMinute: 120,
+		Cooldowns: map[string]time.Duration{
+			"get_current_datetime": 2 * time.Second,
+		},
+	})
+
+	first := registry.Execute("get_current_datetime", map[string]interface{}{})
+	if first.Error != nil {
+		t.Fatalf("expected first call to succeed, got %v", first.Error)
+	}
+
+	second := registry.Execute("get_current_datetime", map[string]interface{}{})
+	if second.Error == nil {
+		t.Fatal("expected cooldown error")
+	}
+	if !errors.Is(second.Error, ErrToolInCooldown) {
+		t.Fatalf("expected ErrToolInCooldown, got %v", second.Error)
+	}
+}
+
+func TestExecuteDryRunSkipsExecution(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"write_file": true,
+		},
+	})
+	absDir, relDir := tempDirInCwd(t)
+	relPath := filepath.Join(relDir, "dryrun.txt")
+
+	result := registry.ExecuteWithOptions("write_file", map[string]interface{}{
+		"path":    relPath,
+		"content": "content",
+	}, ExecuteOptions{DryRun: true})
+	if result.Error != nil {
+		t.Fatalf("expected dry run success, got %v", result.Error)
+	}
+	if !strings.Contains(result.Result, "Dry run") {
+		t.Fatalf("expected dry run message, got %q", result.Result)
+	}
+	if _, err := os.Stat(filepath.Join(absDir, "dryrun.txt")); err == nil {
+		t.Fatal("expected file not to be created in dry run")
+	}
+}
+
+func TestExecuteShellCommandTimeout(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"execute_shell_command": true,
+		},
+	})
+	registry.ConfigureTimeouts(TimeoutConfig{
+		PerTool: map[string]time.Duration{
+			"execute_shell_command": 50 * time.Millisecond,
+		},
+	})
+
+	result := registry.Execute("execute_shell_command", map[string]interface{}{
+		"command": "sleep 1",
+	})
+	if result.Error == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(result.Error.Error(), "timed out") {
+		t.Fatalf("expected timeout error, got %v", result.Error)
+	}
+}
+
 func TestGetToolNames(t *testing.T) {
 	registry := NewRegistry()
 	names := registry.GetToolNames()
@@ -498,6 +820,93 @@ func TestOpenAITools(t *testing.T) {
 		if tool.Function.Description == "" {
 			t.Error("expected tool to have a description")
 		}
+	}
+}
+
+func TestValidateToolCallMissingArgs(t *testing.T) {
+	registry := NewRegistry()
+	result := registry.ValidateToolCall("execute_shell_command", `{}`)
+	if result == nil || result.Error == nil {
+		t.Fatal("expected validation error for missing command")
+	}
+	if !errors.Is(result.Error, ErrInvalidArguments) {
+		t.Fatalf("expected ErrInvalidArguments, got %v", result.Error)
+	}
+}
+
+func TestRegisterToolRequiresVersion(t *testing.T) {
+	registry := NewRegistry()
+	tool := &ToolDefinition{
+		NameValue:        "custom_tool",
+		DescriptionValue: "custom",
+		ParametersValue:  map[string]interface{}{"type": "object"},
+	}
+	if err := registry.RegisterTool(tool); err == nil {
+		t.Fatal("expected error for missing tool version")
+	}
+}
+
+func TestRegisterToolCompatibility(t *testing.T) {
+	registry := NewRegistry()
+	tool := &ToolDefinition{
+		NameValue:        "incompatible_tool",
+		DescriptionValue: "custom",
+		ParametersValue:  map[string]interface{}{"type": "object"},
+		VersionValue:     "1.0.0",
+		CompatibleWithFunc: func(string) bool {
+			return false
+		},
+	}
+	if err := registry.RegisterTool(tool); err == nil {
+		t.Fatal("expected error for incompatible tool")
+	}
+}
+
+type testPlugin struct {
+	name    string
+	version string
+	tools   []Tool
+}
+
+func (p *testPlugin) Name() string {
+	return p.name
+}
+
+func (p *testPlugin) Version() string {
+	return p.version
+}
+
+func (p *testPlugin) Tools() []Tool {
+	return p.tools
+}
+
+func TestRegisterPlugin(t *testing.T) {
+	registry := NewRegistry()
+	plugin := &testPlugin{
+		name:    "custom",
+		version: "0.1.0",
+		tools: []Tool{
+			&ToolDefinition{
+				NameValue:        "plugin_tool",
+				DescriptionValue: "from plugin",
+				ParametersValue:  map[string]interface{}{"type": "object"},
+				VersionValue:     "1.0.0",
+			},
+		},
+	}
+	if err := registry.RegisterPlugin(plugin); err != nil {
+		t.Fatalf("expected plugin registration to succeed, got %v", err)
+	}
+
+	found := false
+	for _, name := range registry.GetToolNames() {
+		if name == "plugin_tool" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected plugin tool to be registered")
 	}
 }
 
@@ -1046,6 +1455,38 @@ func TestFormatToolResult(t *testing.T) {
 	}
 }
 
+func TestFormatToolResultSanitizesOutput(t *testing.T) {
+	defaults := DefaultOutputFilterConfig()
+	ConfigureOutputFilters(OutputFilterConfig{
+		MaxChars:     4,
+		StripANSI:    true,
+		StripControl: true,
+	})
+	t.Cleanup(func() {
+		ConfigureOutputFilters(defaults)
+	})
+
+	toolCall := openai.ToolCall{
+		Function: openai.FunctionCall{
+			Name:      "test_tool",
+			Arguments: `{}`,
+		},
+	}
+	result := &ToolResult{
+		Function: "test_tool",
+		Result:   "\x1b[31mhello\x1b[0m\x07",
+		Error:    nil,
+	}
+
+	output := FormatToolResult(toolCall, result, false)
+	if strings.Contains(output, "\x1b") {
+		t.Fatalf("expected ANSI sequences to be stripped, got %q", output)
+	}
+	if !strings.Contains(output, "hell...") {
+		t.Fatalf("expected truncated sanitized output, got %q", output)
+	}
+}
+
 // Test concurrent tool execution
 func TestConcurrentToolExecution(t *testing.T) {
 	registry := NewRegistry()
@@ -1110,8 +1551,11 @@ func TestConcurrentToolExecution(t *testing.T) {
 func TestPolicyApplicationEdgeCases(t *testing.T) {
 	t.Run("empty policy on empty registry", func(t *testing.T) {
 		r := &Registry{
-			tools:       make(map[string]*Tool),
-			permissions: make(map[string]Permission),
+			tools:        make(map[string]Tool),
+			permissions:  make(map[string]Permission),
+			rateLimits:   DefaultRateLimitConfig(),
+			rateLimiters: make(map[string]*toolRateLimiter),
+			timeouts:     DefaultTimeoutConfig(),
 		}
 		r.applyPolicy(Policy{})
 		// Should not panic

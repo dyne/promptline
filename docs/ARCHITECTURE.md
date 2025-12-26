@@ -10,7 +10,6 @@ internal/chat/session.go     conversation, streaming, history
 internal/tools/tools.go      tool registry, permissions
 internal/tools/builtin.go    tool implementations
 internal/config/config.go    config loader
-internal/theme/theme.go      terminal colors
 ```
 
 ## Flow

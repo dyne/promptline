@@ -40,7 +40,6 @@ func TestExecuteToolCallSuccess(t *testing.T) {
 		return true, nil
 	}
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 
 	toolCall := &openai.ToolCall{
 		ID:   "call_123",
@@ -52,7 +51,7 @@ func TestExecuteToolCallSuccess(t *testing.T) {
 	}
 
 	// Should not panic
-	executeToolCall(session, toolCall, colors, logger)
+	executeToolCall(session, toolCall, logger)
 
 	// Verify tool result was added to history
 	history := session.GetHistory()
@@ -72,7 +71,6 @@ func TestExecuteToolCallWithArgs(t *testing.T) {
 		return true, nil
 	}
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 
 	toolCall := &openai.ToolCall{
 		ID:   "call_456",
@@ -83,7 +81,7 @@ func TestExecuteToolCallWithArgs(t *testing.T) {
 		},
 	}
 
-	executeToolCall(session, toolCall, colors, logger)
+	executeToolCall(session, toolCall, logger)
 
 	history := session.GetHistory()
 	if len(history) == 0 {
@@ -106,7 +104,6 @@ func TestExecuteToolCallLsSuccess(t *testing.T) {
 		return true, nil
 	}
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 
 	// Call non-existent tool
 	toolCall := &openai.ToolCall{
@@ -118,7 +115,7 @@ func TestExecuteToolCallLsSuccess(t *testing.T) {
 		},
 	}
 
-	executeToolCall(session, toolCall, colors, logger)
+	executeToolCall(session, toolCall, logger)
 
 	history := session.GetHistory()
 	if len(history) == 0 {
@@ -137,7 +134,6 @@ func TestExecuteToolCallLongResult(t *testing.T) {
 		return true, nil
 	}
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 
 	// Create a tool call that will generate a long result
 	toolCall := &openai.ToolCall{
@@ -150,7 +146,7 @@ func TestExecuteToolCallLongResult(t *testing.T) {
 	}
 
 	// Should truncate long results in display
-	executeToolCall(session, toolCall, colors, logger)
+	executeToolCall(session, toolCall, logger)
 }
 
 func TestToolsFormatToolResult(t *testing.T) {
@@ -264,7 +260,6 @@ func TestExecuteToolCallFillsMissingPathFromHistory(t *testing.T) {
 	session.AddMessage("user", "read config.json")
 
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 
 	toolCall := &openai.ToolCall{
 		ID:   "call_missing_path",
@@ -275,7 +270,7 @@ func TestExecuteToolCallFillsMissingPathFromHistory(t *testing.T) {
 		},
 	}
 
-	executeToolCall(session, toolCall, colors, logger)
+	executeToolCall(session, toolCall, logger)
 
 	history := session.GetHistory()
 	if len(history) == 0 {
@@ -315,7 +310,6 @@ func TestExecuteToolCallFillsPathFromAssistantMention(t *testing.T) {
 	session.AddAssistantMessage("Yes, I can see `config.json`.", nil)
 
 	logger := zerolog.Nop()
-	colors := testColorScheme()
 
 	toolCall := &openai.ToolCall{
 		ID:   "call_assistant_path",
@@ -326,7 +320,7 @@ func TestExecuteToolCallFillsPathFromAssistantMention(t *testing.T) {
 		},
 	}
 
-	executeToolCall(session, toolCall, colors, logger)
+	executeToolCall(session, toolCall, logger)
 
 	history := session.GetHistory()
 	if len(history) == 0 {

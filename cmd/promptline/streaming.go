@@ -26,20 +26,21 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/sashabaranov/go-openai"
 	"promptline/internal/chat"
-	"promptline/internal/theme"
 	"promptline/internal/tools"
 )
 
 // handleConversation sends user message and streams AI response
-func handleConversation(input string, session *chat.Session, colors *theme.ColorScheme, logger zerolog.Logger) {
-	logConversation(logger, openai.ChatMessageRoleUser, input)
+func handleConversation(input string, session *chat.Session, logger zerolog.Logger) {
+	sessionLogger := logger.With().Str("session_id", session.SessionID).Logger()
+	logConversation(sessionLogger, openai.ChatMessageRoleUser, input)
 
 	// Stream the conversation, handling tool calls recursively
-	streamConversation(session, input, true, colors, logger)
+	streamConversation(session, input, true, sessionLogger)
 }
 
 // streamConversation handles streaming with tool execution
-func streamConversation(session *chat.Session, input string, includeUserMessage bool, colors *theme.ColorScheme, logger zerolog.Logger) {
+func streamConversation(session *chat.Session, input string, includeUserMessage bool, logger zerolog.Logger) {
+	sessionLogger := logger.With().Str("session_id", session.SessionID).Logger()
 	// Create streaming events channel
 	events := make(chan chat.StreamEvent, 10)
 	ctx := context.Background()
@@ -49,7 +50,7 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 
 	// Display assistant prefix with special character (only for new conversations)
 	if includeUserMessage {
-		colors.Assistant.Print("⟫ ")
+		fmt.Print("⟫ ")
 	}
 
 	start := time.Now()
@@ -72,8 +73,8 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 			}
 
 		case chat.StreamEventError:
-			colors.Error.Printf("\n✗ Error: %v\n", event.Err)
-			logger.Error().Err(event.Err).Msg("Streaming error")
+			fmt.Printf("\n✗ Error: %v\n", event.Err)
+			sessionLogger.Error().Err(event.Err).Msg("Streaming error")
 			return
 		}
 	}
@@ -81,12 +82,12 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 	duration := time.Since(start)
 
 	// Log the response
-	logger.Info().
+	sessionLogger.Info().
 		Str("model_response", responseBuilder.String()).
 		Dur("duration_ms", duration).
 		Int("tool_calls", len(toolCallsToExecute)).
 		Msg("AI response received")
-	logConversation(logger, openai.ChatMessageRoleAssistant, responseBuilder.String())
+	logConversation(sessionLogger, openai.ChatMessageRoleAssistant, responseBuilder.String())
 
 	// Execute any tool calls and continue conversation
 	if len(toolCallsToExecute) > 0 {
@@ -94,7 +95,7 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 
 		anyHandled := false
 		for _, event := range toolCallsToExecute {
-			if executeToolCall(session, event.ToolCall, colors, logger) {
+			if executeToolCall(session, event.ToolCall, sessionLogger) {
 				anyHandled = true
 			}
 		}
@@ -102,8 +103,8 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 		// Continue conversation with tool results if any tool call was handled
 		if anyHandled {
 			fmt.Println()
-			colors.Assistant.Print("⟫ ")
-			streamConversation(session, "", false, colors, logger)
+			fmt.Print("⟫ ")
+			streamConversation(session, "", false, sessionLogger)
 		} else {
 			fmt.Println()
 			fmt.Println()
@@ -117,9 +118,10 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 
 // executeToolCall executes a single tool call and adds result to session.
 // Returns true when the tool call is handled.
-func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *theme.ColorScheme, logger zerolog.Logger) bool {
+func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, logger zerolog.Logger) bool {
 	toolName := toolCall.Function.Name
 	toolArgs := toolCall.Function.Arguments
+	toolCallID := toolCall.ID
 
 	if toolName == "read_file" && shouldFillPath(toolCall.Function.Arguments) {
 		toolArgs = fillPathFromHistory(session, toolCall, logger)
@@ -129,22 +131,25 @@ func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *t
 	if trimmedArgs == "" {
 		logger.Debug().
 			Str("tool_name", toolName).
+			Str("tool_call_id", toolCallID).
 			Msg("Tool call arguments are empty")
 	} else if !json.Valid([]byte(trimmedArgs)) {
 		logger.Debug().
 			Str("tool_name", toolName).
+			Str("tool_call_id", toolCallID).
 			Int("tool_args_length", len(toolArgs)).
 			Msg("Tool call arguments are not valid JSON")
 	}
 
-	logToolCall(logger, toolName, toolArgs)
+	logToolCall(logger, toolName, toolArgs, toolCallID)
 
 	// Show what tool is being called
-	colors.ProgressIndicator.Printf("🔧 [%s]", toolName)
+	fmt.Printf("🔧 [%s]", toolName)
 	fmt.Println()
 
 	logger.Debug().
 		Str("tool_name", toolName).
+		Str("tool_call_id", toolCallID).
 		Str("tool_args", toolArgs).
 		Msg("Executing tool")
 
@@ -171,21 +176,24 @@ func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *t
 	if result.Error != nil {
 		logger.Error().
 			Str("tool_name", toolName).
+			Str("tool_call_id", toolCallID).
 			Err(result.Error).
 			Msg("Tool execution failed")
 	} else {
 		logger.Debug().
 			Str("tool_name", toolName).
+			Str("tool_call_id", toolCallID).
 			Int("result_length", len(result.Result)).
 			Msg("Tool executed successfully")
 	}
 	return true
 }
 
-func logToolCall(logger zerolog.Logger, name, args string) {
+func logToolCall(logger zerolog.Logger, name, args, callID string) {
 	logger.Info().
 		Str("role", "tool_call").
 		Str("tool", name).
+		Str("tool_call_id", callID).
 		Str("args", args).
 		Msg("conversation")
 }

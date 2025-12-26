@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Promptline Config",
+  "type": "object",
+  "properties": {
+    "api_key": { "type": "string" },
+    "api_url": { "type": "string" },
+    "model": { "type": "string" },
+    "temperature": { "type": "number" },
+    "max_tokens": { "type": "number" },
+    "history_file": { "type": "string" },
+    "command_history_file": { "type": "string" },
+    "history_max_messages": { "type": "number" },
+    "tools": {
+      "type": "object",
+      "properties": {
+        "allow": { "type": "array", "items": { "type": "string" } },
+        "ask": { "type": "array", "items": { "type": "string" } },
+        "deny": { "type": "array", "items": { "type": "string" } },
+        "require_confirmation": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "tool_limits": {
+      "type": "object",
+      "properties": {
+        "max_file_size_bytes": { "type": "number", "default": 10485760 },
+        "max_directory_depth": { "type": "number", "default": 8 },
+        "max_directory_entries": { "type": "number", "default": 2000 }
+      }
+    },
+    "tool_path_whitelist": { "type": "array", "items": { "type": "string" } },
+    "tool_rate_limits": {
+      "type": "object",
+      "properties": {
+        "default_per_minute": { "type": "number", "default": 60 },
+        "per_tool": { "type": "object", "additionalProperties": { "type": "number" }, "default": {} },
+        "cooldown_seconds": {
+          "type": "object",
+          "additionalProperties": { "type": "number" },
+          "default": { "execute_shell_command": 2 }
+        }
+      }
+    },
+    "tool_timeouts": {
+      "type": "object",
+      "properties": {
+        "default_seconds": { "type": "number", "default": 0 },
+        "per_tool_seconds": {
+          "type": "object",
+          "additionalProperties": { "type": "number" },
+          "default": { "execute_shell_command": 5 }
+        }
+      }
+    },
+    "tool_output_filters": {
+      "type": "object",
+      "properties": {
+        "max_chars": { "type": "number" },
+        "strip_ansi": { "type": "boolean" },
+        "strip_control": { "type": "boolean" }
+      }
+    }
+  }
+}

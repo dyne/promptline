@@ -25,6 +25,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -50,6 +51,9 @@ type Session struct {
 	BaseURL           string
 	ToolApprover      ToolApprovalFunc
 	Logger            *zerolog.Logger
+	SessionID         string
+	DryRun            bool
+	requestCounter    uint64
 	mu                sync.Mutex
 	lastSavedMsgCount int // Track how many messages were last saved (protected by mu)
 }
@@ -58,6 +62,7 @@ type Session struct {
 type ToolApprovalFunc func(call openai.ToolCall) (bool, error)
 
 var defaultSystemPrompt = mustLoadSystemPrompt()
+var sessionCounter uint64
 
 func mustLoadSystemPrompt() string {
 	prompt, err := loadSystemPrompt()
@@ -73,6 +78,9 @@ func loadSystemPrompt() (string, error) {
 
 // NewSession creates a new chat session with a default OpenAI client.
 func NewSession(cfg *config.Config) *Session {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
 	// Create client with custom base URL if provided
 	clientConfig := openai.DefaultConfig(cfg.APIKey)
 	if cfg.APIURL != "" {
@@ -90,7 +98,23 @@ func NewSession(cfg *config.Config) *Session {
 // NewSessionWithClient creates a new chat session with a provided client (for testing).
 func NewSessionWithClient(cfg *config.Config, client ChatClient) *Session {
 	// Initialize tool registry
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	tools.ConfigureLimits(cfg.ToolLimitsConfig())
+	tools.ConfigurePathWhitelist(cfg.ToolPathWhitelistConfig())
 	toolRegistry := tools.NewRegistryWithPolicy(cfg.ToolPolicy())
+	toolRegistry.ConfigureRateLimits(cfg.ToolRateLimitsConfig())
+	toolRegistry.ConfigureTimeouts(cfg.ToolTimeoutsConfig())
+	tools.ConfigureOutputFilters(cfg.ToolOutputFiltersConfig())
+
+	if client == nil {
+		clientConfig := openai.DefaultConfig(cfg.APIKey)
+		if cfg.APIURL != "" {
+			clientConfig.BaseURL = cfg.APIURL
+		}
+		client = openai.NewClientWithConfig(clientConfig)
+	}
 
 	systemPrompt := defaultSystemPrompt
 
@@ -107,6 +131,7 @@ func NewSessionWithClient(cfg *config.Config, client ChatClient) *Session {
 		Config:       cfg,
 		Messages:     messages,
 		ToolRegistry: toolRegistry,
+		SessionID:    fmt.Sprintf("session-%d", atomic.AddUint64(&sessionCounter, 1)),
 	}
 	if cfg.APIURL != "" {
 		sess.BaseURL = cfg.APIURL
@@ -125,6 +150,7 @@ func (s *Session) AddMessage(role, content string) {
 		Role:    role,
 		Content: content,
 	})
+	s.trimHistoryLocked()
 }
 
 // AddAssistantMessage adds an assistant message with optional tool calls.
@@ -136,6 +162,7 @@ func (s *Session) AddAssistantMessage(content string, toolCalls []openai.ToolCal
 		Content:   content,
 		ToolCalls: toolCalls,
 	})
+	s.trimHistoryLocked()
 }
 
 // AddToolResultMessage appends a tool result message.
@@ -145,9 +172,14 @@ func (s *Session) AddToolResultMessage(call openai.ToolCall, result *tools.ToolR
 
 	// Use plain result as content. TOON encoding was causing issues with history serialization.
 	// The API accepts plain text for tool results.
-	content := result.Result
-	if result.Error != nil {
-		content = fmt.Sprintf("Error: %v", result.Error)
+	content := ""
+	if result == nil {
+		content = "Error: tool result is nil"
+	} else {
+		content = result.Result
+		if result.Error != nil {
+			content = fmt.Sprintf("Error: %v", result.Error)
+		}
 	}
 
 	name := call.Function.Name
@@ -160,6 +192,7 @@ func (s *Session) AddToolResultMessage(call openai.ToolCall, result *tools.ToolR
 		Name:       name,
 		ToolCallID: call.ID,
 	})
+	s.trimHistoryLocked()
 }
 
 // MessagesSnapshot returns a copy of the current messages.
@@ -167,17 +200,17 @@ func (s *Session) MessagesSnapshot() []openai.ChatCompletionMessage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	msgs := make([]openai.ChatCompletionMessage, len(s.Messages))
-	for i, msg := range s.Messages {
-		msgs[i] = msg
-		if len(msg.ToolCalls) == 0 {
+	copy(msgs, s.Messages)
+	for i := range msgs {
+		if len(msgs[i].ToolCalls) == 0 {
 			continue
 		}
-		toolCalls := make([]openai.ToolCall, len(msg.ToolCalls))
-		for j, call := range msg.ToolCalls {
-			if strings.TrimSpace(call.Function.Arguments) == "" {
-				call.Function.Arguments = "{}"
+		toolCalls := make([]openai.ToolCall, len(msgs[i].ToolCalls))
+		copy(toolCalls, msgs[i].ToolCalls)
+		for j := range toolCalls {
+			if strings.TrimSpace(toolCalls[j].Function.Arguments) == "" {
+				toolCalls[j].Function.Arguments = "{}"
 			}
-			toolCalls[j] = call
 		}
 		msgs[i].ToolCalls = toolCalls
 	}
@@ -192,6 +225,7 @@ func (s *Session) GetResponseWithContext(ctx context.Context, prompt string) (st
 	// Loop to handle tool calls
 	for {
 		start := time.Now()
+		requestID := s.nextRequestID()
 		req := openai.ChatCompletionRequest{
 			Model:    s.Config.Model,
 			Messages: s.MessagesSnapshot(),
@@ -206,13 +240,13 @@ func (s *Session) GetResponseWithContext(ctx context.Context, prompt string) (st
 			req.MaxTokens = *s.Config.MaxTokens
 		}
 
-		s.debugLogRequest("create_completion", req)
+		s.debugLogRequest(requestID, "create_completion", req)
 		resp, err := s.Client.CreateChatCompletion(ctx, req)
 		if err != nil {
-			s.debugLogError("create_completion", err)
-			return "", &APIError{Operation: "create_completion", Err: err}
+			s.debugLogError(requestID, "create_completion", err)
+			return "", NewAPIError("create_completion", err)
 		}
-		s.debugLogCompletion("create_completion", time.Since(start), resp)
+		s.debugLogCompletion(requestID, "create_completion", time.Since(start), resp)
 
 		response := resp.Choices[0].Message
 		s.AddAssistantMessage(response.Content, response.ToolCalls)
@@ -234,38 +268,41 @@ func (s *Session) GetResponseWithContext(ctx context.Context, prompt string) (st
 
 // ExecuteToolCallWithApproval evaluates tool permission and optionally asks for approval.
 func (s *Session) ExecuteToolCallWithApproval(call openai.ToolCall) *tools.ToolResult {
+	if s.ToolRegistry == nil {
+		return invalidToolResult("unknown_tool", fmt.Errorf("%w: tool registry unavailable", tools.ErrToolNotFound))
+	}
 	name := call.Function.Name
 	if name == "" {
 		return invalidToolResult("unknown_tool", fmt.Errorf("%w: tool call missing function name", tools.ErrInvalidArguments))
 	}
-	if err := s.preflightValidateToolCall(name, call.Function.Arguments); err != nil {
+	if err := s.ToolRegistry.ValidateToolCall(name, call.Function.Arguments); err != nil {
 		return err
 	}
 	perm := s.ToolRegistry.GetPermission(name)
-	if s.Logger != nil {
-		s.Logger.Debug().
+	if logger := s.sessionLogger(); logger != nil {
+		logger.Debug().
 			Str("tool_name", name).
 			Str("permission", string(perm.Level)).
 			Msg("Tool permission evaluated")
 	}
 	switch perm.Level {
 	case tools.PermissionAllow:
-		return s.ToolRegistry.ExecuteOpenAIToolCall(call)
+		return s.ToolRegistry.ExecuteOpenAIToolCallWithOptions(call, tools.ExecuteOptions{DryRun: s.DryRun})
 	case tools.PermissionDeny:
 		return deniedToolResult(name, fmt.Sprintf("Tool %q is denied by policy.", name), tools.ErrToolNotAllowed)
 	case tools.PermissionAsk:
 		if s.ToolApprover == nil {
 			return deniedToolResult(name, fmt.Sprintf("Tool %q requires user approval, but no approver is configured.", name), tools.ErrToolDeniedByUser)
 		}
-		if s.Logger != nil {
-			s.Logger.Debug().
+		if logger := s.sessionLogger(); logger != nil {
+			logger.Debug().
 				Str("tool_name", name).
 				Msg("Awaiting tool approval")
 		}
 		approved, err := s.ToolApprover(call)
 		if err != nil {
-			if s.Logger != nil {
-				s.Logger.Debug().
+			if logger := s.sessionLogger(); logger != nil {
+				logger.Debug().
 					Str("tool_name", name).
 					Err(err).
 					Msg("Tool approval failed")
@@ -273,19 +310,19 @@ func (s *Session) ExecuteToolCallWithApproval(call openai.ToolCall) *tools.ToolR
 			return deniedToolResult(name, fmt.Sprintf("Tool %q approval failed: %v", name, err), tools.ErrToolDeniedByUser)
 		}
 		if !approved {
-			if s.Logger != nil {
-				s.Logger.Debug().
+			if logger := s.sessionLogger(); logger != nil {
+				logger.Debug().
 					Str("tool_name", name).
 					Msg("Tool approval denied by user")
 			}
 			return deniedToolResult(name, fmt.Sprintf("User denied execution of tool %q.", name), tools.ErrToolDeniedByUser)
 		}
-		if s.Logger != nil {
-			s.Logger.Debug().
+		if logger := s.sessionLogger(); logger != nil {
+			logger.Debug().
 				Str("tool_name", name).
 				Msg("Tool approval granted")
 		}
-		return s.ToolRegistry.ExecuteOpenAIToolCallWithOptions(call, tools.ExecuteOptions{Force: true})
+		return s.ToolRegistry.ExecuteOpenAIToolCallWithOptions(call, tools.ExecuteOptions{Force: true, DryRun: s.DryRun})
 	default:
 		return deniedToolResult(name, fmt.Sprintf("Tool %q requires user approval.", name), tools.ErrToolDeniedByUser)
 	}
@@ -304,71 +341,6 @@ func invalidToolResult(name string, err error) *tools.ToolResult {
 		Function: name,
 		Result:   fmt.Sprintf("Error: %v", err),
 		Error:    err,
-	}
-}
-
-func (s *Session) preflightValidateToolCall(name, argsJSON string) *tools.ToolResult {
-	if !s.toolExists(name) {
-		return invalidToolResult(name, fmt.Errorf("%w: tool %q not found", tools.ErrToolNotFound, name))
-	}
-
-	args := map[string]interface{}{}
-	if strings.TrimSpace(argsJSON) != "" {
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			return invalidToolResult(name, fmt.Errorf("%w: %v", tools.ErrInvalidArguments, err))
-		}
-	}
-
-	switch name {
-	case "execute_shell_command":
-		if !hasRequiredStringArg(args, "command") {
-			return invalidToolResult(name, fmt.Errorf("%w: missing or invalid 'command' parameter (use write_file for file writes)", tools.ErrInvalidArguments))
-		}
-	case "write_file":
-		if !hasRequiredStringArg(args, "path") || !hasRequiredStringArg(args, "content") {
-			return invalidToolResult(name, fmt.Errorf("%w: missing or invalid 'path' or 'content' parameter", tools.ErrInvalidArguments))
-		}
-	case "read_file":
-		if !hasNonEmptyArg(args, "path") {
-			return invalidToolResult(name, fmt.Errorf("%w: missing or invalid 'path' parameter", tools.ErrInvalidArguments))
-		}
-	}
-
-	return nil
-}
-
-func (s *Session) toolExists(name string) bool {
-	for _, toolName := range s.ToolRegistry.GetToolNames() {
-		if toolName == name {
-			return true
-		}
-	}
-	return false
-}
-
-func hasRequiredStringArg(args map[string]interface{}, key string) bool {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return false
-	}
-	str, ok := value.(string)
-	return ok && strings.TrimSpace(str) != ""
-}
-
-func hasNonEmptyArg(args map[string]interface{}, key string) bool {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return false
-	}
-	switch v := value.(type) {
-	case string:
-		return strings.TrimSpace(v) != ""
-	case []interface{}:
-		return len(v) > 0
-	case map[string]interface{}:
-		return len(v) > 0
-	default:
-		return true
 	}
 }
 
@@ -419,18 +391,19 @@ func (s *Session) StreamResponseWithContext(ctx context.Context, prompt string, 
 	}
 
 	start := time.Now()
-	stream, err := s.createStream(ctx)
+	requestID := s.nextRequestID()
+	stream, err := s.createStream(ctx, requestID)
 	if err != nil {
-		s.debugLogError("create_stream", err)
-		events <- NewErrorEvent(&StreamError{Operation: "create_stream", Err: err})
+		s.debugLogError(requestID, "create_stream", err)
+		events <- NewErrorEvent(NewStreamError("create_stream", err))
 		return
 	}
 	defer stream.Close()
 
-	s.processStream(ctx, stream, events, start)
+	s.processStream(ctx, stream, events, start, requestID)
 }
 
-func (s *Session) createStream(ctx context.Context) (*openai.ChatCompletionStream, error) {
+func (s *Session) createStream(ctx context.Context, requestID string) (*openai.ChatCompletionStream, error) {
 	req := openai.ChatCompletionRequest{
 		Model:    s.Config.Model,
 		Messages: s.MessagesSnapshot(),
@@ -446,15 +419,16 @@ func (s *Session) createStream(ctx context.Context) (*openai.ChatCompletionStrea
 		req.MaxTokens = *s.Config.MaxTokens
 	}
 
-	s.debugLogRequest("create_stream", req)
+	s.debugLogRequest(requestID, "create_stream", req)
 	return s.Client.CreateChatCompletionStream(ctx, req)
 }
 
 // processStream handles the streaming loop and local state accumulation.
 // Thread-safety: The contentBuilder, toolCalls, and argBuilders are local to
 // this function call and not shared with other goroutines, so no locking needed.
-func (s *Session) processStream(ctx context.Context, stream *openai.ChatCompletionStream, events chan<- StreamEvent, start time.Time) {
-	var contentBuilder strings.Builder
+func (s *Session) processStream(ctx context.Context, stream *openai.ChatCompletionStream, events chan<- StreamEvent, start time.Time, requestID string) {
+	contentBuilder := getBuilder()
+	defer putBuilder(contentBuilder)
 	toolCalls := make(map[string]*openai.ToolCall)
 	argBuilders := make(map[string]*strings.Builder)
 	indexToKey := make(map[int]string)
@@ -464,27 +438,28 @@ func (s *Session) processStream(ctx context.Context, stream *openai.ChatCompleti
 	for {
 		select {
 		case <-ctx.Done():
-			s.debugLogStreamEnd("stream_cancelled", time.Since(start), recvCount, len(toolCalls), ctx.Err())
+			s.debugLogStreamEnd(requestID, "stream_cancelled", time.Since(start), recvCount, len(toolCalls), ctx.Err())
+			releaseBuilders(argBuilders)
 			events <- NewErrorEvent(ctx.Err())
 			return
 		default:
 			response, err := stream.Recv()
 			if err != nil {
-				s.debugLogStreamEnd("stream_recv", time.Since(start), recvCount, len(toolCalls), err)
-				s.handleStreamEnd(err, &contentBuilder, toolCalls, argBuilders, events)
+				s.debugLogStreamEnd(requestID, "stream_recv", time.Since(start), recvCount, len(toolCalls), err)
+				s.handleStreamEnd(err, contentBuilder, toolCalls, argBuilders, events)
 				return
 			}
 			recvCount++
 			if firstChunk.IsZero() {
 				firstChunk = time.Now()
-				s.debugLogFirstChunk(time.Since(start))
+				s.debugLogFirstChunk(requestID, time.Since(start))
 			}
 
 			if len(response.Choices) == 0 {
 				continue
 			}
 
-			s.handleStreamChunk(response.Choices[0].Delta, &contentBuilder, toolCalls, argBuilders, indexToKey, events)
+			s.handleStreamChunk(response.Choices[0].Delta, contentBuilder, toolCalls, argBuilders, indexToKey, events)
 		}
 	}
 }
@@ -493,10 +468,12 @@ func (s *Session) handleStreamEnd(err error, contentBuilder *strings.Builder, to
 	if err == io.EOF {
 		finalCalls := finalizeToolCalls(toolCalls, argBuilders)
 		s.AddAssistantMessage(contentBuilder.String(), finalCalls)
+		releaseBuilders(argBuilders)
 		s.emitToolCalls(finalCalls, events)
 		return
 	}
-	events <- NewErrorEvent(&StreamError{Operation: "receive_chunk", Err: err})
+	releaseBuilders(argBuilders)
+	events <- NewErrorEvent(NewStreamError("receive_chunk", err))
 }
 
 func (s *Session) handleStreamChunk(delta openai.ChatCompletionStreamChoiceDelta, contentBuilder *strings.Builder, toolCalls map[string]*openai.ToolCall, argBuilders map[string]*strings.Builder, indexToKey map[int]string, events chan<- StreamEvent) {
@@ -520,11 +497,13 @@ func (s *Session) emitToolCalls(finalCalls []openai.ToolCall, events chan<- Stre
 	}
 }
 
-func (s *Session) debugLogRequest(operation string, req openai.ChatCompletionRequest) {
-	if s.Logger == nil {
+func (s *Session) debugLogRequest(requestID, operation string, req openai.ChatCompletionRequest) {
+	logger := s.sessionLogger()
+	if logger == nil {
 		return
 	}
-	s.Logger.Debug().
+	logger.Debug().
+		Str("request_id", requestID).
 		Str("operation", operation).
 		Str("model", req.Model).
 		Int("message_count", len(req.Messages)).
@@ -532,8 +511,9 @@ func (s *Session) debugLogRequest(operation string, req openai.ChatCompletionReq
 		Msg("Sending request")
 }
 
-func (s *Session) debugLogCompletion(operation string, duration time.Duration, resp openai.ChatCompletionResponse) {
-	if s.Logger == nil {
+func (s *Session) debugLogCompletion(requestID, operation string, duration time.Duration, resp openai.ChatCompletionResponse) {
+	logger := s.sessionLogger()
+	if logger == nil {
 		return
 	}
 	choiceCount := len(resp.Choices)
@@ -541,7 +521,8 @@ func (s *Session) debugLogCompletion(operation string, duration time.Duration, r
 	if choiceCount > 0 {
 		toolCallCount = len(resp.Choices[0].Message.ToolCalls)
 	}
-	s.Logger.Debug().
+	logger.Debug().
+		Str("request_id", requestID).
 		Str("operation", operation).
 		Dur("duration_ms", duration).
 		Int("choice_count", choiceCount).
@@ -549,20 +530,24 @@ func (s *Session) debugLogCompletion(operation string, duration time.Duration, r
 		Msg("Received response")
 }
 
-func (s *Session) debugLogFirstChunk(elapsed time.Duration) {
-	if s.Logger == nil {
+func (s *Session) debugLogFirstChunk(requestID string, elapsed time.Duration) {
+	logger := s.sessionLogger()
+	if logger == nil {
 		return
 	}
-	s.Logger.Debug().
+	logger.Debug().
+		Str("request_id", requestID).
 		Dur("time_to_first_chunk_ms", elapsed).
 		Msg("Received first stream chunk")
 }
 
-func (s *Session) debugLogStreamEnd(operation string, duration time.Duration, recvCount, toolCallCount int, err error) {
-	if s.Logger == nil {
+func (s *Session) debugLogStreamEnd(requestID, operation string, duration time.Duration, recvCount, toolCallCount int, err error) {
+	logger := s.sessionLogger()
+	if logger == nil {
 		return
 	}
-	event := s.Logger.Debug().
+	event := logger.Debug().
+		Str("request_id", requestID).
 		Str("operation", operation).
 		Dur("duration_ms", duration).
 		Int("chunks", recvCount).
@@ -573,14 +558,29 @@ func (s *Session) debugLogStreamEnd(operation string, duration time.Duration, re
 	event.Msg("Stream finished")
 }
 
-func (s *Session) debugLogError(operation string, err error) {
-	if s.Logger == nil {
+func (s *Session) debugLogError(requestID, operation string, err error) {
+	logger := s.sessionLogger()
+	if logger == nil {
 		return
 	}
-	s.Logger.Debug().
+	logger.Debug().
+		Str("request_id", requestID).
 		Str("operation", operation).
 		Err(err).
 		Msg("Request failed")
+}
+
+func (s *Session) sessionLogger() *zerolog.Logger {
+	if s.Logger == nil {
+		return nil
+	}
+	logger := s.Logger.With().Str("session_id", s.SessionID).Logger()
+	return &logger
+}
+
+func (s *Session) nextRequestID() string {
+	id := atomic.AddUint64(&s.requestCounter, 1)
+	return fmt.Sprintf("%s-request-%d", s.SessionID, id)
 }
 
 // accumulateToolCall merges incremental tool call deltas into a stored call.
@@ -620,7 +620,7 @@ func accumulateToolCall(toolCalls map[string]*openai.ToolCall, argBuilders map[s
 
 	builder, ok := argBuilders[key]
 	if !ok {
-		builder = &strings.Builder{}
+		builder = getBuilder()
 		argBuilders[key] = builder
 	}
 	builder.WriteString(tc.Function.Arguments)
@@ -748,7 +748,7 @@ func (s *Session) SaveConversationHistory(filepath string) error {
 
 	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		return &HistoryError{Operation: "open", Filepath: filepath, Err: err}
+		return NewHistoryError("open", filepath, err)
 	}
 	defer file.Close()
 
@@ -756,11 +756,12 @@ func (s *Session) SaveConversationHistory(filepath string) error {
 	// Only save messages we haven't saved yet
 	for i := s.lastSavedMsgCount; i < len(history); i++ {
 		if err := encoder.Encode(history[i]); err != nil {
-			return &HistoryError{Operation: "encode", Filepath: filepath, Err: err}
+			return NewHistoryError("encode", filepath, err)
 		}
 	}
 
 	s.lastSavedMsgCount = len(history)
+	s.trimHistoryLocked()
 	return nil
 }
 
@@ -774,27 +775,29 @@ func (s *Session) LoadConversationHistory(filepath string, maxLines int) error {
 		if os.IsNotExist(err) {
 			return nil // No history file is okay
 		}
-		return &HistoryError{Operation: "open", Filepath: filepath, Err: err}
+		return NewHistoryError("open", filepath, err)
 	}
 	defer file.Close()
 
 	// Read all lines
 	var messages []openai.ChatCompletionMessage
 	decoder := json.NewDecoder(file)
+	limit := maxLines
+	if limit <= 0 && s.Config != nil {
+		limit = s.Config.HistoryMaxMessages
+	}
 	for {
 		var msg openai.ChatCompletionMessage
 		if err := decoder.Decode(&msg); err != nil {
 			if err == io.EOF {
 				break
 			}
-			return &HistoryError{Operation: "decode", Filepath: filepath, Err: err}
+			return NewHistoryError("decode", filepath, err)
 		}
 		messages = append(messages, msg)
-	}
-
-	// Apply limit - keep only the last N messages
-	if maxLines > 0 && len(messages) > maxLines {
-		messages = messages[len(messages)-maxLines:]
+		if limit > 0 && len(messages) > limit {
+			messages = messages[1:]
+		}
 	}
 
 	// Append to session (after system message)
@@ -802,8 +805,32 @@ func (s *Session) LoadConversationHistory(filepath string, maxLines int) error {
 
 	// Update saved message count since we loaded them
 	s.lastSavedMsgCount = len(messages)
+	s.trimHistoryLocked()
 
 	return nil
+}
+
+func (s *Session) trimHistoryLocked() {
+	if s.Config == nil || s.Config.HistoryMaxMessages <= 0 {
+		return
+	}
+	if len(s.Messages) <= 1 {
+		return
+	}
+	historyCount := len(s.Messages) - 1
+	overflow := historyCount - s.Config.HistoryMaxMessages
+	if overflow <= 0 {
+		return
+	}
+	drop := overflow
+	if drop > s.lastSavedMsgCount {
+		drop = s.lastSavedMsgCount
+	}
+	if drop <= 0 {
+		return
+	}
+	s.Messages = append([]openai.ChatCompletionMessage{s.Messages[0]}, s.Messages[1+drop:]...)
+	s.lastSavedMsgCount -= drop
 }
 
 // PrintHistory prints the conversation history

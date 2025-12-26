@@ -14,13 +14,24 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-package main
+package tools
 
-import (
-	"promptline/internal/theme"
+import "sync"
+
+var (
+	pathRulesMu     sync.RWMutex
+	allowedBaseDirs []string
 )
 
-// testColorScheme creates a minimal color scheme for testing
-func testColorScheme() *theme.ColorScheme {
-	return theme.DefaultColorScheme()
+// ConfigurePathWhitelist sets optional base directories that tools may access.
+func ConfigurePathWhitelist(paths []string) {
+	pathRulesMu.Lock()
+	defer pathRulesMu.Unlock()
+	allowedBaseDirs = append([]string{}, paths...)
+}
+
+func getPathWhitelist() []string {
+	pathRulesMu.RLock()
+	defer pathRulesMu.RUnlock()
+	return append([]string{}, allowedBaseDirs...)
 }

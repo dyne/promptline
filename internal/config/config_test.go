@@ -20,6 +20,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"promptline/internal/tools"
 )
 
 func writeTempConfig(t *testing.T, content string) string {
@@ -45,7 +47,7 @@ func TestEnvOverridesFile(t *testing.T) {
 		t.Fatalf("expected env key to override file, got %s", cfg.APIKey)
 	}
 	if cfg.APIURL != "https://env.example" {
-		t.Fatalf("expected env api url to override file, got %s", cfg.APIURL)
+		t.Fatalf("expected env API URL to override file, got %s", cfg.APIURL)
 	}
 }
 
@@ -58,6 +60,22 @@ func TestMissingAPIKeyReturnsError(t *testing.T) {
 	_, err := LoadConfig(path)
 	if err == nil {
 		t.Fatal("expected error for missing API key")
+	}
+}
+
+func TestConfigValidationRejectsUnknownField(t *testing.T) {
+	path := writeTempConfig(t, `{"api_key":"k","unknown_field":123}`)
+	_, err := LoadConfig(path)
+	if err == nil {
+		t.Fatal("expected error for unknown field")
+	}
+}
+
+func TestConfigValidationRejectsInvalidType(t *testing.T) {
+	path := writeTempConfig(t, `{"api_key":"k","tool_limits":{"max_file_size_bytes":"oops"}}`)
+	_, err := LoadConfig(path)
+	if err == nil {
+		t.Fatal("expected error for invalid type")
 	}
 }
 
@@ -74,7 +92,148 @@ func TestDefaultsApplied(t *testing.T) {
 		t.Fatalf("expected default model to be set")
 	}
 	if cfg.APIURL == "" {
-		t.Fatalf("expected default api url to be set")
+		t.Fatalf("expected default API URL to be set")
+	}
+}
+
+func TestToolLimitsDefaultsApplied(t *testing.T) {
+	path := writeTempConfig(t, `{"api_key":"k"}`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defaults := tools.DefaultLimits()
+	if cfg.ToolLimits.MaxFileSizeBytes != defaults.MaxFileSizeBytes {
+		t.Fatalf("expected default max file size %d, got %d", defaults.MaxFileSizeBytes, cfg.ToolLimits.MaxFileSizeBytes)
+	}
+	if cfg.ToolLimits.MaxDirectoryDepth != defaults.MaxDirectoryDepth {
+		t.Fatalf("expected default max directory depth %d, got %d", defaults.MaxDirectoryDepth, cfg.ToolLimits.MaxDirectoryDepth)
+	}
+	if cfg.ToolLimits.MaxDirectoryEntries != defaults.MaxDirectoryEntries {
+		t.Fatalf("expected default max directory entries %d, got %d", defaults.MaxDirectoryEntries, cfg.ToolLimits.MaxDirectoryEntries)
+	}
+}
+
+func TestToolLimitsCustom(t *testing.T) {
+	content := `{
+		"api_key": "k",
+		"tool_limits": {
+			"max_file_size_bytes": 1024,
+			"max_directory_depth": 3,
+			"max_directory_entries": 25
+		}
+	}`
+	path := writeTempConfig(t, content)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ToolLimits.MaxFileSizeBytes != 1024 {
+		t.Fatalf("expected max file size 1024, got %d", cfg.ToolLimits.MaxFileSizeBytes)
+	}
+	if cfg.ToolLimits.MaxDirectoryDepth != 3 {
+		t.Fatalf("expected max directory depth 3, got %d", cfg.ToolLimits.MaxDirectoryDepth)
+	}
+	if cfg.ToolLimits.MaxDirectoryEntries != 25 {
+		t.Fatalf("expected max directory entries 25, got %d", cfg.ToolLimits.MaxDirectoryEntries)
+	}
+}
+
+func TestToolPathWhitelistCustom(t *testing.T) {
+	content := `{
+		"api_key": "k",
+		"tool_path_whitelist": ["docs", "internal"]
+	}`
+	path := writeTempConfig(t, content)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.ToolPathWhitelist) != 2 {
+		t.Fatalf("expected 2 whitelist entries, got %d", len(cfg.ToolPathWhitelist))
+	}
+	if cfg.ToolPathWhitelist[0] != "docs" {
+		t.Fatalf("expected first whitelist entry docs, got %s", cfg.ToolPathWhitelist[0])
+	}
+	if cfg.ToolPathWhitelist[1] != "internal" {
+		t.Fatalf("expected second whitelist entry internal, got %s", cfg.ToolPathWhitelist[1])
+	}
+}
+
+func TestToolRateLimitsCustom(t *testing.T) {
+	content := `{
+		"api_key": "k",
+		"tool_rate_limits": {
+			"default_per_minute": 10,
+			"per_tool": {
+				"read_file": 2
+			},
+			"cooldown_seconds": {
+				"execute_shell_command": 7
+			}
+		}
+	}`
+	path := writeTempConfig(t, content)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ToolRateLimits.DefaultPerMinute != 10 {
+		t.Fatalf("expected default_per_minute 10, got %d", cfg.ToolRateLimits.DefaultPerMinute)
+	}
+	if cfg.ToolRateLimits.PerTool["read_file"] != 2 {
+		t.Fatalf("expected read_file rate 2, got %d", cfg.ToolRateLimits.PerTool["read_file"])
+	}
+	if cfg.ToolRateLimits.CooldownSeconds["execute_shell_command"] != 7 {
+		t.Fatalf("expected execute_shell_command cooldown 7, got %d", cfg.ToolRateLimits.CooldownSeconds["execute_shell_command"])
+	}
+}
+
+func TestToolTimeoutsCustom(t *testing.T) {
+	content := `{
+		"api_key": "k",
+		"tool_timeouts": {
+			"default_seconds": 3,
+			"per_tool_seconds": {
+				"execute_shell_command": 9
+			}
+		}
+	}`
+	path := writeTempConfig(t, content)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ToolTimeouts.DefaultSeconds != 3 {
+		t.Fatalf("expected default_seconds 3, got %d", cfg.ToolTimeouts.DefaultSeconds)
+	}
+	if cfg.ToolTimeouts.PerToolSeconds["execute_shell_command"] != 9 {
+		t.Fatalf("expected execute_shell_command timeout 9, got %d", cfg.ToolTimeouts.PerToolSeconds["execute_shell_command"])
+	}
+}
+
+func TestToolOutputFiltersCustom(t *testing.T) {
+	content := `{
+		"api_key": "k",
+		"tool_output_filters": {
+			"max_chars": 1200,
+			"strip_ansi": false,
+			"strip_control": false
+		}
+	}`
+	path := writeTempConfig(t, content)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ToolOutputFilters.MaxChars != 1200 {
+		t.Fatalf("expected max_chars 1200, got %d", cfg.ToolOutputFilters.MaxChars)
+	}
+	if cfg.ToolOutputFilters.StripANSI {
+		t.Fatal("expected strip_ansi false")
+	}
+	if cfg.ToolOutputFilters.StripControl {
+		t.Fatal("expected strip_control false")
 	}
 }
 

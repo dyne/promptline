@@ -20,9 +20,9 @@ import (
 	"context"
 	"testing"
 
-	"strings"
 	"github.com/sashabaranov/go-openai"
 	"promptline/internal/config"
+	"strings"
 )
 
 // BenchmarkAddMessage measures message addition performance
@@ -32,7 +32,7 @@ func BenchmarkAddMessage(b *testing.B) {
 		Model:  "gpt-4o-mini",
 	}
 	session := NewSession(cfg)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		session.AddMessage(openai.ChatMessageRoleUser, "test message")
@@ -46,7 +46,7 @@ func BenchmarkAddAssistantMessage(b *testing.B) {
 		Model:  "gpt-4o-mini",
 	}
 	session := NewSession(cfg)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		session.AddAssistantMessage("response", nil)
@@ -60,13 +60,13 @@ func BenchmarkMessagesSnapshot(b *testing.B) {
 		Model:  "gpt-4o-mini",
 	}
 	session := NewSession(cfg)
-	
+
 	// Add some messages
 	for i := 0; i < 100; i++ {
 		session.AddMessage(openai.ChatMessageRoleUser, "message")
 		session.AddAssistantMessage("response", nil)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = session.MessagesSnapshot()
@@ -89,13 +89,13 @@ func BenchmarkGetResponseWithMock(b *testing.B) {
 			}, nil
 		},
 	}
-	
+
 	cfg := &config.Config{
 		APIKey: "test-key",
 		Model:  "gpt-4o-mini",
 	}
 	session := NewSessionWithClient(cfg, mockClient)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = session.GetResponse("test input")
@@ -120,14 +120,14 @@ func BenchmarkFinalizeToolCalls(b *testing.B) {
 			},
 		},
 	}
-	
+
 	argBuilders := make(map[string]*strings.Builder)
 	for id := range toolCalls {
 		builder := &strings.Builder{}
 		builder.WriteString(`{"arg":"value"}`)
 		argBuilders[id] = builder
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = finalizeToolCalls(toolCalls, argBuilders)
@@ -141,7 +141,7 @@ func BenchmarkStreamEventCreation(b *testing.B) {
 			_ = NewContentEvent("test content")
 		}
 	})
-	
+
 	b.Run("NewToolCallEvent", func(b *testing.B) {
 		toolCall := &openai.ToolCall{
 			ID:   "test",
@@ -152,9 +152,9 @@ func BenchmarkStreamEventCreation(b *testing.B) {
 			_ = NewToolCallEvent(toolCall)
 		}
 	})
-	
+
 	b.Run("NewErrorEvent", func(b *testing.B) {
-		err := &StreamError{Operation: "test", Err: context.Canceled}
+		err := NewStreamError("test", context.Canceled)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_ = NewErrorEvent(err)
@@ -169,7 +169,7 @@ func BenchmarkConcurrentMessageAddition(b *testing.B) {
 		Model:  "gpt-4o-mini",
 	}
 	session := NewSession(cfg)
-	
+
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {

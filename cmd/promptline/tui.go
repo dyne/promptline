@@ -24,7 +24,6 @@ import (
 	"github.com/rs/zerolog"
 	"promptline/internal/chat"
 	"promptline/internal/config"
-	"promptline/internal/theme"
 )
 
 func runTUIMode(logger zerolog.Logger) {
@@ -36,22 +35,16 @@ func runTUIMode(logger zerolog.Logger) {
 		logger.Fatal().Err(err).Msg("Failed to load config")
 	}
 
-	// Load theme with manager (supports NO_COLOR env var)
-	themeMgr, err := theme.NewManager("theme.json")
-	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to load theme")
-	}
-	colors := themeMgr.ColorScheme()
-
 	// Create chat session
 	session := chat.NewSession(cfg)
 	defer session.Close()
-	session.ToolApprover = newToolApprover(colors)
+	session.ToolApprover = newToolApprover()
 	session.Logger = &logger
+	session.DryRun = *dryRun
 
 	// Initialize readline with dynamic command completion and Ctrl-R handler
 	rl, err := readline.NewEx(&readline.Config{
-		Prompt:          colors.User.Sprint("❯ "),
+		Prompt:          "❯ ",
 		HistoryFile:     cfg.CommandHistoryFile,
 		AutoComplete:    getCommandCompleter(),
 		InterruptPrompt: "^C",
@@ -66,7 +59,7 @@ func runTUIMode(logger zerolog.Logger) {
 	rl.Config.FuncFilterInputRune = func(r rune) (rune, bool) {
 		if r == 18 { // Ctrl-R
 			// Trigger history search
-			selected := searchConversationHistory(session, colors, logger)
+			selected := searchConversationHistory(session, logger)
 			if selected != "" {
 				// Write the selected text to readline buffer
 				rl.WriteStdin([]byte(selected))
@@ -77,7 +70,7 @@ func runTUIMode(logger zerolog.Logger) {
 	}
 
 	// Display header
-	colors.Header.Println("Promptline by Dyne.org")
+	fmt.Println("Promptline by Dyne.org")
 	fmt.Printf("Connected to: %s\n", session.BaseURL)
 	fmt.Printf("Model in use: %s\n", session.Config.Model)
 	// fmt.Println("Type /help for commands, Ctrl+C or /quit to exit")
@@ -105,7 +98,7 @@ func runTUIMode(logger zerolog.Logger) {
 
 		// Handle slash commands
 		if strings.HasPrefix(line, "/") {
-			if handleCommand(line, session, colors, logger, &debugMode) {
+			if handleCommand(line, session, logger, &debugMode) {
 				// /quit was called
 				break
 			}
@@ -113,7 +106,7 @@ func runTUIMode(logger zerolog.Logger) {
 		}
 
 		// Handle conversation
-		handleConversation(line, session, colors, logger)
+		handleConversation(line, session, logger)
 
 	}
 

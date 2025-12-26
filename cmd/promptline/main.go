@@ -29,6 +29,7 @@ import (
 var (
 	debugMode = flag.Bool("d", false, "Enable debug mode")
 	logFile   = flag.String("log-file", "", "Log file path (logs disabled by default)")
+	dryRun    = flag.Bool("dry-run", false, "Validate tool calls without executing them")
 )
 
 func main() {
@@ -63,13 +64,13 @@ func initLogger(debug bool, logFilePath string) (zerolog.Logger, error) {
 	// Configure output
 	var output io.Writer
 	if debug {
-    if logFilePath == "" {
-      cwd, cwdErr := os.Getwd()
-      if cwdErr != nil {
-        return zerolog.Logger{}, fmt.Errorf("failed to determine default log path: %w", cwdErr)
-      }
-      logFilePath = filepath.Join(cwd, "promptline_debug.log")
-    }
+		if logFilePath == "" {
+			cwd, cwdErr := os.Getwd()
+			if cwdErr != nil {
+				return zerolog.Logger{}, fmt.Errorf("failed to determine default log path: %w", cwdErr)
+			}
+			logFilePath = filepath.Join(cwd, "promptline_debug.log")
+		}
 
 		file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {

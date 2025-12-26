@@ -27,16 +27,15 @@ import (
 	"github.com/sashabaranov/go-openai"
 	"golang.org/x/term"
 	"promptline/internal/chat"
-	"promptline/internal/theme"
 )
 
-func newToolApprover(colors *theme.ColorScheme) chat.ToolApprovalFunc {
+func newToolApprover() chat.ToolApprovalFunc {
 	return func(call openai.ToolCall) (bool, error) {
-		return promptToolApproval(call, colors)
+		return promptToolApproval(call)
 	}
 }
 
-func promptToolApproval(call openai.ToolCall, colors *theme.ColorScheme) (bool, error) {
+func promptToolApproval(call openai.ToolCall) (bool, error) {
 	input := os.Stdin
 	output := io.Writer(os.Stdout)
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -72,9 +71,6 @@ func promptToolApproval(call openai.ToolCall, colors *theme.ColorScheme) (bool, 
 	}
 
 	for {
-		if colors != nil {
-			colors.Header.Print("Permission: ")
-		}
 		fmt.Fprintf(output, "Allow tool %s%s? [y/N/p]: ", name, argsDisplay)
 		input, err := reader.ReadString('\n')
 		if err != nil {

@@ -25,7 +25,6 @@ import (
 	"github.com/pterm/pterm"
 	"github.com/rs/zerolog"
 	"promptline/internal/chat"
-	"promptline/internal/theme"
 	"promptline/internal/tools"
 )
 
@@ -49,7 +48,7 @@ func getAvailableCommands() []Command {
 }
 
 // handleCommand processes slash commands, returns true if should quit
-func handleCommand(input string, session *chat.Session, colors *theme.ColorScheme, logger zerolog.Logger, debugMode *bool) bool {
+func handleCommand(input string, session *chat.Session, logger zerolog.Logger, debugMode *bool) bool {
 	cmdName := strings.TrimPrefix(input, "/")
 	cmdName = strings.ToLower(strings.TrimSpace(cmdName))
 
@@ -58,42 +57,42 @@ func handleCommand(input string, session *chat.Session, colors *theme.ColorSchem
 	// Execute command based on name
 	switch cmdName {
 	case "help":
-		showHelp(colors)
+		showHelp()
 		return false
 
 	case "clear":
 		session.ClearHistory()
-		colors.Success.Println("✓ Conversation history cleared")
+		fmt.Println("✓ Conversation history cleared")
 		return false
 
 	case "history":
-		showHistory(session, colors)
+		showHistory(session)
 		return false
 
 	case "debug":
 		*debugMode = !*debugMode
 		if *debugMode {
-			colors.Success.Println("✓ Debug mode enabled")
+			fmt.Println("✓ Debug mode enabled")
 		} else {
-			colors.Success.Println("✓ Debug mode disabled")
+			fmt.Println("✓ Debug mode disabled")
 		}
 		return false
 
 	case "permissions":
-		showPermissions(session, colors)
+		showPermissions(session)
 		return false
 
 	case "quit", "exit":
 		return true
 
 	default:
-		colors.Error.Printf("✗ Unknown command: /%s (type /help for available commands)\n", cmdName)
+		fmt.Printf("✗ Unknown command: /%s (type /help for available commands)\n", cmdName)
 		return false
 	}
 }
 
-func showHelp(colors *theme.ColorScheme) {
-	colors.Header.Println("\nAvailable Commands:")
+func showHelp() {
+	fmt.Println("\nAvailable Commands:")
 	seen := make(map[string]bool)
 	for _, cmd := range getAvailableCommands() {
 		if seen[cmd.Name] {
@@ -109,21 +108,21 @@ func showHelp(colors *theme.ColorScheme) {
 	fmt.Println()
 }
 
-func showHistory(session *chat.Session, colors *theme.ColorScheme) {
+func showHistory(session *chat.Session) {
 	messages := session.GetHistory()
 	if len(messages) == 0 {
-		colors.Error.Println("No conversation history")
+		fmt.Println("No conversation history")
 		return
 	}
 
-	colors.Header.Println("\nConversation History:")
+	fmt.Println("\nConversation History:")
 	for _, msg := range messages {
 		switch msg.Role {
 		case "user":
-			colors.User.Print("❯ ")
+			fmt.Print("❯ ")
 			fmt.Printf("%s\n", msg.Content)
 		case "assistant":
-			colors.Assistant.Print("⟫ ")
+			fmt.Print("⟫ ")
 			fmt.Printf("%s\n", msg.Content)
 		case "system":
 			fmt.Printf("[System] %s\n", msg.Content)
@@ -132,8 +131,8 @@ func showHistory(session *chat.Session, colors *theme.ColorScheme) {
 	fmt.Println()
 }
 
-func showPermissions(session *chat.Session, colors *theme.ColorScheme) {
-	colors.Header.Println("\nTool Permissions:")
+func showPermissions(session *chat.Session) {
+	fmt.Println("\nTool Permissions:")
 
 	toolNames := session.ToolRegistry.GetToolNames()
 	if len(toolNames) == 0 {
@@ -158,10 +157,10 @@ func showPermissions(session *chat.Session, colors *theme.ColorScheme) {
 }
 
 // searchConversationHistory shows an interactive fuzzy search of conversation history
-func searchConversationHistory(session *chat.Session, colors *theme.ColorScheme, logger zerolog.Logger) string {
+func searchConversationHistory(session *chat.Session, logger zerolog.Logger) string {
 	history := session.GetHistory()
 	if len(history) == 0 {
-		colors.Error.Println("\nNo conversation history available")
+		fmt.Println("\nNo conversation history available")
 		return ""
 	}
 
@@ -174,7 +173,7 @@ func searchConversationHistory(session *chat.Session, colors *theme.ColorScheme,
 	}
 
 	if len(userMessages) == 0 {
-		colors.Error.Println("\nNo user messages in history")
+		fmt.Println("\nNo user messages in history")
 		return ""
 	}
 
@@ -195,7 +194,7 @@ func searchConversationHistory(session *chat.Session, colors *theme.ColorScheme,
 
 	// Show interactive selector
 	fmt.Println() // newline before selector
-	colors.Header.Println("Search History (Ctrl-C to cancel, arrows to navigate):")
+	fmt.Println("Search History (Ctrl-C to cancel, arrows to navigate):")
 
 	selected, err := pterm.DefaultInteractiveSelect.
 		WithOptions(uniqueMessages).

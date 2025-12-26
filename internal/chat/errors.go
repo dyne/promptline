@@ -16,61 +16,28 @@
 
 package chat
 
-import "fmt"
+import (
+	"fmt"
 
-// StreamError represents an error during streaming operations.
-type StreamError struct {
-	Operation string
-	Err       error
+	apperrors "promptline/internal/errors"
+)
+
+// NewStreamError wraps a streaming operation error with a code and message.
+func NewStreamError(operation string, err error) *apperrors.Error {
+	return apperrors.Wrap(apperrors.CodeStream, fmt.Sprintf("streaming error during %s", operation), err)
 }
 
-func (e *StreamError) Error() string {
-	return fmt.Sprintf("streaming error during %s: %v", e.Operation, e.Err)
+// NewToolExecutionError wraps a tool execution error with a code and message.
+func NewToolExecutionError(toolName string, err error) *apperrors.Error {
+	return apperrors.Wrap(apperrors.CodeToolExecution, fmt.Sprintf("tool execution error for %s", toolName), err)
 }
 
-func (e *StreamError) Unwrap() error {
-	return e.Err
+// NewAPIError wraps an API operation error with a code and message.
+func NewAPIError(operation string, err error) *apperrors.Error {
+	return apperrors.Wrap(apperrors.CodeAPI, fmt.Sprintf("API error during %s", operation), err)
 }
 
-// ToolExecutionError represents an error during tool execution.
-type ToolExecutionError struct {
-	ToolName string
-	Err      error
-}
-
-func (e *ToolExecutionError) Error() string {
-	return fmt.Sprintf("tool execution error for %s: %v", e.ToolName, e.Err)
-}
-
-func (e *ToolExecutionError) Unwrap() error {
-	return e.Err
-}
-
-// APIError represents an error from the OpenAI API.
-type APIError struct {
-	Operation string
-	Err       error
-}
-
-func (e *APIError) Error() string {
-	return fmt.Sprintf("API error during %s: %v", e.Operation, e.Err)
-}
-
-func (e *APIError) Unwrap() error {
-	return e.Err
-}
-
-// HistoryError represents an error related to conversation history operations.
-type HistoryError struct {
-	Operation string
-	Filepath  string
-	Err       error
-}
-
-func (e *HistoryError) Error() string {
-	return fmt.Sprintf("history error during %s on %s: %v", e.Operation, e.Filepath, e.Err)
-}
-
-func (e *HistoryError) Unwrap() error {
-	return e.Err
+// NewHistoryError wraps a history operation error with a code and message.
+func NewHistoryError(operation, filepath string, err error) *apperrors.Error {
+	return apperrors.Wrap(apperrors.CodeHistory, fmt.Sprintf("history error during %s on %s", operation, filepath), err)
 }

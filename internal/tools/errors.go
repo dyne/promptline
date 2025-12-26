@@ -19,6 +19,8 @@ package tools
 import (
 	"errors"
 	"fmt"
+
+	apperrors "promptline/internal/errors"
 )
 
 // Common tool errors
@@ -37,32 +39,23 @@ var (
 
 	// ErrInvalidArguments indicates tool arguments are invalid or malformed.
 	ErrInvalidArguments = errors.New("invalid tool arguments")
+
+	// ErrToolRateLimited indicates a tool call exceeded rate limits.
+	ErrToolRateLimited = errors.New("tool rate limit exceeded")
+
+	// ErrToolInCooldown indicates a tool is in a cooldown window.
+	ErrToolInCooldown = errors.New("tool is in cooldown")
 )
 
-// ToolExecutionError represents an error during tool execution.
-type ToolExecutionError struct {
-	ToolName  string
-	Operation string
-	Err       error
-}
-
-func (e *ToolExecutionError) Error() string {
-	if e.Operation != "" {
-		return fmt.Sprintf("tool %s failed during %s: %v", e.ToolName, e.Operation, e.Err)
+// NewToolExecutionError wraps a tool execution error with a shared error code.
+func NewToolExecutionError(toolName, operation string, err error) *apperrors.Error {
+	if operation != "" {
+		return apperrors.Wrap(apperrors.CodeToolExecution, fmt.Sprintf("tool %s failed during %s", toolName, operation), err)
 	}
-	return fmt.Sprintf("tool %s failed: %v", e.ToolName, e.Err)
+	return apperrors.Wrap(apperrors.CodeToolExecution, fmt.Sprintf("tool %s failed", toolName), err)
 }
 
-func (e *ToolExecutionError) Unwrap() error {
-	return e.Err
-}
-
-// PermissionError represents an error related to tool permissions.
-type PermissionError struct {
-	ToolName string
-	Reason   string
-}
-
-func (e *PermissionError) Error() string {
-	return fmt.Sprintf("permission denied for tool %s: %s", e.ToolName, e.Reason)
+// NewPermissionError wraps a permission error with a shared error code.
+func NewPermissionError(toolName, reason string) *apperrors.Error {
+	return apperrors.New(apperrors.CodePermission, fmt.Sprintf("permission denied for tool %s: %s", toolName, reason))
 }
