@@ -44,25 +44,26 @@ func readMemInfoFallback() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	entries := map[string]string{
+		"MemTotal": fmt.Sprintf("%d kB", totalBytes/1024),
+	}
+
 	pageSize, err := unix.SysctlUint64("vm.page_size")
 	if err != nil {
-		return nil, err
+		return entries, nil
 	}
 	freePages, err := unix.SysctlUint64("vm.page_free_count")
 	if err != nil {
-		return nil, err
+		return entries, nil
 	}
 	freeBytes := freePages * pageSize
+	entries["MemFree"] = fmt.Sprintf("%d kB", freeBytes/1024)
+
 	availablePages := freePages
 	if inactivePages, err := unix.SysctlUint64("vm.page_inactive_count"); err == nil {
 		availablePages += inactivePages
 	}
 	availableBytes := availablePages * pageSize
-
-	entries := map[string]string{
-		"MemTotal": fmt.Sprintf("%d kB", totalBytes/1024),
-		"MemFree":  fmt.Sprintf("%d kB", freeBytes/1024),
-	}
 	if availableBytes > 0 {
 		entries["MemAvailable"] = fmt.Sprintf("%d kB", availableBytes/1024)
 	}
