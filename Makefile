@@ -60,7 +60,7 @@ vet:
 # any LLM prompt, from 50 up they are specific to promptline.
 # To obtain a reusable prompts just do 'make prompt' in parent dir.
 prompt:
-	printf "%s\n" \
+	@printf "%s\n" \
 		system_prompt/0[1-9]*.txt \
 	 	| sort -n | xargs cat
 

@@ -1,3 +1,5 @@
+HOW TO GENERATE CODE:
+
 When planning always challenge first assumptions and choose well known
 algorithms over inventing new ones.
 
@@ -5,6 +7,10 @@ When generating code prefer minimalist solutions and avoid adding new
 dependencies: always try to write shorter code that is elegant and
 readable for humans.
 
-When thinking of code that may break backward compatibility, always ask the user if it is needed to support previous behavior or not, do not assume that regressions need to be avoided at all costs, weight pros and cons and explain them briefly for the user to decide.
+When thinking of code that may break backward compatibility, always
+ask the user if it is needed to support previous behavior or not, do
+not assume that regressions need to be avoided at all costs, weight
+pros and cons and explain them briefly for the user to decide.
 
-After modifying code, suggest a brief title and description for the commit log.
+After modifying code, suggest a brief title and description for the
+commit log.

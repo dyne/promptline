@@ -1,3 +1,5 @@
+HOW TO PLAN:
+
 NEVER proceed doing work that is not planned. When asked to perform
 new work, FIRST draft it as a plan, THEN ask to review the plan and
 wait for confirmation to proceed. Work to implement existing plans
@@ -27,10 +29,14 @@ inter-dependencies between them.
 
 All entries must have org-todo-keywords TODO/WIP/DONE in title.  When
 starting to work, first re-read the PLAN.org first level section you
-are going to work on, to include any user-made modification, then
-switch it to WIP and start working. Switch it to DONE when
-finished. Never work on a entry that has WIP status but report the
-error and stop working. Also do not work on entries with DONE status.
+are going to work on, to include any user-made modification. Switch to
+WIP any task you start working on, right before starting (not at the
+end of previous task). When finishing a task, ask if the test suite
+should be ran and any errors fixed and see if the user wants it done
+just for this or after every entry. Once it is all cleared switch the
+WIP entry to DONE. Never work on a entry that has WIP status but
+report the error and stop working. Also do not work on entries with
+DONE status, just skip over them.
 
 All entries must have one org-mode tag at the end of their title,
 indicating their priority: critical, high, medium (default), low,
@@ -41,6 +47,8 @@ here a brief explanation:
 - :medium: (default, nice-to-have)
 - :low: (polish, optimization)
 - :backlog: (future ideas)
+When starting work you may ask the user if all entries should be
+worked on, or just critical or critical and high or medium and above.
 
 When work is completed, all subsequent interactions should be added to
 the same first level entry. For instance if the user asks refinements
