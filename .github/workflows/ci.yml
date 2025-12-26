@@ -16,7 +16,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -52,13 +52,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   binary-releases:
-    name: Build binary release for ${{ matrix.os }}
+    name: Build binary releases
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     needs: [semantic-versioning]
-    if: ${{ needs.semantic-release.outputs.new_release_published == 'true' }}
+    if: ${{ needs.semantic-versioning.outputs.new_release_published == 'true' }}
     steps:
       - name: Capture system info
         id: sysinfo
@@ -68,7 +68,7 @@ jobs:
           echo "s=$(uname -s)" >> $GITHUB_OUTPUT
           echo "m=$(uname -m)" >> $GITHUB_OUTPUT
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -77,11 +77,51 @@ jobs:
         run: go mod download
       - name: Build release
         run: |
-          go build -ldflags="-s -w -X main.Version=${{ needs.semantic-release.outputs.new_release_version }}" -trimpath -o promptline ./cmd/promptline
+          go build -ldflags="-s -w -X main.Version=${{ needs.semantic-versioning.outputs.new_release_version }}" -trimpath -o promptline ./cmd/promptline
           mv ./promptline ./promptline-${UNAME_S}-${UNAME_M}
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ steps.sysinfo.outputs.s }}-${{ steps.sysinfo.outputs.m }}
+          path: ./promptline-${{ steps.sysinfo.outputs.s }}-${{ steps.sysinfo.outputs.m }}
+
+  remove-tag-on-fail:
+    name: Remove tag on fail
+    needs: [semantic-versioning]
+    runs-on: ubuntu-latest
+    if: ${{ (failure() || cancelled()) && needs.semantic-versioning.outputs.new_release_published == 'true' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Remove tag
+        uses: dev-drprasad/delete-tag-and-release@v1.1
+        with:
+          tag_name: ${{ needs.semantic-versioning.outputs.new_release_version }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          delete_release: false
+          repo: dyne/promptline
+
+  upload-releases:
+    name: Upload releases
+    needs: [semantic-versioning, binary-releases]
+    runs-on: ubuntu-latest
+    steps:
+      - name: download binary artifacts
+        uses: actions/download-artifact@v5
+        with:
           path: |
-            ./promptline-${UNAME_S}-${UNAME_M}
+            promptline-bin
+      - name: show directory structure
+        run: tree -dL 3
+      - name: relase all binary artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            promptline-bin/release*/*
+          tag_name: ${{ needs.semantic-versioning.outputs.new_release_version }}
+          draft: true
+          prerelease: false
+          fail_on_unmatched_files: true
+          generate_release_notes: true
