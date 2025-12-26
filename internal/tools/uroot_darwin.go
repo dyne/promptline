@@ -35,7 +35,7 @@ func uptimeFallbackSeconds() (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	bootTime := time.Unix(boot.Sec, boot.Usec*1000)
+	bootTime := time.Unix(boot.Sec, int64(boot.Usec)*1000)
 	return time.Since(bootTime).Seconds(), nil
 }
 
