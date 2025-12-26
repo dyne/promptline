@@ -1,12 +1,19 @@
 # Makefile for promptline
 
-.PHONY: build install clean test coverage help
+.PHONY: build install clean test coverage help release test-race fmt vet benchmarks prompt
+
+GO ?= go
+GOOS ?= $(shell $(GO) env GOOS)
+GOARCH ?= $(shell $(GO) env GOARCH)
+GOEXE := $(shell GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) env GOEXE)
+BINARY := promptline$(GOEXE)
 
 # Default target
 help:
 	@echo "promptline Makefile"
 	@echo "Usage:"
 	@echo "  make build     - Build the application"
+	@echo "  make release   - Build a release binary"
 	@echo "  make install   - Install the application globally"
 	@echo "  make clean     - Clean build artifacts"
 	@echo "  make test      - Run tests"
@@ -17,45 +24,48 @@ help:
 
 # Build the application
 build:
-	go build -o promptline ./cmd/promptline
+	$(GO) build -o $(BINARY) ./cmd/promptline
+
+release:
+	$(GO) build -trimpath -ldflags "-s -w" -o $(BINARY) ./cmd/promptline
 
 # Install the application globally
 install:
-	go install ./cmd/promptline
+	$(GO) install ./cmd/promptline
 
 # Clean build artifacts
 clean:
-	rm -f promptline
+	rm -f promptline promptline.exe
 
 # Run tests
 test:
-	go test ./...
+	$(GO) test ./...
 
 # Run tests with race detector
 test-race:
-	go test -race ./...
+	$(GO) test -race ./...
 
 # Run tests with coverage
 coverage:
 	@echo "Running tests with coverage..."
-	@go test -coverprofile=coverage.out ./...
+	$(GO) test -coverprofile=coverage.out ./...
 	@echo ""
 	@echo "=== Coverage Summary ==="
-	@go tool cover -func=coverage.out | tail -1
+	@$(GO) tool cover -func=coverage.out | tail -1
 	@echo ""
 	@echo "For detailed HTML report, run: go tool cover -html=coverage.out"
 
 benchmarks:
 	$(info Running tool benchmarks...)
-	go test -run '^$$' -bench BenchmarkURoot -benchmem ./internal/tools
+	$(GO) test -run '^$$' -bench BenchmarkURoot -benchmem ./internal/tools
 
 # Format code
 fmt:
-	go fmt ./...
+	$(GO) fmt ./...
 
 # Vet code
 vet:
-	go vet ./...
+	$(GO) vet ./...
 
 # All system prompts are in sorting order, from 01 to 49 are reusable on
 # any LLM prompt, from 50 up they are specific to promptline.

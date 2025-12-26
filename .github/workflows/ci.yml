@@ -55,35 +55,42 @@ jobs:
     name: Build binary releases
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     needs: [semantic-versioning]
     if: ${{ needs.semantic-versioning.outputs.new_release_published == 'true' }}
     steps:
-      - name: Capture system info
-        id: sysinfo
-        run: |
-          echo "UNAME_S=$(uname -s)" >> $GITHUB_ENV
-          echo "UNAME_M=$(uname -m)" >> $GITHUB_ENV
-          echo "s=$(uname -s)" >> $GITHUB_OUTPUT
-          echo "m=$(uname -m)" >> $GITHUB_OUTPUT
       - name: Checkout repository
         uses: actions/checkout@v6
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Capture Go env
+        id: goenv
+        shell: bash
+        run: |
+          GOOS=$(go env GOOS)
+          GOARCH=$(go env GOARCH)
+          GOEXE=$(go env GOEXE)
+          echo "GOOS=$GOOS" >> "$GITHUB_ENV"
+          echo "GOARCH=$GOARCH" >> "$GITHUB_ENV"
+          echo "GOEXE=$GOEXE" >> "$GITHUB_ENV"
+          echo "goos=$GOOS" >> "$GITHUB_OUTPUT"
+          echo "goarch=$GOARCH" >> "$GITHUB_OUTPUT"
+          echo "goexe=$GOEXE" >> "$GITHUB_OUTPUT"
       - name: Install go deps
         run: go mod download
       - name: Build release
+        shell: bash
         run: |
-          go build -ldflags="-s -w -X main.Version=${{ needs.semantic-versioning.outputs.new_release_version }}" -trimpath -o promptline ./cmd/promptline
-          mv ./promptline ./promptline-${UNAME_S}-${UNAME_M}
+          OUTPUT="promptline-${GOOS}-${GOARCH}${GOEXE}"
+          go build -ldflags="-s -w -X main.Version=${{ needs.semantic-versioning.outputs.new_release_version }}" -trimpath -o "$OUTPUT" ./cmd/promptline
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ steps.sysinfo.outputs.s }}-${{ steps.sysinfo.outputs.m }}
-          path: ./promptline-${{ steps.sysinfo.outputs.s }}-${{ steps.sysinfo.outputs.m }}
+          name: release-${{ steps.goenv.outputs.goos }}-${{ steps.goenv.outputs.goarch }}
+          path: ./promptline-${{ steps.goenv.outputs.goos }}-${{ steps.goenv.outputs.goarch }}${{ steps.goenv.outputs.goexe }}
 
   remove-tag-on-fail:
     name: Remove tag on fail
@@ -121,7 +128,7 @@ jobs:
           files: |
             promptline-bin/release*/*
           tag_name: ${{ needs.semantic-versioning.outputs.new_release_version }}
-          draft: true
+          draft: false
           prerelease: false
           fail_on_unmatched_files: true
           generate_release_notes: true
