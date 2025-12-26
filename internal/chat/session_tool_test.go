@@ -227,6 +227,36 @@ func TestExecuteToolCallWithApprovalAllowed(t *testing.T) {
 	}
 }
 
+func TestExecuteToolCallWithApprovalSkipsPromptOnInvalidArgs(t *testing.T) {
+	cfg := &config.Config{
+		APIKey: "test-key",
+		Model:  "test-model",
+	}
+	session := NewSession(cfg)
+	approvals := 0
+	session.ToolApprover = func(call openai.ToolCall) (bool, error) {
+		approvals++
+		return true, nil
+	}
+
+	toolCall := openai.ToolCall{
+		ID:   "call-invalid-1",
+		Type: openai.ToolTypeFunction,
+		Function: openai.FunctionCall{
+			Name:      "execute_shell_command",
+			Arguments: "{}",
+		},
+	}
+
+	result := session.ExecuteToolCallWithApproval(toolCall)
+	if !errors.Is(result.Error, tools.ErrInvalidArguments) {
+		t.Fatalf("expected ErrInvalidArguments, got: %v", result.Error)
+	}
+	if approvals != 0 {
+		t.Fatalf("expected approval to be skipped, got %d", approvals)
+	}
+}
+
 // TestMultipleToolCalls verifies handling of multiple tool calls
 func TestMultipleToolCalls(t *testing.T) {
 	cfg := &config.Config{

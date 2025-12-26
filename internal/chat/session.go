@@ -25,7 +25,9 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/sashabaranov/go-openai"
 	"promptline/internal/config"
 	"promptline/internal/tools"
@@ -47,6 +49,7 @@ type Session struct {
 	ToolRegistry      *tools.Registry
 	BaseURL           string
 	ToolApprover      ToolApprovalFunc
+	Logger            *zerolog.Logger
 	mu                sync.Mutex
 	lastSavedMsgCount int // Track how many messages were last saved (protected by mu)
 }
@@ -164,7 +167,20 @@ func (s *Session) MessagesSnapshot() []openai.ChatCompletionMessage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	msgs := make([]openai.ChatCompletionMessage, len(s.Messages))
-	copy(msgs, s.Messages)
+	for i, msg := range s.Messages {
+		msgs[i] = msg
+		if len(msg.ToolCalls) == 0 {
+			continue
+		}
+		toolCalls := make([]openai.ToolCall, len(msg.ToolCalls))
+		for j, call := range msg.ToolCalls {
+			if strings.TrimSpace(call.Function.Arguments) == "" {
+				call.Function.Arguments = "{}"
+			}
+			toolCalls[j] = call
+		}
+		msgs[i].ToolCalls = toolCalls
+	}
 	return msgs
 }
 
@@ -175,6 +191,7 @@ func (s *Session) GetResponseWithContext(ctx context.Context, prompt string) (st
 
 	// Loop to handle tool calls
 	for {
+		start := time.Now()
 		req := openai.ChatCompletionRequest{
 			Model:    s.Config.Model,
 			Messages: s.MessagesSnapshot(),
@@ -189,10 +206,13 @@ func (s *Session) GetResponseWithContext(ctx context.Context, prompt string) (st
 			req.MaxTokens = *s.Config.MaxTokens
 		}
 
+		s.debugLogRequest("create_completion", req)
 		resp, err := s.Client.CreateChatCompletion(ctx, req)
 		if err != nil {
+			s.debugLogError("create_completion", err)
 			return "", &APIError{Operation: "create_completion", Err: err}
 		}
+		s.debugLogCompletion("create_completion", time.Since(start), resp)
 
 		response := resp.Choices[0].Message
 		s.AddAssistantMessage(response.Content, response.ToolCalls)
@@ -216,9 +236,18 @@ func (s *Session) GetResponseWithContext(ctx context.Context, prompt string) (st
 func (s *Session) ExecuteToolCallWithApproval(call openai.ToolCall) *tools.ToolResult {
 	name := call.Function.Name
 	if name == "" {
-		name = "unknown_tool"
+		return invalidToolResult("unknown_tool", fmt.Errorf("%w: tool call missing function name", tools.ErrInvalidArguments))
+	}
+	if err := s.preflightValidateToolCall(name, call.Function.Arguments); err != nil {
+		return err
 	}
 	perm := s.ToolRegistry.GetPermission(name)
+	if s.Logger != nil {
+		s.Logger.Debug().
+			Str("tool_name", name).
+			Str("permission", string(perm.Level)).
+			Msg("Tool permission evaluated")
+	}
 	switch perm.Level {
 	case tools.PermissionAllow:
 		return s.ToolRegistry.ExecuteOpenAIToolCall(call)
@@ -228,12 +257,33 @@ func (s *Session) ExecuteToolCallWithApproval(call openai.ToolCall) *tools.ToolR
 		if s.ToolApprover == nil {
 			return deniedToolResult(name, fmt.Sprintf("Tool %q requires user approval, but no approver is configured.", name), tools.ErrToolDeniedByUser)
 		}
+		if s.Logger != nil {
+			s.Logger.Debug().
+				Str("tool_name", name).
+				Msg("Awaiting tool approval")
+		}
 		approved, err := s.ToolApprover(call)
 		if err != nil {
+			if s.Logger != nil {
+				s.Logger.Debug().
+					Str("tool_name", name).
+					Err(err).
+					Msg("Tool approval failed")
+			}
 			return deniedToolResult(name, fmt.Sprintf("Tool %q approval failed: %v", name, err), tools.ErrToolDeniedByUser)
 		}
 		if !approved {
+			if s.Logger != nil {
+				s.Logger.Debug().
+					Str("tool_name", name).
+					Msg("Tool approval denied by user")
+			}
 			return deniedToolResult(name, fmt.Sprintf("User denied execution of tool %q.", name), tools.ErrToolDeniedByUser)
+		}
+		if s.Logger != nil {
+			s.Logger.Debug().
+				Str("tool_name", name).
+				Msg("Tool approval granted")
 		}
 		return s.ToolRegistry.ExecuteOpenAIToolCallWithOptions(call, tools.ExecuteOptions{Force: true})
 	default:
@@ -246,6 +296,79 @@ func deniedToolResult(name, message string, err error) *tools.ToolResult {
 		Function: name,
 		Result:   message,
 		Error:    err,
+	}
+}
+
+func invalidToolResult(name string, err error) *tools.ToolResult {
+	return &tools.ToolResult{
+		Function: name,
+		Result:   fmt.Sprintf("Error: %v", err),
+		Error:    err,
+	}
+}
+
+func (s *Session) preflightValidateToolCall(name, argsJSON string) *tools.ToolResult {
+	if !s.toolExists(name) {
+		return invalidToolResult(name, fmt.Errorf("%w: tool %q not found", tools.ErrToolNotFound, name))
+	}
+
+	args := map[string]interface{}{}
+	if strings.TrimSpace(argsJSON) != "" {
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return invalidToolResult(name, fmt.Errorf("%w: %v", tools.ErrInvalidArguments, err))
+		}
+	}
+
+	switch name {
+	case "execute_shell_command":
+		if !hasRequiredStringArg(args, "command") {
+			return invalidToolResult(name, fmt.Errorf("%w: missing or invalid 'command' parameter (use write_file for file writes)", tools.ErrInvalidArguments))
+		}
+	case "write_file":
+		if !hasRequiredStringArg(args, "path") || !hasRequiredStringArg(args, "content") {
+			return invalidToolResult(name, fmt.Errorf("%w: missing or invalid 'path' or 'content' parameter", tools.ErrInvalidArguments))
+		}
+	case "read_file":
+		if !hasNonEmptyArg(args, "path") {
+			return invalidToolResult(name, fmt.Errorf("%w: missing or invalid 'path' parameter", tools.ErrInvalidArguments))
+		}
+	}
+
+	return nil
+}
+
+func (s *Session) toolExists(name string) bool {
+	for _, toolName := range s.ToolRegistry.GetToolNames() {
+		if toolName == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRequiredStringArg(args map[string]interface{}, key string) bool {
+	value, ok := args[key]
+	if !ok || value == nil {
+		return false
+	}
+	str, ok := value.(string)
+	return ok && strings.TrimSpace(str) != ""
+}
+
+func hasNonEmptyArg(args map[string]interface{}, key string) bool {
+	value, ok := args[key]
+	if !ok || value == nil {
+		return false
+	}
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v) != ""
+	case []interface{}:
+		return len(v) > 0
+	case map[string]interface{}:
+		return len(v) > 0
+	default:
+		return true
 	}
 }
 
@@ -295,14 +418,16 @@ func (s *Session) StreamResponseWithContext(ctx context.Context, prompt string, 
 		s.AddMessage(openai.ChatMessageRoleUser, prompt)
 	}
 
+	start := time.Now()
 	stream, err := s.createStream(ctx)
 	if err != nil {
+		s.debugLogError("create_stream", err)
 		events <- NewErrorEvent(&StreamError{Operation: "create_stream", Err: err})
 		return
 	}
 	defer stream.Close()
 
-	s.processStream(ctx, stream, events)
+	s.processStream(ctx, stream, events, start)
 }
 
 func (s *Session) createStream(ctx context.Context) (*openai.ChatCompletionStream, error) {
@@ -321,27 +446,37 @@ func (s *Session) createStream(ctx context.Context) (*openai.ChatCompletionStrea
 		req.MaxTokens = *s.Config.MaxTokens
 	}
 
+	s.debugLogRequest("create_stream", req)
 	return s.Client.CreateChatCompletionStream(ctx, req)
 }
 
 // processStream handles the streaming loop and local state accumulation.
 // Thread-safety: The contentBuilder, toolCalls, and argBuilders are local to
 // this function call and not shared with other goroutines, so no locking needed.
-func (s *Session) processStream(ctx context.Context, stream *openai.ChatCompletionStream, events chan<- StreamEvent) {
+func (s *Session) processStream(ctx context.Context, stream *openai.ChatCompletionStream, events chan<- StreamEvent, start time.Time) {
 	var contentBuilder strings.Builder
 	toolCalls := make(map[string]*openai.ToolCall)
 	argBuilders := make(map[string]*strings.Builder)
+	var firstChunk time.Time
+	recvCount := 0
 
 	for {
 		select {
 		case <-ctx.Done():
+			s.debugLogStreamEnd("stream_cancelled", time.Since(start), recvCount, len(toolCalls), ctx.Err())
 			events <- NewErrorEvent(ctx.Err())
 			return
 		default:
 			response, err := stream.Recv()
 			if err != nil {
+				s.debugLogStreamEnd("stream_recv", time.Since(start), recvCount, len(toolCalls), err)
 				s.handleStreamEnd(err, &contentBuilder, toolCalls, argBuilders, events)
 				return
+			}
+			recvCount++
+			if firstChunk.IsZero() {
+				firstChunk = time.Now()
+				s.debugLogFirstChunk(time.Since(start))
 			}
 
 			if len(response.Choices) == 0 {
@@ -382,6 +517,69 @@ func (s *Session) emitToolCalls(finalCalls []openai.ToolCall, events chan<- Stre
 		callCopy := call
 		events <- NewToolCallEvent(&callCopy)
 	}
+}
+
+func (s *Session) debugLogRequest(operation string, req openai.ChatCompletionRequest) {
+	if s.Logger == nil {
+		return
+	}
+	s.Logger.Debug().
+		Str("operation", operation).
+		Str("model", req.Model).
+		Int("message_count", len(req.Messages)).
+		Int("tool_count", len(req.Tools)).
+		Msg("Sending request")
+}
+
+func (s *Session) debugLogCompletion(operation string, duration time.Duration, resp openai.ChatCompletionResponse) {
+	if s.Logger == nil {
+		return
+	}
+	choiceCount := len(resp.Choices)
+	toolCallCount := 0
+	if choiceCount > 0 {
+		toolCallCount = len(resp.Choices[0].Message.ToolCalls)
+	}
+	s.Logger.Debug().
+		Str("operation", operation).
+		Dur("duration_ms", duration).
+		Int("choice_count", choiceCount).
+		Int("tool_calls", toolCallCount).
+		Msg("Received response")
+}
+
+func (s *Session) debugLogFirstChunk(elapsed time.Duration) {
+	if s.Logger == nil {
+		return
+	}
+	s.Logger.Debug().
+		Dur("time_to_first_chunk_ms", elapsed).
+		Msg("Received first stream chunk")
+}
+
+func (s *Session) debugLogStreamEnd(operation string, duration time.Duration, recvCount, toolCallCount int, err error) {
+	if s.Logger == nil {
+		return
+	}
+	event := s.Logger.Debug().
+		Str("operation", operation).
+		Dur("duration_ms", duration).
+		Int("chunks", recvCount).
+		Int("tool_call_candidates", toolCallCount)
+	if err != nil && err != io.EOF {
+		event.Err(err)
+	}
+	event.Msg("Stream finished")
+}
+
+func (s *Session) debugLogError(operation string, err error) {
+	if s.Logger == nil {
+		return
+	}
+	s.Logger.Debug().
+		Str("operation", operation).
+		Err(err).
+		Msg("Request failed")
 }
 
 // accumulateToolCall merges incremental tool call deltas into a stored call.
@@ -433,9 +631,7 @@ func finalizeToolCalls(toolCalls map[string]*openai.ToolCall, argBuilders map[st
 
 		args := rawArgs
 		if trimmed == "" {
-			args = "{}"
-		} else if !json.Valid([]byte(args)) {
-			args = "{}"
+			args = ""
 		}
 		call.Function.Arguments = args
 		if call.Function.Name == "" {

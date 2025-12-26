@@ -47,18 +47,7 @@ func runTUIMode(logger zerolog.Logger) {
 	session := chat.NewSession(cfg)
 	defer session.Close()
 	session.ToolApprover = newToolApprover(colors)
-
-	// Load conversation history
-	if cfg.HistoryFile != "" {
-		if err := session.LoadConversationHistory(cfg.HistoryFile, cfg.HistoryMaxMessages); err != nil {
-			logger.Warn().Err(err).Msg("Failed to load conversation history")
-		} else {
-			historyCount := len(session.GetHistory())
-			if historyCount > 0 {
-				logger.Debug().Int("messages", historyCount).Msg("Loaded conversation history")
-			}
-		}
-	}
+	session.Logger = &logger
 
 	// Initialize readline with dynamic command completion and Ctrl-R handler
 	rl, err := readline.NewEx(&readline.Config{
@@ -126,12 +115,6 @@ func runTUIMode(logger zerolog.Logger) {
 		// Handle conversation
 		handleConversation(line, session, colors, logger)
 
-		// Save conversation history after each turn
-		if cfg.HistoryFile != "" {
-			if err := session.SaveConversationHistory(cfg.HistoryFile); err != nil {
-				logger.Warn().Err(err).Msg("Failed to save conversation history")
-			}
-		}
 	}
 
 	logger.Info().Msg("Session ended")

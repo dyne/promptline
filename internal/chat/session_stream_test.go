@@ -199,9 +199,9 @@ func TestFinalizeToolCallsWithInvalidJSON(t *testing.T) {
 		t.Fatalf("Expected 1 result, got %d", len(results))
 	}
 
-	// Should default to empty object for invalid JSON
-	if results[0].Function.Arguments != "{}" {
-		t.Errorf("Expected '{}', got %s", results[0].Function.Arguments)
+	// Should preserve invalid JSON to surface validation failures.
+	if results[0].Function.Arguments != "{invalid json}" {
+		t.Errorf("Expected raw invalid JSON, got %s", results[0].Function.Arguments)
 	}
 }
 

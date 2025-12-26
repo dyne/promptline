@@ -166,7 +166,7 @@ func TestFinalizeToolCallsEnsuresNameAndJSONArgs(t *testing.T) {
 		t.Fatalf("expected args to preserve JSON, got %q", call.Function.Arguments)
 	}
 
-	// When name exists but args are empty, default to {} for JSON validity.
+	// When name exists but args are empty, preserve empty args.
 	entry3 := accumulateToolCall(toolCalls, argBuilders, openai.ToolCall{
 		ID:   "3",
 		Type: openai.ToolTypeFunction,
@@ -179,12 +179,12 @@ func TestFinalizeToolCallsEnsuresNameAndJSONArgs(t *testing.T) {
 	final = finalizeToolCalls(toolCalls, argBuilders)
 	foundEmpty := false
 	for _, c := range final {
-		if c.Function.Name == "ls" && c.Function.Arguments == "{}" {
+		if c.Function.Name == "ls" && c.Function.Arguments == "" {
 			foundEmpty = true
 		}
 	}
 	if !foundEmpty {
-		t.Fatalf("expected ls call with empty args coerced to {}")
+		t.Fatalf("expected ls call with empty args preserved")
 	}
 }
 
@@ -349,6 +349,34 @@ func TestMessagesSnapshotIsCopy(t *testing.T) {
 	}
 	if s.Messages[1].Content != "user" {
 		t.Errorf("expected original content 'user', got %s", s.Messages[1].Content)
+	}
+}
+
+func TestMessagesSnapshotNormalizesEmptyToolArgs(t *testing.T) {
+	s := &Session{
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role: openai.ChatMessageRoleAssistant,
+				ToolCalls: []openai.ToolCall{
+					{
+						ID:   "call-1",
+						Type: openai.ToolTypeFunction,
+						Function: openai.FunctionCall{
+							Name:      "write_file",
+							Arguments: "",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	snapshot := s.MessagesSnapshot()
+	if snapshot[0].ToolCalls[0].Function.Arguments != "{}" {
+		t.Errorf("expected snapshot to normalize empty args to {}, got %q", snapshot[0].ToolCalls[0].Function.Arguments)
+	}
+	if s.Messages[0].ToolCalls[0].Function.Arguments != "" {
+		t.Errorf("expected original message args to remain empty, got %q", s.Messages[0].ToolCalls[0].Function.Arguments)
 	}
 }
 

@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -122,6 +123,18 @@ func executeToolCall(session *chat.Session, toolCall *openai.ToolCall, colors *t
 
 	if toolName == "read_file" && shouldFillPath(toolCall.Function.Arguments) {
 		toolArgs = fillPathFromHistory(session, toolCall, logger)
+	}
+
+	trimmedArgs := strings.TrimSpace(toolArgs)
+	if trimmedArgs == "" {
+		logger.Debug().
+			Str("tool_name", toolName).
+			Msg("Tool call arguments are empty")
+	} else if !json.Valid([]byte(trimmedArgs)) {
+		logger.Debug().
+			Str("tool_name", toolName).
+			Int("tool_args_length", len(toolArgs)).
+			Msg("Tool call arguments are not valid JSON")
 	}
 
 	logToolCall(logger, toolName, toolArgs)

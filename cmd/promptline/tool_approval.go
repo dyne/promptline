@@ -18,11 +18,14 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/sashabaranov/go-openai"
+	"golang.org/x/term"
 	"promptline/internal/chat"
 	"promptline/internal/theme"
 )
@@ -34,22 +37,45 @@ func newToolApprover(colors *theme.ColorScheme) chat.ToolApprovalFunc {
 }
 
 func promptToolApproval(call openai.ToolCall, colors *theme.ColorScheme) (bool, error) {
-	reader := bufio.NewReader(os.Stdin)
+	input := os.Stdin
+	output := io.Writer(os.Stdout)
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		if tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
+			input = tty
+			output = tty
+			defer tty.Close()
+		} else {
+			return false, fmt.Errorf("no TTY available for tool approval")
+		}
+	}
+	reader := bufio.NewReader(input)
 	name := call.Function.Name
 	if name == "" {
 		name = "unknown_tool"
 	}
-	args := strings.TrimSpace(call.Function.Arguments)
+	rawArgs := strings.TrimSpace(call.Function.Arguments)
 	argsDisplay := ""
-	if args != "" && args != "{}" && args != "null" {
-		argsDisplay = fmt.Sprintf(" with args %s", args)
+	contentPreview := ""
+	if rawArgs != "" && rawArgs != "{}" && rawArgs != "null" {
+		argsDisplay = fmt.Sprintf(" with args %s", rawArgs)
+		if argsMap, ok := parseArgsJSON(rawArgs); ok {
+			if content, ok := argsMap["content"]; ok {
+				if contentStr, ok := content.(string); ok {
+					contentPreview = contentStr
+				}
+				delete(argsMap, "content")
+			}
+			if redacted, err := json.Marshal(argsMap); err == nil {
+				argsDisplay = fmt.Sprintf(" with args %s", string(redacted))
+			}
+		}
 	}
 
 	for {
 		if colors != nil {
 			colors.Header.Print("Permission: ")
 		}
-		fmt.Printf("Allow tool %s%s? [y/N]: ", name, argsDisplay)
+		fmt.Fprintf(output, "Allow tool %s%s? [y/N/p]: ", name, argsDisplay)
 		input, err := reader.ReadString('\n')
 		if err != nil {
 			return false, err
@@ -58,10 +84,28 @@ func promptToolApproval(call openai.ToolCall, colors *theme.ColorScheme) (bool, 
 		switch normalized {
 		case "y", "yes":
 			return true, nil
+		case "p":
+			if contentPreview == "" {
+				fmt.Fprintln(output, "No content field to preview.")
+				continue
+			}
+			fmt.Fprintln(output, contentPreview)
+			continue
 		case "", "n", "no":
 			return false, nil
 		default:
-			fmt.Println("Please enter y or n.")
+			fmt.Fprintln(output, "Please enter y, n, or p to preview content.")
 		}
 	}
+}
+
+func parseArgsJSON(rawArgs string) (map[string]interface{}, bool) {
+	if rawArgs == "" {
+		return nil, false
+	}
+	var argsMap map[string]interface{}
+	if err := json.Unmarshal([]byte(rawArgs), &argsMap); err != nil {
+		return nil, false
+	}
+	return argsMap, true
 }

@@ -42,7 +42,7 @@ func registerBuiltInTools(r *Registry) {
 
 	r.RegisterTool(&Tool{
 		Name:        "execute_shell_command",
-		Description: "Execute a shell command and return its output",
+		Description: "Execute a shell command and return its output (do not use for writing files; use write_file)",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -74,7 +74,7 @@ func registerBuiltInTools(r *Registry) {
 
 	r.RegisterTool(&Tool{
 		Name:        "write_file",
-		Description: "Write content to a file",
+		Description: "Create or overwrite a text file (preferred for file writes)",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -194,7 +194,7 @@ func getCurrentDatetime(args map[string]interface{}) (string, error) {
 func executeShellCommand(args map[string]interface{}) (string, error) {
 	command, ok := args["command"].(string)
 	if !ok {
-		return "", fmt.Errorf("missing or invalid 'command' parameter")
+		return "", fmt.Errorf("missing or invalid 'command' parameter (use write_file for file writes)")
 	}
 
 	// Validate command for security
