@@ -19,7 +19,6 @@ package paths
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -39,7 +38,11 @@ func TestResolveWithinBase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.HasPrefix(resolved, filepath.Clean(base)) {
+	baseResolved, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		t.Fatalf("failed to resolve base dir: %v", err)
+	}
+	if !HasPathPrefix(resolved, baseResolved) {
 		t.Fatalf("expected resolved path to stay within base, got %s", resolved)
 	}
 }
