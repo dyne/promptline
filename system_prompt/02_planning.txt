@@ -32,7 +32,10 @@ switch it to WIP and start working. Switch it to DONE when
 finished. Never work on a entry that has WIP status but report the
 error and stop working. Also do not work on entries with DONE status.
 
-All entries must have one org-mode tag at the end of their title, indicating their priority: critical, high, medium (default), low, backlog. Up to you to decide the priority during the planning phase, here a brief explanation:
+All entries must have one org-mode tag at the end of their title,
+indicating their priority: critical, high, medium (default), low,
+backlog. Up to you to decide the priority during the planning phase,
+here a brief explanation:
 - :critical: (security, data loss, broken builds)
 - :high (major features, important bugs)
 - :medium: (default, nice-to-have)
