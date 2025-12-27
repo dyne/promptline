@@ -102,3 +102,21 @@ func TestLogFileFlagDefault(t *testing.T) {
 		t.Error("logFile flag should be defined")
 	}
 }
+
+func TestVersionVariable(t *testing.T) {
+	// Test that Version variable exists and has default value
+	if Version == "" {
+		t.Error("Version variable should not be empty")
+	}
+	
+	// Default value should be "dev" if not set via ldflags
+	if Version != "dev" {
+		t.Logf("Note: Version is set to %q (may be set via ldflags)", Version)
+	}
+}
+
+func TestVersionFlagDefault(t *testing.T) {
+	if version == nil {
+		t.Error("version flag should be defined")
+	}
+}
