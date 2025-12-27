@@ -64,23 +64,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "ls",
 		DescriptionValue: "List directory contents",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Directory path to list (default: current directory)",
-				},
-				"recursive": map[string]interface{}{
-					"type":        "boolean",
-					"description": "List directories recursively",
-				},
-				"show_hidden": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Include hidden files",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[lsArgs](),
 		ExecuteFunc:  executeLs,
 		VersionValue: urootToolVersion,
 	})
@@ -88,20 +72,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "cat",
 		DescriptionValue: "Concatenate and print files",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"paths": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "File paths to concatenate",
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Single file path to concatenate",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[catArgs](),
 		ExecuteFunc:  wrapURootCommand(buildCatArgs, runCat),
 		ValidateFunc: validatePathsArg("paths", "path"),
 		VersionValue: urootToolVersion,
@@ -137,28 +108,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "ln",
 		DescriptionValue: "Create a link to a file",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"target": map[string]interface{}{
-					"type":        "string",
-					"description": "Existing target path",
-				},
-				"link_path": map[string]interface{}{
-					"type":        "string",
-					"description": "New link path",
-				},
-				"symbolic": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Create a symbolic link instead of hard link",
-				},
-				"force": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Remove existing destination before linking",
-				},
-			},
-			"required": []string{"target", "link_path"},
-		},
+		ParametersValue: mustSchemaParametersFor[linkArgs](),
 		ExecuteFunc:  linkPath,
 		ValidateFunc: validateRequiredStrings([]string{"target", "link_path"}, nil),
 		VersionValue: urootToolVersion,
@@ -176,24 +126,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "truncate",
 		DescriptionValue: "Shrink or extend a file to a specified size",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "File path to truncate",
-				},
-				"size": map[string]interface{}{
-					"type":        "number",
-					"description": "Size in bytes",
-				},
-				"no_create": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Do not create file if missing",
-				},
-			},
-			"required": []string{"path", "size"},
-		},
+		ParametersValue: mustSchemaParametersFor[truncateArgs](),
 		ExecuteFunc:  truncateFile,
 		ValidateFunc: validateTruncateArgs,
 		VersionValue: urootToolVersion,
@@ -202,20 +135,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "readlink",
 		DescriptionValue: "Print resolved symbolic link target",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Symlink path to read",
-				},
-				"follow": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Resolve symlinks recursively",
-				},
-			},
-			"required": []string{"path"},
-		},
+		ParametersValue: mustSchemaParametersFor[readlinkArgs](),
 		ExecuteFunc:  readLinkPath,
 		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
 		VersionValue: urootToolVersion,
@@ -251,24 +171,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "head",
 		DescriptionValue: "Output the first part of files",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"paths": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "File paths to read",
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Single file path to read",
-				},
-				"lines": map[string]interface{}{
-					"type":        "number",
-					"description": "Number of lines to return (default: 10)",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[headArgs](),
 		ExecuteFunc:  headText,
 		ValidateFunc: validatePathsArg("paths", "path"),
 		VersionValue: urootToolVersion,
@@ -277,24 +180,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "tail",
 		DescriptionValue: "Output the last part of files",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"paths": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "File paths to read",
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Single file path to read",
-				},
-				"lines": map[string]interface{}{
-					"type":        "number",
-					"description": "Number of lines to return (default: 10)",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[tailArgs](),
 		ExecuteFunc:  tailText,
 		ValidateFunc: validatePathsArg("paths", "path"),
 		VersionValue: urootToolVersion,
@@ -303,20 +189,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "sort",
 		DescriptionValue: "Sort lines of text",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "File path to sort",
-				},
-				"reverse": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Reverse sort order",
-				},
-			},
-			"required": []string{"path"},
-		},
+		ParametersValue: mustSchemaParametersFor[sortArgs](),
 		ExecuteFunc:  sortText,
 		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
 		VersionValue: urootToolVersion,
@@ -343,20 +216,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "wc",
 		DescriptionValue: "Word, line, and byte count",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"paths": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "File paths to count",
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Single file path to count",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[wcArgs](),
 		ExecuteFunc:  wordCount,
 		ValidateFunc: validatePathsArg("paths", "path"),
 		VersionValue: urootToolVersion,
@@ -365,28 +225,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "tr",
 		DescriptionValue: "Translate characters",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"from": map[string]interface{}{
-					"type":        "string",
-					"description": "Characters to replace",
-				},
-				"to": map[string]interface{}{
-					"type":        "string",
-					"description": "Replacement characters",
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "File path to process",
-				},
-				"input": map[string]interface{}{
-					"type":        "string",
-					"description": "Inline text to process (if path not provided)",
-				},
-			},
-			"required": []string{"from", "to"},
-		},
+		ParametersValue: mustSchemaParametersFor[translateArgs](),
 		ExecuteFunc:  translateText,
 		ValidateFunc: validateTranslateArgs,
 		VersionValue: urootToolVersion,
@@ -404,20 +243,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "comm",
 		DescriptionValue: "Compare sorted files line by line",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path1": map[string]interface{}{
-					"type":        "string",
-					"description": "First file path",
-				},
-				"path2": map[string]interface{}{
-					"type":        "string",
-					"description": "Second file path",
-				},
-			},
-			"required": []string{"path1", "path2"},
-		},
+		ParametersValue: mustSchemaParametersFor[commArgs](),
 		ExecuteFunc:  compareFiles,
 		ValidateFunc: validateCommArgs,
 		VersionValue: urootToolVersion,
@@ -426,20 +252,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "strings",
 		DescriptionValue: "Print printable character sequences",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "File path to scan",
-				},
-				"min_length": map[string]interface{}{
-					"type":        "number",
-					"description": "Minimum string length (default: 4)",
-				},
-			},
-			"required": []string{"path"},
-		},
+		ParametersValue: mustSchemaParametersFor[stringsArgs](),
 		ExecuteFunc:  stringsText,
 		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
 		VersionValue: urootToolVersion,
@@ -448,20 +261,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "more",
 		DescriptionValue: "Page through text",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "File path to read",
-				},
-				"lines": map[string]interface{}{
-					"type":        "number",
-					"description": "Number of lines to return (default: 40)",
-				},
-			},
-			"required": []string{"path"},
-		},
+		ParametersValue: mustSchemaParametersFor[moreArgs](),
 		ExecuteFunc:  moreText,
 		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
 		VersionValue: urootToolVersion,
@@ -470,20 +270,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "hexdump",
 		DescriptionValue: "Display file contents in hexadecimal",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "File path to dump",
-				},
-				"max_bytes": map[string]interface{}{
-					"type":        "number",
-					"description": "Maximum bytes to display (default: 512)",
-				},
-			},
-			"required": []string{"path"},
-		},
+		ParametersValue: mustSchemaParametersFor[hexdumpArgs](),
 		ExecuteFunc:  hexDump,
 		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
 		VersionValue: urootToolVersion,
@@ -492,20 +279,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "cmp",
 		DescriptionValue: "Compare two files byte by byte",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path1": map[string]interface{}{
-					"type":        "string",
-					"description": "First file path",
-				},
-				"path2": map[string]interface{}{
-					"type":        "string",
-					"description": "Second file path",
-				},
-			},
-			"required": []string{"path1", "path2"},
-		},
+		ParametersValue: mustSchemaParametersFor[cmpArgs](),
 		ExecuteFunc:  compareBytes,
 		ValidateFunc: validateCommArgs,
 		VersionValue: urootToolVersion,
@@ -514,20 +288,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "md5sum",
 		DescriptionValue: "Compute MD5 checksums",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"paths": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "File paths to hash",
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Single file path to hash",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[md5sumArgs](),
 		ExecuteFunc:  md5Sum,
 		ValidateFunc: validatePathsArg("paths", "path"),
 		VersionValue: urootToolVersion,
@@ -536,24 +297,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "shasum",
 		DescriptionValue: "Compute SHA checksums",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"paths": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "File paths to hash",
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Single file path to hash",
-				},
-				"algorithm": map[string]interface{}{
-					"type":        "number",
-					"description": "SHA algorithm (1, 256, or 512)",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[shasumArgs](),
 		ExecuteFunc:  shaSum,
 		ValidateFunc: validatePathsArg("paths", "path"),
 		VersionValue: urootToolVersion,
@@ -562,20 +306,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "base64",
 		DescriptionValue: "Base64 encode or decode files",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "File path to encode or decode",
-				},
-				"decode": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Decode base64 input",
-				},
-			},
-			"required": []string{"path"},
-		},
+		ParametersValue: mustSchemaParametersFor[base64Args](),
 		ExecuteFunc:  base64Tool,
 		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
 		VersionValue: urootToolVersion,
@@ -774,20 +505,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "echo",
 		DescriptionValue: "Display text",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"text": map[string]interface{}{
-					"type":        "string",
-					"description": "Text to echo",
-				},
-				"parts": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "Text parts to join with spaces",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[echoArgs](),
 		ExecuteFunc:  echoTool,
 		VersionValue: urootToolVersion,
 	})
@@ -795,23 +513,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "seq",
 		DescriptionValue: "Print sequence of numbers",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"start": map[string]interface{}{
-					"type":        "number",
-					"description": "Start value (default: 1 if end specified)",
-				},
-				"end": map[string]interface{}{
-					"type":        "number",
-					"description": "End value",
-				},
-				"step": map[string]interface{}{
-					"type":        "number",
-					"description": "Step value (default: 1)",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[seqArgs](),
 		ExecuteFunc:  seqTool,
 		ValidateFunc: validateSeqArgs,
 		VersionValue: urootToolVersion,
@@ -865,20 +567,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "mkfifo",
 		DescriptionValue: "Create a named pipe",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "FIFO path to create",
-				},
-				"mode": map[string]interface{}{
-					"type":        "string",
-					"description": "Octal permission mode (default: 600)",
-				},
-			},
-			"required": []string{"path"},
-		},
+		ParametersValue: mustSchemaParametersFor[mkfifoArgs](),
 		ExecuteFunc:  mkfifoTool,
 		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
 		VersionValue: urootToolVersion,
@@ -907,31 +596,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "find",
 		DescriptionValue: "Search for files",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Root path to search (default: current directory)",
-				},
-				"name": map[string]interface{}{
-					"type":        "string",
-					"description": "Glob pattern to match file names",
-				},
-				"type": map[string]interface{}{
-					"type":        "string",
-					"description": "Filter by type: file or dir",
-				},
-				"max_depth": map[string]interface{}{
-					"type":        "number",
-					"description": "Maximum depth to traverse",
-				},
-				"show_hidden": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Include hidden entries",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[findArgs](),
 		ExecuteFunc:  findTool,
 		VersionValue: urootToolVersion,
 	})
@@ -939,20 +604,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "chmod",
 		DescriptionValue: "Change file permissions",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Path to modify",
-				},
-				"mode": map[string]interface{}{
-					"type":        "string",
-					"description": "Octal permission mode (e.g., 644)",
-				},
-			},
-			"required": []string{"path", "mode"},
-		},
+		ParametersValue: mustSchemaParametersFor[chmodArgs](),
 		ExecuteFunc:  chmodTool,
 		ValidateFunc: validateChmodArgs,
 		VersionValue: urootToolVersion,
