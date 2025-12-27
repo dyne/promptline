@@ -209,6 +209,182 @@ unique
 	if result.Error == nil {
 		t.Fatal("expected error for multiple matches")
 	}
+	if !strings.Contains(result.Error.Error(), "exact mode") {
+		t.Fatalf("expected exact mode hint, got %v", result.Error)
+	}
+}
+
+func TestEditFileOccurrenceSelectsMatch(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"edit_file": true,
+		},
+	})
+
+	absDir, relDir := tempDirInCwd(t)
+	absPath := filepath.Join(absDir, "occurrence.txt")
+	relPath := filepath.Join(relDir, "occurrence.txt")
+	if err := os.WriteFile(absPath, []byte("dup\nkeep\ndup\n"), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	edits := `<<<<<<< SEARCH
+dup
+=======
+unique
+>>>>>>> REPLACE`
+	result := registry.Execute("edit_file", map[string]interface{}{
+		"path":       relPath,
+		"edits":      edits,
+		"occurrence": 2,
+	})
+	if result.Error != nil {
+		t.Fatalf("expected edit_file success, got: %v", result.Error)
+	}
+
+	updated, err := os.ReadFile(absPath)
+	if err != nil {
+		t.Fatalf("failed to read updated file: %v", err)
+	}
+	if string(updated) != "dup\nkeep\nunique\n" {
+		t.Fatalf("unexpected content: %q", string(updated))
+	}
+}
+
+func TestEditFileReplaceAll(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"edit_file": true,
+		},
+	})
+
+	absDir, relDir := tempDirInCwd(t)
+	absPath := filepath.Join(absDir, "replace_all.txt")
+	relPath := filepath.Join(relDir, "replace_all.txt")
+	if err := os.WriteFile(absPath, []byte("dup\ndup\n"), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	edits := `<<<<<<< SEARCH
+dup
+=======
+unique
+>>>>>>> REPLACE`
+	result := registry.Execute("edit_file", map[string]interface{}{
+		"path":        relPath,
+		"edits":       edits,
+		"replace_all": true,
+	})
+	if result.Error != nil {
+		t.Fatalf("expected edit_file success, got: %v", result.Error)
+	}
+
+	updated, err := os.ReadFile(absPath)
+	if err != nil {
+		t.Fatalf("failed to read updated file: %v", err)
+	}
+	if string(updated) != "unique\nunique\n" {
+		t.Fatalf("unexpected content: %q", string(updated))
+	}
+}
+
+func TestEditFileRejectsNoOp(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"edit_file": true,
+		},
+	})
+
+	absDir, relDir := tempDirInCwd(t)
+	absPath := filepath.Join(absDir, "noop.txt")
+	relPath := filepath.Join(relDir, "noop.txt")
+	if err := os.WriteFile(absPath, []byte("stay\n"), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	edits := `<<<<<<< SEARCH
+stay
+=======
+stay
+>>>>>>> REPLACE`
+	result := registry.Execute("edit_file", map[string]interface{}{
+		"path":  relPath,
+		"edits": edits,
+	})
+	if result.Error == nil {
+		t.Fatal("expected no-op error")
+	}
+	if !strings.Contains(result.Error.Error(), "replacement is identical") {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+}
+
+func TestEditFileRejectsMultipleMatchesWhitespace(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"edit_file": true,
+		},
+	})
+
+	absDir, relDir := tempDirInCwd(t)
+	absPath := filepath.Join(absDir, "whitespace.txt")
+	relPath := filepath.Join(relDir, "whitespace.txt")
+	content := "    if err != nil {\n        return err\n    }\n    if err != nil {\n        return err\n    }\n"
+	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	edits := `<<<<<<< SEARCH
+  if err != nil {
+    return err
+  }
+=======
+  if err != nil {
+    return fmt.Errorf("wrapped: %w", err)
+  }
+>>>>>>> REPLACE`
+	result := registry.Execute("edit_file", map[string]interface{}{
+		"path":  relPath,
+		"edits": edits,
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for multiple whitespace matches")
+	}
+	if !strings.Contains(result.Error.Error(), "whitespace mode") {
+		t.Fatalf("expected whitespace mode hint, got %v", result.Error)
+	}
+}
+
+func TestEditFileRejectsMultipleMatchesFuzzy(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"edit_file": true,
+		},
+	})
+
+	absDir, relDir := tempDirInCwd(t)
+	absPath := filepath.Join(absDir, "fuzzy_dupe.txt")
+	relPath := filepath.Join(relDir, "fuzzy_dupe.txt")
+	content := "return fmt.Errorf(\"oops: %w\", err)\nreturn fmt.Errorf(\"oops: %w\", err)\n"
+	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+
+	edits := `<<<<<<< SEARCH
+return fmt.Errorf("oops: %w", er)
+=======
+return fmt.Errorf("oops: %w", err)
+>>>>>>> REPLACE`
+	result := registry.Execute("edit_file", map[string]interface{}{
+		"path":  relPath,
+		"edits": edits,
+	})
+	if result.Error == nil {
+		t.Fatal("expected error for multiple fuzzy matches")
+	}
+	if !strings.Contains(result.Error.Error(), "fuzzy mode") {
+		t.Fatalf("expected fuzzy mode hint, got %v", result.Error)
+	}
 }
 
 func TestEditFileRejectsInvalidFormat(t *testing.T) {

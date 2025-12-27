@@ -21,13 +21,14 @@ Core:
 - `get_current_datetime`: {}.
 - `read_file`: { "path": "string" }. Required: path.
 - `create_file`: { "path": "string", "content": "string", "overwrite": "boolean" }. Required: path, content. `overwrite` defaults to false. Parent directories are created automatically.
-- `edit_file`: { "path": "string", "edits": "string" }. Required: path, edits. `edits` is one or more blocks:
+- `edit_file`: { "path": "string", "edits": "string", "occurrence": "number", "replace_all": "boolean" }. Required: path, edits. `occurrence` is 1-based, `replace_all` applies to all matches (mutually exclusive). `edits` is one or more blocks:
   <<<<<<< SEARCH
   [original code block]
   =======
   [replacement code block]
   >>>>>>> REPLACE
   Marker runs are canonical with 7 markers and a single space, but 6 or 8 markers and extra whitespace between the markers and the keyword are also accepted.
+  If a search block matches multiple locations, set `occurrence` or `replace_all`. No-op replacements (replacement identical to matched content) are rejected.
 - `ls`: { "path": "string", "recursive": "boolean", "show_hidden": "boolean" }. Use for directory listing (u-root `ls`).
 
 File operations:

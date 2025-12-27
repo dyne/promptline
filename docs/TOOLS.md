@@ -33,7 +33,7 @@ Core:
 
 Markers are canonical with 7 `<` or `>` and a single space, but the parser also accepts 6 or 8 markers and extra whitespace between the marker run and the keyword.
 
-Matching is progressive (exact, then whitespace-insensitive, then fuzzy) and fails if the search block matches multiple locations.
+Matching is progressive (exact, then whitespace-insensitive, then fuzzy). If the search block matches multiple locations, provide `occurrence` (1-based) to pick one match or `replace_all: true` to update all matches (mutually exclusive). No-op replacements (replacement identical to matched content) are rejected.
 
 File operations:
 - `cat` `cp` `mv` `rm` `ln` `touch` `truncate` `readlink` `realpath`
