@@ -110,33 +110,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "cp",
 		DescriptionValue: "Copy files and directories",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"sources": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "Source file or directory paths",
-				},
-				"destination": map[string]interface{}{
-					"type":        "string",
-					"description": "Destination path",
-				},
-				"recursive": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Copy directories recursively",
-				},
-				"force": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Overwrite existing files",
-				},
-				"no_follow_symlinks": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Copy symlink itself instead of target",
-				},
-			},
-			"required": []string{"sources", "destination"},
-		},
+		ParametersValue: mustSchemaParametersFor[copyArgs](),
 		ExecuteFunc:  wrapURootCommand(buildCopyArgs, runCopy),
 		ValidateFunc: validateRequiredStrings([]string{"destination"}, []string{"sources"}),
 		VersionValue: urootToolVersion,
@@ -145,29 +119,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "mv",
 		DescriptionValue: "Move or rename files and directories",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"sources": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "Source file or directory paths",
-				},
-				"destination": map[string]interface{}{
-					"type":        "string",
-					"description": "Destination path",
-				},
-				"update": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Move only when source is newer or destination is missing",
-				},
-				"no_clobber": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Do not overwrite existing files",
-				},
-			},
-			"required": []string{"sources", "destination"},
-		},
+		ParametersValue: mustSchemaParametersFor[moveArgs](),
 		ExecuteFunc:  wrapURootCommand(buildMoveArgs, runMove),
 		ValidateFunc: validateRequiredStrings([]string{"destination"}, []string{"sources"}),
 		VersionValue: urootToolVersion,
@@ -176,28 +128,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "rm",
 		DescriptionValue: "Remove files or directories",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"paths": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "Paths to remove",
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Single path to remove",
-				},
-				"recursive": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Remove directories recursively",
-				},
-				"force": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Ignore nonexistent files",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[removeArgs](),
 		ExecuteFunc:  wrapURootCommand(buildRemoveArgs, runRemove),
 		ValidateFunc: validatePathsArg("paths", "path"),
 		VersionValue: urootToolVersion,
@@ -236,36 +167,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "touch",
 		DescriptionValue: "Create files or update timestamps",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"paths": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "File paths to touch",
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Single file path to touch",
-				},
-				"access": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Change access time only",
-				},
-				"modification": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Change modification time only",
-				},
-				"no_create": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Do not create files if they do not exist",
-				},
-				"datetime": map[string]interface{}{
-					"type":        "string",
-					"description": "RFC3339 timestamp to apply",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[touchArgs](),
 		ExecuteFunc:  wrapURootCommand(buildTouchArgs, runTouch),
 		ValidateFunc: validatePathsArg("paths", "path"),
 		VersionValue: urootToolVersion,
@@ -340,45 +242,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "grep",
 		DescriptionValue: "Search text patterns in files",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"pattern": map[string]interface{}{
-					"type":        "string",
-					"description": "Pattern to search for (regular expression)",
-				},
-				"paths": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "File paths to search",
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Single file path to search",
-				},
-				"ignore_case": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Case-insensitive matching",
-				},
-				"recursive": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Search directories recursively",
-				},
-				"show_hidden": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Include hidden files when searching directories",
-				},
-				"invert": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Select non-matching lines",
-				},
-				"max_matches": map[string]interface{}{
-					"type":        "number",
-					"description": "Maximum number of matches to return",
-				},
-			},
-			"required": []string{"pattern"},
-		},
+		ParametersValue: mustSchemaParametersFor[grepArgs](),
 		ExecuteFunc:  grepText,
 		ValidateFunc: validateGrepArgs,
 		VersionValue: urootToolVersion,
@@ -531,25 +395,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "tee",
 		DescriptionValue: "Write input to files and standard output",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"content": map[string]interface{}{
-					"type":        "string",
-					"description": "Content to write",
-				},
-				"paths": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "File paths to write",
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Single file path to write",
-				},
-			},
-			"required": []string{"content"},
-		},
+		ParametersValue: mustSchemaParametersFor[teeArgs](),
 		ExecuteFunc:  teeText,
 		ValidateFunc: validateTeeArgs,
 		VersionValue: urootToolVersion,
@@ -738,28 +584,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "mkdir",
 		DescriptionValue: "Create directories",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"paths": map[string]interface{}{
-					"type":        "array",
-					"items":       map[string]interface{}{"type": "string"},
-					"description": "Directory paths to create",
-				},
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Single directory path to create",
-				},
-				"parents": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Create parent directories as needed",
-				},
-				"mode": map[string]interface{}{
-					"type":        "string",
-					"description": "Octal permission mode (e.g., 755)",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[mkdirArgs](),
 		ExecuteFunc:  wrapURootCommand(buildMkdirArgs, runMkdir),
 		ValidateFunc: validatePathsArg("paths", "path"),
 		VersionValue: urootToolVersion,
