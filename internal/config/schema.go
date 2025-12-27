@@ -316,7 +316,8 @@ const exampleConfigJSON = `{
   "tools": {
     "allow": ["get_current_datetime", "read_file", "ls"],
     "ask": [
-      "write_file",
+      "create_file",
+      "edit_file",
       "cat",
       "cp",
       "mv",

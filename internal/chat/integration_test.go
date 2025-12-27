@@ -86,13 +86,13 @@ func TestToolApprovalWorkflowIntegration(t *testing.T) {
 	}
 	writeCall := openai.ToolCall{
 		Function: openai.FunctionCall{
-			Name:      "write_file",
+			Name:      "create_file",
 			Arguments: string(writeArgs),
 		},
 	}
 	writeResult := session.ExecuteToolCallWithApproval(writeCall)
 	if writeResult.Error == nil {
-		t.Fatal("expected write_file to be denied")
+		t.Fatal("expected create_file to be denied")
 	}
 	if !errors.Is(writeResult.Error, tools.ErrToolNotAllowed) && !errors.Is(writeResult.Error, tools.ErrToolDeniedByUser) {
 		t.Fatalf("expected permission error, got %v", writeResult.Error)
