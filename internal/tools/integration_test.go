@@ -26,11 +26,11 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-func TestExecuteOpenAIToolCallWriteReadIntegration(t *testing.T) {
+func TestExecuteOpenAIToolCallCreateReadIntegration(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
-			"write_file": true,
-			"read_file":  true,
+			"create_file": true,
+			"read_file":   true,
 		},
 	})
 
@@ -53,13 +53,13 @@ func TestExecuteOpenAIToolCallWriteReadIntegration(t *testing.T) {
 	})
 	writeCall := openai.ToolCall{
 		Function: openai.FunctionCall{
-			Name:      "write_file",
+			Name:      "create_file",
 			Arguments: string(writeArgs),
 		},
 	}
 	writeResult := registry.ExecuteOpenAIToolCall(writeCall)
 	if writeResult.Error != nil {
-		t.Fatalf("expected write_file success, got %v", writeResult.Error)
+		t.Fatalf("expected create_file success, got %v", writeResult.Error)
 	}
 
 	readArgs, _ := json.Marshal(map[string]interface{}{

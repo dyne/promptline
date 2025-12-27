@@ -365,7 +365,7 @@ func TestMessagesSnapshotNormalizesEmptyToolArgs(t *testing.T) {
 						ID:   "call-1",
 						Type: openai.ToolTypeFunction,
 						Function: openai.FunctionCall{
-							Name:      "write_file",
+							Name:      "create_file",
 							Arguments: "",
 						},
 					},

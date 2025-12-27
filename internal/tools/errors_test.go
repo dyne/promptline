@@ -55,9 +55,9 @@ func TestToolExecutionError(t *testing.T) {
 }
 
 func TestPermissionError(t *testing.T) {
-	err := NewPermissionError("write_file", "tool requires confirmation")
+	err := NewPermissionError("create_file", "tool requires confirmation")
 
-	expected := "permission denied for tool write_file: tool requires confirmation"
+	expected := "permission denied for tool create_file: tool requires confirmation"
 	if err.Error() != expected {
 		t.Errorf("expected %q, got %q", expected, err.Error())
 	}

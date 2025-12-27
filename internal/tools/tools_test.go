@@ -315,22 +315,22 @@ func TestExecuteGetCurrentDatetime(t *testing.T) {
 	}
 }
 
-func TestExecuteWriteAndReadFile(t *testing.T) {
+func TestExecuteCreateAndReadFile(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
-			"write_file": true,
-			"read_file":  true,
+			"create_file": true,
+			"read_file":   true,
 		},
 	})
 	_, relDir := tempDirInCwd(t)
 	relPath := filepath.Join(relDir, "sample.txt")
 
-	writeResult := registry.Execute("write_file", map[string]interface{}{
+	writeResult := registry.Execute("create_file", map[string]interface{}{
 		"path":    relPath,
 		"content": "sample content",
 	})
 	if writeResult.Error != nil {
-		t.Fatalf("expected write_file success, got: %v", writeResult.Error)
+		t.Fatalf("expected create_file success, got: %v", writeResult.Error)
 	}
 
 	readResult := registry.Execute("read_file", map[string]interface{}{
@@ -341,6 +341,74 @@ func TestExecuteWriteAndReadFile(t *testing.T) {
 	}
 	if strings.TrimSpace(readResult.Result) != "sample content" {
 		t.Fatalf("expected content 'sample content', got %q", readResult.Result)
+	}
+}
+
+func TestCreateFileAutoCreatesParentDirs(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"create_file": true,
+		},
+	})
+	absDir, relDir := tempDirInCwd(t)
+	relPath := filepath.Join(relDir, "nested", "dir", "file.txt")
+
+	result := registry.Execute("create_file", map[string]interface{}{
+		"path":    relPath,
+		"content": "nested content",
+	})
+	if result.Error != nil {
+		t.Fatalf("expected create_file success, got: %v", result.Error)
+	}
+
+	if _, err := os.Stat(filepath.Join(absDir, "nested", "dir", "file.txt")); err != nil {
+		t.Fatalf("expected nested file to be created, got %v", err)
+	}
+}
+
+func TestCreateFileRequiresOverwriteFlag(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"create_file": true,
+			"read_file":   true,
+		},
+	})
+	_, relDir := tempDirInCwd(t)
+	relPath := filepath.Join(relDir, "overwrite.txt")
+
+	first := registry.Execute("create_file", map[string]interface{}{
+		"path":    relPath,
+		"content": "first",
+	})
+	if first.Error != nil {
+		t.Fatalf("expected initial create_file success, got: %v", first.Error)
+	}
+
+	second := registry.Execute("create_file", map[string]interface{}{
+		"path":    relPath,
+		"content": "second",
+	})
+	if second.Error == nil {
+		t.Fatal("expected error when overwrite is false")
+	}
+
+	third := registry.Execute("create_file", map[string]interface{}{
+		"path":      relPath,
+		"content":   "second",
+		"overwrite": true,
+	})
+	if third.Error != nil {
+		t.Fatalf("expected create_file overwrite success, got: %v", third.Error)
+	}
+
+	readResult := registry.Execute("read_file", map[string]interface{}{
+		"path": relPath,
+	})
+	if readResult.Error != nil {
+		t.Fatalf("expected read_file success, got: %v", readResult.Error)
+	}
+	if strings.TrimSpace(readResult.Result) != "second" {
+		t.Fatalf("expected overwritten content 'second', got %q", readResult.Result)
 	}
 }
 
@@ -377,7 +445,7 @@ func TestReadFileSizeLimit(t *testing.T) {
 	}
 }
 
-func TestWriteFileSizeLimit(t *testing.T) {
+func TestCreateFileSizeLimit(t *testing.T) {
 	defaults := DefaultLimits()
 	ConfigureLimits(Limits{
 		MaxFileSizeBytes:    4,
@@ -390,11 +458,11 @@ func TestWriteFileSizeLimit(t *testing.T) {
 
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
-			"write_file": true,
+			"create_file": true,
 		},
 	})
 	_, relDir := tempDirInCwd(t)
-	result := registry.Execute("write_file", map[string]interface{}{
+	result := registry.Execute("create_file", map[string]interface{}{
 		"path":    filepath.Join(relDir, "big.txt"),
 		"content": "12345",
 	})
@@ -406,7 +474,7 @@ func TestWriteFileSizeLimit(t *testing.T) {
 	}
 }
 
-func TestWriteFileRejectsNullBytePath(t *testing.T) {
+func TestCreateFileRejectsNullBytePath(t *testing.T) {
 	defaults := DefaultLimits()
 	ConfigureLimits(defaults)
 	t.Cleanup(func() {
@@ -415,10 +483,10 @@ func TestWriteFileRejectsNullBytePath(t *testing.T) {
 
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
-			"write_file": true,
+			"create_file": true,
 		},
 	})
-	result := registry.Execute("write_file", map[string]interface{}{
+	result := registry.Execute("create_file", map[string]interface{}{
 		"path":    "bad\x00path.txt",
 		"content": "data",
 	})
@@ -430,7 +498,7 @@ func TestWriteFileRejectsNullBytePath(t *testing.T) {
 	}
 }
 
-func TestWriteFileRejectsCombiningMarkPath(t *testing.T) {
+func TestCreateFileRejectsCombiningMarkPath(t *testing.T) {
 	defaults := DefaultLimits()
 	ConfigureLimits(defaults)
 	t.Cleanup(func() {
@@ -439,10 +507,10 @@ func TestWriteFileRejectsCombiningMarkPath(t *testing.T) {
 
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
-			"write_file": true,
+			"create_file": true,
 		},
 	})
-	result := registry.Execute("write_file", map[string]interface{}{
+	result := registry.Execute("create_file", map[string]interface{}{
 		"path":    "e\u0301.txt",
 		"content": "data",
 	})
@@ -454,7 +522,7 @@ func TestWriteFileRejectsCombiningMarkPath(t *testing.T) {
 	}
 }
 
-func TestWriteFileRespectsPathWhitelist(t *testing.T) {
+func TestCreateFileRespectsPathWhitelist(t *testing.T) {
 	defaults := DefaultLimits()
 	ConfigureLimits(defaults)
 	absAllowed, relAllowed := tempDirInCwd(t)
@@ -466,10 +534,10 @@ func TestWriteFileRespectsPathWhitelist(t *testing.T) {
 
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
-			"write_file": true,
+			"create_file": true,
 		},
 	})
-	allowedResult := registry.Execute("write_file", map[string]interface{}{
+	allowedResult := registry.Execute("create_file", map[string]interface{}{
 		"path":    filepath.Join(relAllowed, "ok.txt"),
 		"content": "ok",
 	})
@@ -477,7 +545,7 @@ func TestWriteFileRespectsPathWhitelist(t *testing.T) {
 		t.Fatalf("expected whitelist write to succeed, got %v", allowedResult.Error)
 	}
 
-	blockedResult := registry.Execute("write_file", map[string]interface{}{
+	blockedResult := registry.Execute("create_file", map[string]interface{}{
 		"path":    filepath.Join(relBlocked, "nope.txt"),
 		"content": "nope",
 	})
@@ -621,13 +689,13 @@ func TestToolCooldownEnforced(t *testing.T) {
 func TestExecuteDryRunSkipsExecution(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
-			"write_file": true,
+			"create_file": true,
 		},
 	})
 	absDir, relDir := tempDirInCwd(t)
 	relPath := filepath.Join(relDir, "dryrun.txt")
 
-	result := registry.ExecuteWithOptions("write_file", map[string]interface{}{
+	result := registry.ExecuteWithOptions("create_file", map[string]interface{}{
 		"path":    relPath,
 		"content": "content",
 	}, ExecuteOptions{DryRun: true})
@@ -686,7 +754,7 @@ func TestGetToolNames(t *testing.T) {
 	}
 
 	// Check for expected tools
-	expectedTools := []string{"ls", "read_file", "write_file", "get_current_datetime"}
+	expectedTools := []string{"ls", "read_file", "create_file", "edit_file", "get_current_datetime"}
 	for _, expected := range expectedTools {
 		found := false
 		for _, name := range names {
@@ -707,7 +775,7 @@ func TestGetPermission(t *testing.T) {
 			"read_file": true,
 		},
 		Ask: map[string]bool{
-			"write_file": true,
+			"create_file": true,
 		},
 	})
 
@@ -718,9 +786,9 @@ func TestGetPermission(t *testing.T) {
 	}
 
 	// Tool with confirmation
-	perm = registry.GetPermission("write_file")
+	perm = registry.GetPermission("create_file")
 	if perm.Level != PermissionAsk {
-		t.Errorf("expected write_file to be ask, got %s", perm.Level)
+		t.Errorf("expected create_file to be ask, got %s", perm.Level)
 	}
 
 	// Unknown tool
@@ -901,20 +969,20 @@ func TestReadFileNonExistent(t *testing.T) {
 	}
 }
 
-func TestWriteFileInvalidPath(t *testing.T) {
+func TestCreateFileRejectsPathTraversal(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
-			"write_file": true,
+			"create_file": true,
 		},
 	})
 
-	result := registry.Execute("write_file", map[string]interface{}{
-		"path":    filepath.Join("missing-dir", "file.txt"),
+	result := registry.Execute("create_file", map[string]interface{}{
+		"path":    filepath.Join("..", "outside.txt"),
 		"content": "test",
 	})
 
 	if result.Error == nil {
-		t.Fatal("expected error for invalid path")
+		t.Fatal("expected error for path traversal")
 	}
 }
 
@@ -933,14 +1001,14 @@ func TestReadFileRejectsAbsolutePath(t *testing.T) {
 	}
 }
 
-func TestWriteFileRejectsAbsolutePath(t *testing.T) {
+func TestCreateFileRejectsAbsolutePath(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
-			"write_file": true,
+			"create_file": true,
 		},
 	})
 
-	result := registry.Execute("write_file", map[string]interface{}{
+	result := registry.Execute("create_file", map[string]interface{}{
 		"path":    "/tmp/absolute.txt",
 		"content": "data",
 	})
@@ -972,17 +1040,17 @@ func TestReadFileRejectsBinaryContent(t *testing.T) {
 	}
 }
 
-func TestWriteFileRejectsBinaryContent(t *testing.T) {
+func TestCreateFileRejectsBinaryContent(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
-			"write_file": true,
+			"create_file": true,
 		},
 	})
 
 	_, relDir := tempDirInCwd(t)
 	relPath := filepath.Join(relDir, "binary.txt")
 
-	result := registry.Execute("write_file", map[string]interface{}{
+	result := registry.Execute("create_file", map[string]interface{}{
 		"path":    relPath,
 		"content": "text\u0000binary",
 	})
@@ -1021,13 +1089,13 @@ func TestReadFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
 	}
 }
 
-func TestWriteFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
+func TestCreateFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink tests require elevated privileges on windows")
 	}
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
-			"write_file": true,
+			"create_file": true,
 		},
 	})
 
@@ -1039,7 +1107,7 @@ func TestWriteFileRejectsSymlinkOutsideWorkdir(t *testing.T) {
 		t.Fatalf("failed to create symlink directory: %v", err)
 	}
 
-	result := registry.Execute("write_file", map[string]interface{}{
+	result := registry.Execute("create_file", map[string]interface{}{
 		"path":    filepath.Join(relDir, "outside_dir", "file.txt"),
 		"content": "data",
 	})
@@ -1195,10 +1263,10 @@ func TestReadFileSecurityBlocks(t *testing.T) {
 	}
 }
 
-func TestWriteFileSecurityBlocks(t *testing.T) {
+func TestCreateFileSecurityBlocks(t *testing.T) {
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
-			"write_file": true,
+			"create_file": true,
 		},
 	})
 
@@ -1213,7 +1281,7 @@ func TestWriteFileSecurityBlocks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := registry.Execute("write_file", map[string]interface{}{
+			result := registry.Execute("create_file", map[string]interface{}{
 				"path":    tt.path,
 				"content": "test",
 			})
@@ -1514,7 +1582,7 @@ func TestPermissionDeniedScenarios(t *testing.T) {
 			},
 		})
 
-		result := registry.Execute("write_file", map[string]interface{}{
+		result := registry.Execute("create_file", map[string]interface{}{
 			"path":    "/tmp/test.txt",
 			"content": "test",
 		})
@@ -1563,11 +1631,11 @@ func TestConfirmationRequirements(t *testing.T) {
 	t.Run("confirmation blocks execution", func(t *testing.T) {
 		registry := NewRegistryWithPolicy(Policy{
 			Ask: map[string]bool{
-				"write_file": true,
+				"create_file": true,
 			},
 		})
 
-		result := registry.Execute("write_file", map[string]interface{}{
+		result := registry.Execute("create_file", map[string]interface{}{
 			"path":    "/tmp/test.txt",
 			"content": "test",
 		})
@@ -1580,13 +1648,13 @@ func TestConfirmationRequirements(t *testing.T) {
 	t.Run("force bypasses confirmation", func(t *testing.T) {
 		registry := NewRegistryWithPolicy(Policy{
 			Ask: map[string]bool{
-				"write_file": true,
+				"create_file": true,
 			},
 		})
 
 		_, relDir := tempDirInCwd(t)
 		tempFile := filepath.Join(relDir, "test.txt")
-		result := registry.ExecuteWithOptions("write_file", map[string]interface{}{
+		result := registry.ExecuteWithOptions("create_file", map[string]interface{}{
 			"path":    tempFile,
 			"content": "test content",
 		}, ExecuteOptions{Force: true})
@@ -1713,7 +1781,7 @@ func TestRegistryConcurrentAccess(t *testing.T) {
 			for j := 0; j < 50; j++ {
 				registry.AllowTool("ls", true)
 				registry.SetAllowed("read_file", true)
-				registry.SetRequireConfirmation("write_file", true)
+				registry.SetRequireConfirmation("create_file", true)
 			}
 			done <- true
 		}(i)

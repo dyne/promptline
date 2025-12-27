@@ -18,8 +18,22 @@ Promptline ships with safe, Go-native tools (including u-root implementations). 
 Core:
 - `get_current_datetime` - RFC3339 timestamp
 - `read_file` - read from disk
-- `write_file` - write to disk
+- `create_file` - create a text file (overwrite flag, auto-create parent dirs)
+- `edit_file` - apply SEARCH/REPLACE edits to a text file
 - `ls` - list directory (path, recursive, show_hidden). Use this for directory listing (u-root `ls`).
+
+`edit_file` format:
+```
+<<<<<<< SEARCH
+[original code block]
+=======
+[replacement code block]
+>>>>>>> REPLACE
+```
+
+Markers are canonical with 7 `<` or `>` and a single space, but the parser also accepts 6 or 8 markers and extra whitespace between the marker run and the keyword.
+
+Matching is progressive (exact, then whitespace-insensitive, then fuzzy) and fails if the search block matches multiple locations.
 
 File operations:
 - `cat` `cp` `mv` `rm` `ln` `touch` `truncate` `readlink` `realpath`
@@ -55,7 +69,7 @@ Override in `config.json`:
 {
   "tools": {
     "allow": ["ls", "read_file"],
-    "ask": ["write_file"],
+    "ask": ["create_file", "edit_file"],
     "deny": []
   }
 }

@@ -20,7 +20,7 @@ Requires Go 1.22+ and `OPENAI_API_KEY` set or config.json
   "model": "gpt-4o-mini",
   "tools": {
     "allow": ["read_file", "ls"],
-    "ask": ["write_file"]
+    "ask": ["create_file", "edit_file"]
   },
   "tool_limits": {
     "max_file_size_bytes": 10485760,
@@ -90,4 +90,3 @@ License along with this program.  If not, see
     <img src="https://files.dyne.org/software_by_dyne.png" width="170">
   </a>
 </p>
-

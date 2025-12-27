@@ -66,28 +66,21 @@ func registerBuiltInTools(r *Registry) {
 	})
 
 	register(&ToolDefinition{
-		NameValue:        "write_file",
-		DescriptionValue: "Create or overwrite a text file (preferred for file writes)",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Path to the file to write",
-				},
-				"content": map[string]interface{}{
-					"type":        "string",
-					"description": "Content to write to the file",
-				},
-			},
-			"required": []string{"path", "content"},
-		},
-		ExecuteFunc: writeFile,
-		ValidateFunc: ChainValidation(
-			RequireStringArg("path", "missing or invalid 'path' or 'content' parameter"),
-			RequireStringArg("content", "missing or invalid 'path' or 'content' parameter"),
-		),
-		VersionValue: builtinToolVersion,
+		NameValue:        "create_file",
+		DescriptionValue: "Create a text file and auto-create parent directories (use overwrite to replace an existing file)",
+		ParametersValue:  mustSchemaParametersFor[createFileArgs](),
+		ExecuteFunc:      createFile,
+		ValidateFunc:     validateCreateFileArgs,
+		VersionValue:     builtinToolVersion,
+	})
+
+	register(&ToolDefinition{
+		NameValue:        "edit_file",
+		DescriptionValue: "Apply SEARCH/REPLACE edits to a text file",
+		ParametersValue:  mustSchemaParametersFor[editFileArgs](),
+		ExecuteFunc:      editFile,
+		ValidateFunc:     validateEditFileArgs,
+		VersionValue:     builtinToolVersion,
 	})
 
 }
@@ -183,56 +176,6 @@ func readFile(ctx context.Context, args map[string]interface{}) (string, error) 
 	return string(content), nil
 }
 
-func writeFile(ctx context.Context, args map[string]interface{}) (string, error) {
-	if err := ensureContext(ctx); err != nil {
-		return "", err
-	}
-
-	path, err := extractPathArg(args)
-	if err != nil {
-		return "", err
-	}
-
-	content, ok := args["content"].(string)
-	if !ok {
-		return "", fmt.Errorf("missing or invalid 'content' parameter")
-	}
-
-	limits := getLimits()
-	if int64(len(content)) > limits.MaxFileSizeBytes {
-		return "", fmt.Errorf("content exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
-	}
-
-	if !isTextContent([]byte(content)) {
-		return "", fmt.Errorf("content appears to be binary; write_file supports text only")
-	}
-
-	workdir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine working directory: %v", err)
-	}
-
-	resolved, err := resolvePathWithinBase(path, workdir)
-	if err != nil {
-		return "", err
-	}
-
-	if info, err := os.Stat(resolved); err == nil && info.IsDir() {
-		return "", fmt.Errorf("path '%s' is a directory", resolved)
-	}
-
-	if err := ensureContext(ctx); err != nil {
-		return "", err
-	}
-
-	// Use os.WriteFile instead of exec for better security
-	if err := os.WriteFile(resolved, []byte(content), 0644); err != nil {
-		return "", fmt.Errorf("failed to write file: %v", err)
-	}
-
-	return fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), resolved), nil
-}
-
 func getPathArg(args map[string]interface{}) string {
 	path, ok := args["path"].(string)
 	if !ok || path == "" {
@@ -308,6 +251,81 @@ func resolvePathWithinBase(path, baseDir string) (string, error) {
 	}
 
 	return resolved, nil
+}
+
+func resolvePathWithinBaseAllowMissing(path, baseDir string) (string, error) {
+	if err := paths.ValidatePathString(path, maxPathLength); err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(path) {
+		return "", fmt.Errorf("absolute paths are not allowed")
+	}
+
+	baseAbs, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid base directory: %v", err)
+	}
+	baseResolved, err := filepath.EvalSymlinks(baseAbs)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve base directory: %v", err)
+	}
+
+	cleanRel := filepath.Clean(path)
+	candidate := filepath.Clean(filepath.Join(baseResolved, cleanRel))
+	if !paths.HasPathPrefix(candidate, baseResolved) {
+		return "", fmt.Errorf("path escapes working directory")
+	}
+
+	for _, dangerous := range dangerousPaths {
+		if strings.HasPrefix(candidate, dangerous) {
+			return "", fmt.Errorf("access to %s is restricted for security", dangerous)
+		}
+	}
+
+	resolved, err := resolveExistingAncestor(candidate, baseResolved)
+	if err != nil {
+		return "", err
+	}
+	if err := validatePathWhitelist(resolved, baseResolved); err != nil {
+		return "", err
+	}
+
+	return resolved, nil
+}
+
+func resolveExistingAncestor(candidate, baseResolved string) (string, error) {
+	probe := candidate
+	for {
+		if _, err := os.Lstat(probe); err == nil {
+			resolvedProbe, err := filepath.EvalSymlinks(probe)
+			if err != nil {
+				return "", fmt.Errorf("failed to resolve path: %v", err)
+			}
+			if !paths.HasPathPrefix(resolvedProbe, baseResolved) {
+				return "", fmt.Errorf("path escapes working directory")
+			}
+			remainder, err := filepath.Rel(probe, candidate)
+			if err != nil {
+				return "", fmt.Errorf("failed to compute relative path: %v", err)
+			}
+			if remainder == "." {
+				return resolvedProbe, nil
+			}
+			resolved := filepath.Join(resolvedProbe, remainder)
+			if !paths.HasPathPrefix(resolved, baseResolved) {
+				return "", fmt.Errorf("path escapes working directory")
+			}
+			return resolved, nil
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("failed to stat path: %v", err)
+		}
+
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return "", fmt.Errorf("failed to resolve path")
+		}
+		probe = parent
+	}
 }
 
 func validatePathWhitelist(absPath, baseResolved string) error {
