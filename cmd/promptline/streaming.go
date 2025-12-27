@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -30,20 +31,29 @@ import (
 )
 
 // handleConversation sends user message and streams AI response
-func handleConversation(input string, session *chat.Session, logger zerolog.Logger) {
+func handleConversation(input string, session *chat.Session, logger zerolog.Logger, canceler *operationCanceler) {
 	sessionLogger := logger.With().Str("session_id", session.SessionID).Logger()
 	logConversation(sessionLogger, openai.ChatMessageRoleUser, input)
 
 	// Stream the conversation, handling tool calls recursively
-	streamConversation(session, input, true, sessionLogger)
+	streamConversation(session, input, true, sessionLogger, canceler)
 }
 
 // streamConversation handles streaming with tool execution
-func streamConversation(session *chat.Session, input string, includeUserMessage bool, logger zerolog.Logger) {
+func streamConversation(session *chat.Session, input string, includeUserMessage bool, logger zerolog.Logger, canceler *operationCanceler) {
 	sessionLogger := logger.With().Str("session_id", session.SessionID).Logger()
 	// Create streaming events channel
 	events := make(chan chat.StreamEvent, 10)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	if canceler != nil {
+		canceler.Set(cancel)
+	}
+	defer func() {
+		cancel()
+		if canceler != nil {
+			canceler.Clear()
+		}
+	}()
 
 	// Start streaming in goroutine
 	go session.StreamResponseWithContext(ctx, input, includeUserMessage, events)
@@ -73,6 +83,11 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 			}
 
 		case chat.StreamEventError:
+			if errors.Is(event.Err, context.Canceled) {
+				fmt.Println("\n⟫ cancelled")
+				sessionLogger.Debug().Err(event.Err).Msg("Streaming cancelled")
+				return
+			}
 			fmt.Printf("\n✗ Error: %v\n", event.Err)
 			sessionLogger.Error().Err(event.Err).Msg("Streaming error")
 			return
@@ -104,7 +119,7 @@ func streamConversation(session *chat.Session, input string, includeUserMessage 
 		if anyHandled {
 			fmt.Println()
 			fmt.Print("⟫ ")
-			streamConversation(session, "", false, sessionLogger)
+			streamConversation(session, "", false, sessionLogger, canceler)
 		} else {
 			fmt.Println()
 			fmt.Println()

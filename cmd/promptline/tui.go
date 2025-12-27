@@ -18,6 +18,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
 	"strings"
 
 	"github.com/chzyer/readline"
@@ -42,13 +44,28 @@ func runTUIMode(logger zerolog.Logger) {
 	session.Logger = &logger
 	session.DryRun = *dryRun
 
+	canceler := &operationCanceler{}
+	interrupts := make(chan os.Signal, 1)
+	signal.Notify(interrupts, os.Interrupt)
+	defer signal.Stop(interrupts)
+	go func() {
+		for range interrupts {
+			if canceler.Cancel() {
+				fmt.Println()
+			}
+		}
+	}()
+
 	// Initialize readline with dynamic command completion and Ctrl-R handler
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          "❯ ",
 		HistoryFile:     cfg.CommandHistoryFile,
 		AutoComplete:    getCommandCompleter(),
-		InterruptPrompt: "^C",
-		EOFPrompt:       "exit",
+		InterruptPrompt: "\n",
+		EOFPrompt:       "",
+		FuncFilterInputRune: func(r rune) (rune, bool) {
+			return filterInterruptRune(r)
+		},
 	})
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to initialize readline")
@@ -59,7 +76,7 @@ func runTUIMode(logger zerolog.Logger) {
 	fmt.Println("Promptline by Dyne.org")
 	fmt.Printf("Connected to: %s\n", session.BaseURL)
 	fmt.Printf("Model in use: %s\n", session.Config.Model)
-	// fmt.Println("Type /help for commands, Ctrl+C or /quit to exit")
+	// fmt.Println("Type /help for commands, /quit to exit")
 	// fmt.Println("Press Ctrl+R to search conversation history")
 	fmt.Println()
 
@@ -70,11 +87,21 @@ func runTUIMode(logger zerolog.Logger) {
 	for {
 		line, err := rl.Readline()
 		if err != nil {
-			// EOF or interrupt
-			logger.Debug().Msg("Readline interrupted")
-			break
+			action := classifyReadlineError(line, err)
+			switch action {
+			case readlineContinue:
+				fmt.Println()
+				continue
+			case readlineExit:
+				fmt.Println()
+				goto done
+			default:
+				logger.Debug().Err(err).Msg("Readline interrupted")
+				continue
+			}
 		}
 
+		line = sanitizeInputLine(line)
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -92,10 +119,11 @@ func runTUIMode(logger zerolog.Logger) {
 		}
 
 		// Handle conversation
-		handleConversation(line, session, logger)
+		handleConversation(line, session, logger, canceler)
 
 	}
 
+done:
 	logger.Info().Msg("Session ended")
 }
 
