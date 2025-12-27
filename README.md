@@ -49,7 +49,7 @@ echo "query" | ./promptline -         # batch/pipe
 
 Commands: `/help` `/clear` `/history` `/debug` `/permissions` `/quit`
 
-Keys: `Ctrl+↑/↓` history, `Ctrl+C` exit
+Keys: `Ctrl+↑/↓` history
 
 ## Tools
 
