@@ -23,19 +23,55 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/sashabaranov/go-openai"
 	"golang.org/x/term"
 	"promptline/internal/chat"
 )
 
+type approvalDecision int
+
+const (
+	approvalUnknown approvalDecision = iota
+	approvalYes
+	approvalNo
+	approvalAlways
+)
+
+type toolPromptFunc func(call openai.ToolCall) (approvalDecision, error)
+
 func newToolApprover() chat.ToolApprovalFunc {
+	return newToolApproverWithPrompt(promptToolApproval)
+}
+
+func newToolApproverWithPrompt(prompt toolPromptFunc) chat.ToolApprovalFunc {
+	alwaysAllowed := make(map[string]bool)
+	var mu sync.RWMutex
 	return func(call openai.ToolCall) (bool, error) {
-		return promptToolApproval(call)
+		toolName := toolCallName(call)
+		mu.RLock()
+		allowed := alwaysAllowed[toolName]
+		mu.RUnlock()
+		if allowed {
+			return true, nil
+		}
+
+		decision, err := prompt(call)
+		if err != nil {
+			return false, err
+		}
+		if decision == approvalAlways {
+			mu.Lock()
+			alwaysAllowed[toolName] = true
+			mu.Unlock()
+			return true, nil
+		}
+		return decision == approvalYes, nil
 	}
 }
 
-func promptToolApproval(call openai.ToolCall) (bool, error) {
+func promptToolApproval(call openai.ToolCall) (approvalDecision, error) {
 	input := os.Stdin
 	output := io.Writer(os.Stdout)
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -44,26 +80,17 @@ func promptToolApproval(call openai.ToolCall) (bool, error) {
 			output = tty
 			defer tty.Close()
 		} else {
-			return false, fmt.Errorf("no TTY available for tool approval")
+			return approvalNo, fmt.Errorf("no TTY available for tool approval")
 		}
 	}
 	reader := bufio.NewReader(input)
-	name := call.Function.Name
-	if name == "" {
-		name = "unknown_tool"
-	}
+	name := toolCallName(call)
 	rawArgs := strings.TrimSpace(call.Function.Arguments)
 	argsDisplay := ""
-	contentPreview := ""
 	if rawArgs != "" && rawArgs != "{}" && rawArgs != "null" {
 		argsDisplay = fmt.Sprintf(" with args %s", rawArgs)
 		if argsMap, ok := parseArgsJSON(rawArgs); ok {
-			if content, ok := argsMap["content"]; ok {
-				if contentStr, ok := content.(string); ok {
-					contentPreview = contentStr
-				}
-				delete(argsMap, "content")
-			}
+			delete(argsMap, "content")
 			if redacted, err := json.Marshal(argsMap); err == nil {
 				argsDisplay = fmt.Sprintf(" with args %s", string(redacted))
 			}
@@ -71,28 +98,51 @@ func promptToolApproval(call openai.ToolCall) (bool, error) {
 	}
 
 	for {
-		fmt.Fprintf(output, "Allow tool %s%s? [y/N/p]: ", name, argsDisplay)
-		input, err := reader.ReadString('\n')
+		fmt.Fprintf(output, "Allow tool %s%s? (Yes/no/always): ", name, argsDisplay)
+		line, err := reader.ReadString('\n')
 		if err != nil {
-			return false, err
+			return approvalNo, err
 		}
-		normalized := strings.TrimSpace(strings.ToLower(input))
-		switch normalized {
-		case "y", "yes":
-			return true, nil
-		case "p":
-			if contentPreview == "" {
-				fmt.Fprintln(output, "No content field to preview.")
-				continue
-			}
-			fmt.Fprintln(output, contentPreview)
-			continue
-		case "", "n", "no":
-			return false, nil
+		decision := parseApprovalInput(line)
+		switch decision {
+		case approvalYes, approvalNo, approvalAlways:
+			return decision, nil
 		default:
-			fmt.Fprintln(output, "Please enter y, n, or p to preview content.")
+			fmt.Fprintln(output, "Please enter yes, no, or always.")
 		}
 	}
+}
+
+func parseApprovalInput(input string) approvalDecision {
+	normalized := strings.TrimSpace(strings.ToLower(input))
+	if normalized == "" {
+		return approvalYes
+	}
+	switch {
+	case isPrefixToken(normalized, "yes"):
+		return approvalYes
+	case isPrefixToken(normalized, "no"):
+		return approvalNo
+	case isPrefixToken(normalized, "always"):
+		return approvalAlways
+	default:
+		return approvalUnknown
+	}
+}
+
+func isPrefixToken(input, target string) bool {
+	if input == "" || len(input) > len(target) {
+		return false
+	}
+	return strings.HasPrefix(target, input)
+}
+
+func toolCallName(call openai.ToolCall) string {
+	name := call.Function.Name
+	if name == "" {
+		return "unknown_tool"
+	}
+	return name
 }
 
 func parseArgsJSON(rawArgs string) (map[string]interface{}, bool) {
