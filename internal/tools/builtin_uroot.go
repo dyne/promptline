@@ -144,16 +144,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "realpath",
 		DescriptionValue: "Print absolute path with symlinks resolved",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Path to resolve",
-				},
-			},
-			"required": []string{"path"},
-		},
+		ParametersValue: mustSchemaParametersFor[realpathArgs](),
 		ExecuteFunc:  realpathPath,
 		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
 		VersionValue: urootToolVersion,
@@ -198,16 +189,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "uniq",
 		DescriptionValue: "Report or omit repeated lines",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "File path to process",
-				},
-			},
-			"required": []string{"path"},
-		},
+		ParametersValue: mustSchemaParametersFor[uniqArgs](),
 		ExecuteFunc:  uniqText,
 		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
 		VersionValue: urootToolVersion,
@@ -324,10 +306,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "pwd",
 		DescriptionValue: "Print the working directory",
-		ParametersValue: map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-		},
+		ParametersValue: mustSchemaParametersFor[noArgs](),
 		ExecuteFunc:  printWorkingDirectory,
 		VersionValue: urootToolVersion,
 	})
@@ -335,16 +314,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "dirname",
 		DescriptionValue: "Strip last component from path",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Path to evaluate",
-				},
-			},
-			"required": []string{"path"},
-		},
+		ParametersValue: mustSchemaParametersFor[pathArg](),
 		ExecuteFunc:  dirNamePath,
 		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
 		VersionValue: urootToolVersion,
@@ -353,16 +323,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "basename",
 		DescriptionValue: "Strip directory from filename",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Path to evaluate",
-				},
-			},
-			"required": []string{"path"},
-		},
+		ParametersValue: mustSchemaParametersFor[pathArg](),
 		ExecuteFunc:  baseNamePath,
 		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
 		VersionValue: urootToolVersion,
@@ -371,10 +332,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "uname",
 		DescriptionValue: "Print system information",
-		ParametersValue: map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-		},
+		ParametersValue: mustSchemaParametersFor[noArgs](),
 		ExecuteFunc:  unameTool,
 		VersionValue: urootToolVersion,
 	})
@@ -382,10 +340,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "hostname",
 		DescriptionValue: "Print system hostname",
-		ParametersValue: map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-		},
+		ParametersValue: mustSchemaParametersFor[noArgs](),
 		ExecuteFunc:  hostnameTool,
 		VersionValue: urootToolVersion,
 	})
@@ -393,10 +348,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "uptime",
 		DescriptionValue: "Show how long the system has been running",
-		ParametersValue: map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-		},
+		ParametersValue: mustSchemaParametersFor[noArgs](),
 		ExecuteFunc:  uptimeTool,
 		VersionValue: urootToolVersion,
 	})
@@ -404,10 +356,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "free",
 		DescriptionValue: "Display memory usage",
-		ParametersValue: map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-		},
+		ParametersValue: mustSchemaParametersFor[noArgs](),
 		ExecuteFunc:  freeTool,
 		VersionValue: urootToolVersion,
 	})
@@ -415,15 +364,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "df",
 		DescriptionValue: "Report filesystem disk space usage",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Path to inspect (default: current directory)",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[dfArgs](),
 		ExecuteFunc:  dfTool,
 		VersionValue: urootToolVersion,
 	})
@@ -431,19 +372,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "du",
 		DescriptionValue: "Estimate file space usage",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"path": map[string]interface{}{
-					"type":        "string",
-					"description": "Path to inspect (default: current directory)",
-				},
-				"max_depth": map[string]interface{}{
-					"type":        "number",
-					"description": "Maximum depth to traverse",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[duArgs](),
 		ExecuteFunc:  duTool,
 		VersionValue: urootToolVersion,
 	})
@@ -451,19 +380,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "ps",
 		DescriptionValue: "Report process status",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"name": map[string]interface{}{
-					"type":        "string",
-					"description": "Filter processes by substring match",
-				},
-				"limit": map[string]interface{}{
-					"type":        "number",
-					"description": "Maximum number of processes to return",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[psArgs](),
 		ExecuteFunc:  psTool,
 		VersionValue: urootToolVersion,
 	})
@@ -471,16 +388,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "pidof",
 		DescriptionValue: "Find process IDs by name",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"name": map[string]interface{}{
-					"type":        "string",
-					"description": "Process name to match",
-				},
-			},
-			"required": []string{"name"},
-		},
+		ParametersValue: mustSchemaParametersFor[pidofArgs](),
 		ExecuteFunc:  pidofTool,
 		ValidateFunc: RequireNonEmptyArg("name", "missing or invalid 'name' parameter"),
 		VersionValue: urootToolVersion,
@@ -489,15 +397,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "id",
 		DescriptionValue: "Print user identity",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"user": map[string]interface{}{
-					"type":        "string",
-					"description": "User name to inspect (default: current user)",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[idArgs](),
 		ExecuteFunc:  idTool,
 		VersionValue: urootToolVersion,
 	})
@@ -522,15 +422,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "printenv",
 		DescriptionValue: "Print environment variables",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"name": map[string]interface{}{
-					"type":        "string",
-					"description": "Specific environment variable to print",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[printenvArgs](),
 		ExecuteFunc:  printenvTool,
 		VersionValue: urootToolVersion,
 	})
@@ -538,10 +430,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "tty",
 		DescriptionValue: "Print terminal name",
-		ParametersValue: map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-		},
+		ParametersValue: mustSchemaParametersFor[noArgs](),
 		ExecuteFunc:  ttyTool,
 		VersionValue: urootToolVersion,
 	})
@@ -549,16 +438,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "which",
 		DescriptionValue: "Locate a command in PATH",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"name": map[string]interface{}{
-					"type":        "string",
-					"description": "Command name to locate",
-				},
-			},
-			"required": []string{"name"},
-		},
+		ParametersValue: mustSchemaParametersFor[whichArgs](),
 		ExecuteFunc:  whichTool,
 		ValidateFunc: RequireNonEmptyArg("name", "missing or invalid 'name' parameter"),
 		VersionValue: urootToolVersion,
@@ -576,19 +456,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "mktemp",
 		DescriptionValue: "Create a temporary file or directory",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"dir": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Create a temporary directory instead of a file",
-				},
-				"prefix": map[string]interface{}{
-					"type":        "string",
-					"description": "Prefix for the temporary name",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[mktempArgs](),
 		ExecuteFunc:  mktempTool,
 		VersionValue: urootToolVersion,
 	})
@@ -613,15 +481,7 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "date",
 		DescriptionValue: "Display date and time",
-		ParametersValue: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"format": map[string]interface{}{
-					"type":        "string",
-					"description": "Go time layout or 'unix' (default: RFC3339)",
-				},
-			},
-		},
+		ParametersValue: mustSchemaParametersFor[dateArgs](),
 		ExecuteFunc:  dateTool,
 		VersionValue: urootToolVersion,
 	})
