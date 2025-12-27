@@ -30,10 +30,20 @@ var (
 	debugMode = flag.Bool("d", false, "Enable debug mode")
 	logFile   = flag.String("log-file", "", "Log file path (logs disabled by default)")
 	dryRun    = flag.Bool("dry-run", false, "Validate tool calls without executing them")
+	version   = flag.Bool("version", false, "Display version information and exit")
 )
+
+// Version is set at build time via ldflags. Defaults to "dev".
+var Version = "dev"
 
 func main() {
 	flag.Parse()
+
+	// Handle version flag
+	if *version {
+		fmt.Printf("promptline version %s\n", Version)
+		os.Exit(0)
+	}
 
 	// Initialize logger
 	logger, closer, err := initLogger(*debugMode, *logFile)
@@ -46,7 +56,7 @@ func main() {
 			_ = closer.Close()
 		}()
 	}
-	logger.Info().Msg("Promptline starting")
+	logger.Info().Str("version", Version).Msg("Promptline starting")
 
 	// Check if we're running in batch mode (with "-" argument)
 	args := flag.Args()

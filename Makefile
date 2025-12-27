@@ -7,13 +7,14 @@ GOOS ?= $(shell $(GO) env GOOS)
 GOARCH ?= $(shell $(GO) env GOARCH)
 GOEXE := $(shell GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) env GOEXE)
 BINARY := promptline$(GOEXE)
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
 # Default target
 help:
 	@echo "promptline Makefile"
 	@echo "Usage:"
-	@echo "  make build     - Build the application"
-	@echo "  make release   - Build a release binary"
+	@echo "  make build     - Build the application (version: $(VERSION))"
+	@echo "  make release   - Build a release binary with version $(VERSION)"
 	@echo "  make install   - Install the application globally"
 	@echo "  make clean     - Clean build artifacts"
 	@echo "  make test      - Run tests"
@@ -21,13 +22,15 @@ help:
 	@echo "  make coverage  - Run tests with coverage and display report"
 	@echo "  make help      - Show this help message"
 	@echo "  make prompt    - Show a reusable system prompt"
+	@echo ""
+	@echo "Version can be set via VERSION variable: make VERSION=v1.0.0 release"
 
 # Build the application
 build:
 	$(GO) build -o $(BINARY) ./cmd/promptline
 
 release:
-	$(GO) build -trimpath -ldflags "-s -w" -o $(BINARY) ./cmd/promptline
+	$(GO) build -trimpath -ldflags "-s -w -X main.Version=$(VERSION)" -o $(BINARY) ./cmd/promptline
 
 # Install the application globally
 install:
