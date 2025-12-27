@@ -20,9 +20,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/invopop/jsonschema"
 )
+
+var validate *validator.Validate
+
+func init() {
+	validate = validator.New()
+	validate.RegisterTagNameFunc(func(field reflect.StructField) string {
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if name == "" || name == "-" {
+			return field.Name
+		}
+		return name
+	})
+}
 
 func mustSchemaParametersFor[T any]() map[string]interface{} {
 	var zero T
@@ -65,4 +80,44 @@ func jsonSchemaToMap(schema interface{}) (map[string]interface{}, error) {
 		return nil, err
 	}
 	return params, nil
+}
+
+func unmarshalAndValidate[T any](args map[string]interface{}) (T, error) {
+	var out T
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return out, fmt.Errorf("invalid tool arguments: %v", err)
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, formatValidationError(err)
+	}
+	if validate == nil {
+		return out, nil
+	}
+	if err := validate.Struct(out); err != nil {
+		return out, formatValidationError(err)
+	}
+	return out, nil
+}
+
+func formatValidationError(err error) error {
+	switch typed := err.(type) {
+	case validator.ValidationErrors:
+		if len(typed) == 0 {
+			return err
+		}
+		field := typed[0].Field()
+		if field == "" {
+			field = "parameter"
+		}
+		return fmt.Errorf("missing or invalid '%s' parameter", field)
+	case *json.UnmarshalTypeError:
+		field := typed.Field
+		if field == "" {
+			field = "parameter"
+		}
+		return fmt.Errorf("missing or invalid '%s' parameter", field)
+	default:
+		return err
+	}
 }

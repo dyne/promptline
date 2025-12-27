@@ -36,15 +36,15 @@ const (
 )
 
 type createFileArgs struct {
-	Path      string `json:"path" jsonschema:"description=Path to the file to create,minLength=1"`
-	Content   string `json:"content" jsonschema:"description=Text content to write,minLength=1"`
+	Path      string `json:"path" jsonschema:"description=Path to the file to create,minLength=1" validate:"required,min=1"`
+	Content   string `json:"content" jsonschema:"description=Text content to write,minLength=1" validate:"required,min=1"`
 	Overwrite bool   `json:"overwrite,omitempty" jsonschema:"description=Overwrite the file if it already exists"`
 }
 
 type editFileArgs struct {
-	Path       string `json:"path" jsonschema:"description=Path to the file to edit,minLength=1"`
-	Edits      string `json:"edits" jsonschema:"description=SEARCH/REPLACE blocks to apply,minLength=1"`
-	Occurrence int    `json:"occurrence,omitempty" jsonschema:"description=1-based match occurrence to replace,minimum=1"`
+	Path       string `json:"path" jsonschema:"description=Path to the file to edit,minLength=1" validate:"required,min=1"`
+	Edits      string `json:"edits" jsonschema:"description=SEARCH/REPLACE blocks to apply,minLength=1" validate:"required,min=1"`
+	Occurrence int    `json:"occurrence,omitempty" jsonschema:"description=1-based match occurrence to replace,minimum=1" validate:"omitempty,min=1"`
 	ReplaceAll bool   `json:"replace_all,omitempty" jsonschema:"description=Replace all matches instead of one"`
 }
 
@@ -62,28 +62,49 @@ type editMatch struct {
 	Mode string
 }
 
+func normalizePathArg(args map[string]interface{}) map[string]interface{} {
+	if args == nil {
+		return args
+	}
+	if _, ok := getStringLike(args["path"]); ok {
+		return args
+	}
+	if path, ok := getStringLike(args["file"]); ok {
+		args["path"] = path
+		return args
+	}
+	if path, ok := getStringLike(args["filepath"]); ok {
+		args["path"] = path
+		return args
+	}
+	return args
+}
+
 func validateCreateFileArgs(args map[string]interface{}) error {
-	if _, err := extractPathArg(args); err != nil {
+	args = normalizePathArg(args)
+	parsed, err := unmarshalAndValidate[createFileArgs](args)
+	if err != nil {
 		return err
 	}
-	content, ok := args["content"].(string)
-	if !ok || strings.TrimSpace(content) == "" {
-		return fmt.Errorf("missing or invalid 'content' parameter")
+	if strings.TrimSpace(parsed.Path) == "" {
+		return fmt.Errorf("missing or invalid 'path' parameter")
 	}
-	if overwrite, ok := args["overwrite"]; ok {
-		if _, ok := overwrite.(bool); !ok {
-			return fmt.Errorf("missing or invalid 'overwrite' parameter")
-		}
+	if strings.TrimSpace(parsed.Content) == "" {
+		return fmt.Errorf("missing or invalid 'content' parameter")
 	}
 	return nil
 }
 
 func validateEditFileArgs(args map[string]interface{}) error {
-	if _, err := extractPathArg(args); err != nil {
+	args = normalizePathArg(args)
+	parsed, err := unmarshalAndValidate[editFileArgs](args)
+	if err != nil {
 		return err
 	}
-	edits, ok := args["edits"].(string)
-	if !ok || strings.TrimSpace(edits) == "" {
+	if strings.TrimSpace(parsed.Path) == "" {
+		return fmt.Errorf("missing or invalid 'path' parameter")
+	}
+	if strings.TrimSpace(parsed.Edits) == "" {
 		return fmt.Errorf("missing or invalid 'edits' parameter")
 	}
 	occurrence, hasOccurrence, err := getOptionalPositiveIntArg(args, "occurrence")
@@ -93,13 +114,8 @@ func validateEditFileArgs(args map[string]interface{}) error {
 	if hasOccurrence && occurrence < 1 {
 		return fmt.Errorf("missing or invalid 'occurrence' parameter")
 	}
-	if replaceAll, ok := args["replace_all"]; ok {
-		if _, ok := replaceAll.(bool); !ok {
-			return fmt.Errorf("missing or invalid 'replace_all' parameter")
-		}
-		if replaceAll.(bool) && hasOccurrence {
-			return fmt.Errorf("cannot set both 'occurrence' and 'replace_all'")
-		}
+	if parsed.ReplaceAll && hasOccurrence {
+		return fmt.Errorf("cannot set both 'occurrence' and 'replace_all'")
 	}
 	return nil
 }
@@ -132,23 +148,25 @@ func createFile(ctx context.Context, args map[string]interface{}) (string, error
 		return "", err
 	}
 
-	path, err := extractPathArg(args)
+	args = normalizePathArg(args)
+	parsed, err := unmarshalAndValidate[createFileArgs](args)
 	if err != nil {
 		return "", err
 	}
-	content, ok := args["content"].(string)
-	if !ok || strings.TrimSpace(content) == "" {
+	path := strings.TrimSpace(parsed.Path)
+	if path == "" {
+		return "", fmt.Errorf("missing or invalid 'path' parameter")
+	}
+	content := parsed.Content
+	if strings.TrimSpace(content) == "" {
 		return "", fmt.Errorf("missing or invalid 'content' parameter")
 	}
 
-	overwrite := false
-	if rawOverwrite, ok := args["overwrite"]; ok {
-		val, ok := rawOverwrite.(bool)
-		if !ok {
-			return "", fmt.Errorf("missing or invalid 'overwrite' parameter")
-		}
-		overwrite = val
+	path, err = extractPathArg(map[string]interface{}{"path": path})
+	if err != nil {
+		return "", err
 	}
+	overwrite := parsed.Overwrite
 
 	limits := getLimits()
 	if int64(len(content)) > limits.MaxFileSizeBytes {
@@ -202,13 +220,22 @@ func editFile(ctx context.Context, args map[string]interface{}) (string, error) 
 		return "", err
 	}
 
-	path, err := extractPathArg(args)
+	args = normalizePathArg(args)
+	parsed, err := unmarshalAndValidate[editFileArgs](args)
 	if err != nil {
 		return "", err
 	}
-	editsRaw, ok := args["edits"].(string)
-	if !ok || strings.TrimSpace(editsRaw) == "" {
+	path := strings.TrimSpace(parsed.Path)
+	if path == "" {
+		return "", fmt.Errorf("missing or invalid 'path' parameter")
+	}
+	editsRaw := parsed.Edits
+	if strings.TrimSpace(editsRaw) == "" {
 		return "", fmt.Errorf("missing or invalid 'edits' parameter")
+	}
+	path, err = extractPathArg(map[string]interface{}{"path": path})
+	if err != nil {
+		return "", err
 	}
 
 	workdir, err := os.Getwd()
@@ -258,14 +285,7 @@ func editFile(ctx context.Context, args map[string]interface{}) (string, error) 
 	if hasOccurrence && occurrence < 1 {
 		return "", fmt.Errorf("missing or invalid 'occurrence' parameter")
 	}
-	replaceAll := false
-	if rawReplaceAll, ok := args["replace_all"]; ok {
-		val, ok := rawReplaceAll.(bool)
-		if !ok {
-			return "", fmt.Errorf("missing or invalid 'replace_all' parameter")
-		}
-		replaceAll = val
-	}
+	replaceAll := parsed.ReplaceAll
 	if replaceAll && hasOccurrence {
 		return "", fmt.Errorf("cannot set both 'occurrence' and 'replace_all'")
 	}
