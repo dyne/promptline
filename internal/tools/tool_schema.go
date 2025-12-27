@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/567-labs/instructor-go/pkg/instructor"
+	"github.com/invopop/jsonschema"
 )
 
 func mustSchemaParametersFor[T any]() map[string]interface{} {
@@ -41,20 +41,18 @@ func mustSchemaParametersFor[T any]() map[string]interface{} {
 }
 
 func schemaParametersForType(t reflect.Type) (map[string]interface{}, error) {
-	schema, err := instructor.NewSchema(t)
-	if err != nil {
-		return nil, err
-	}
-
 	defName := t.Name()
-	for _, fn := range schema.Functions {
-		if fn.Name != defName {
-			continue
-		}
-		return jsonSchemaToMap(fn.Parameters)
+	schema := jsonschema.ReflectFromType(t)
+	def, ok := schema.Definitions[defName]
+	if !ok {
+		return nil, fmt.Errorf("schema definition %q not found", defName)
 	}
-
-	return nil, fmt.Errorf("schema definition %q not found", defName)
+	params := &jsonschema.Schema{
+		Type:       "object",
+		Properties: def.Properties,
+		Required:   def.Required,
+	}
+	return jsonSchemaToMap(params)
 }
 
 func jsonSchemaToMap(schema interface{}) (map[string]interface{}, error) {
