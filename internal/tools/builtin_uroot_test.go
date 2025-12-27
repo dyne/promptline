@@ -357,6 +357,92 @@ func TestURootTextProcessing(t *testing.T) {
 		}
 	})
 
+	t.Run("grep directory", func(t *testing.T) {
+		subdir := filepath.Join(dir, "sub")
+		if err := os.MkdirAll(subdir, 0o755); err != nil {
+			t.Fatalf("failed to create subdir: %v", err)
+		}
+		writeTestFile(t, dir, "root.txt", "version 1\nnope")
+		writeTestFile(t, subdir, "nested.txt", "version 2")
+
+		dirRel := relPath(t, dir)
+		result := executeTool(t, registry, "grep", map[string]interface{}{
+			"pattern": "version",
+			"path":    dirRel,
+		})
+		if result.Error != nil {
+			t.Fatalf("expected grep directory success, got %v", result.Error)
+		}
+		expected := filepath.Join(dirRel, "root.txt") + ":version 1"
+		if strings.TrimSpace(result.Result) != expected {
+			t.Fatalf("unexpected grep directory output: %q", result.Result)
+		}
+
+		recursive := executeTool(t, registry, "grep", map[string]interface{}{
+			"pattern":   "version",
+			"path":      dirRel,
+			"recursive": true,
+		})
+		if recursive.Error != nil {
+			t.Fatalf("expected grep recursive success, got %v", recursive.Error)
+		}
+		lines := strings.Split(strings.TrimSpace(recursive.Result), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected 2 grep recursive lines, got %d", len(lines))
+		}
+		expectedLines := map[string]bool{
+			filepath.Join(dirRel, "root.txt") + ":version 1":           true,
+			filepath.Join(dirRel, "sub", "nested.txt") + ":version 2": true,
+		}
+		for _, line := range lines {
+			if !expectedLines[line] {
+				t.Fatalf("unexpected grep recursive line: %q", line)
+			}
+		}
+	})
+
+	t.Run("grep glob paths", func(t *testing.T) {
+		writeTestFile(t, dir, "glob1.go", "Version A")
+		writeTestFile(t, dir, "glob2.go", "Version B")
+		gsub1 := filepath.Join(dir, "g1")
+		gsub2 := filepath.Join(dir, "g2")
+		if err := os.MkdirAll(gsub1, 0o755); err != nil {
+			t.Fatalf("failed to create g1: %v", err)
+		}
+		if err := os.MkdirAll(gsub2, 0o755); err != nil {
+			t.Fatalf("failed to create g2: %v", err)
+		}
+		writeTestFile(t, gsub1, "glob.txt", "Version C")
+		writeTestFile(t, gsub2, "glob.txt", "Version D")
+
+		dirRel := relPath(t, dir)
+		globPattern := filepath.Join(dirRel, "*.go")
+		segmentGlob := filepath.Join(dirRel, "g*", "glob.txt")
+
+		result := executeTool(t, registry, "grep", map[string]interface{}{
+			"pattern": "Version",
+			"paths":   []string{globPattern, segmentGlob},
+		})
+		if result.Error != nil {
+			t.Fatalf("expected grep glob success, got %v", result.Error)
+		}
+		lines := strings.Split(strings.TrimSpace(result.Result), "\n")
+		if len(lines) != 4 {
+			t.Fatalf("expected 4 grep glob lines, got %d", len(lines))
+		}
+		expectedLines := map[string]bool{
+			filepath.Join(dirRel, "glob1.go") + ":Version A":     true,
+			filepath.Join(dirRel, "glob2.go") + ":Version B":     true,
+			filepath.Join(dirRel, "g1", "glob.txt") + ":Version C": true,
+			filepath.Join(dirRel, "g2", "glob.txt") + ":Version D": true,
+		}
+		for _, line := range lines {
+			if !expectedLines[line] {
+				t.Fatalf("unexpected grep glob line: %q", line)
+			}
+		}
+	})
+
 	t.Run("head and tail", func(t *testing.T) {
 		headResult := executeTool(t, registry, "head", map[string]interface{}{
 			"path":  relPath(t, textPath),

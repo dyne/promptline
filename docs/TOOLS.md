@@ -19,7 +19,7 @@ Core:
 - `get_current_datetime` - RFC3339 timestamp
 - `read_file` - read from disk
 - `write_file` - write to disk
-- `ls` - list directory (path, recursive, show_hidden)
+- `ls` - list directory (path, recursive, show_hidden). Use this for directory listing (u-root `ls`).
 
 File operations:
 - `cat` `cp` `mv` `rm` `ln` `touch` `truncate` `readlink` `realpath`
@@ -29,6 +29,11 @@ Directory operations:
 
 Text processing:
 - `grep` `head` `tail` `sort` `uniq` `wc` `tr` `tee` `comm` `strings` `more`
+
+Notes:
+- `grep` accepts file or directory paths. For directories, it searches regular files in that directory; set `recursive: true` to traverse subdirectories and `show_hidden: true` to include hidden entries.
+- `grep` path inputs support glob patterns (for example `cmd/**/*.go` is not supported, but `cmd/*.go` and `cmd/*/main.go` are).
+- Directory traversal for `grep` (and `find`) respects tool limits (max depth and max entries).
 
 File viewing/analysis:
 - `hexdump` `cmp` `md5sum` `shasum` `base64`

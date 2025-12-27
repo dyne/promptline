@@ -233,40 +233,6 @@ func writeFile(ctx context.Context, args map[string]interface{}) (string, error)
 	return fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), resolved), nil
 }
 
-func listDirectory(ctx context.Context, args map[string]interface{}) (string, error) {
-	if err := ensureContext(ctx); err != nil {
-		return "", err
-	}
-
-	path := getPathArg(args)
-	if err := validateDirectoryPath(path); err != nil {
-		return "", err
-	}
-
-	recursive := getBoolArg(args, "recursive")
-	showHidden := getBoolArg(args, "show_hidden")
-	limits := getLimits()
-
-	var result strings.Builder
-	var err error
-
-	if recursive {
-		err = walkDirectory(ctx, path, showHidden, limits, &result)
-	} else {
-		err = listDirectoryNonRecursive(ctx, path, showHidden, limits, &result)
-	}
-
-	if err != nil {
-		return "", err
-	}
-
-	if result.Len() == 0 {
-		return "Directory is empty", nil
-	}
-
-	return result.String(), nil
-}
-
 func getPathArg(args map[string]interface{}) string {
 	path, ok := args["path"].(string)
 	if !ok || path == "" {
@@ -278,25 +244,6 @@ func getPathArg(args map[string]interface{}) string {
 func getBoolArg(args map[string]interface{}, key string) bool {
 	val, ok := args[key].(bool)
 	return ok && val
-}
-
-func validateDirectoryPath(path string) error {
-	if path != "." {
-		if _, err := validatePathWithinWorkdir(path); err != nil {
-			return fmt.Errorf("path validation failed: %v", err)
-		}
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("path not found: %v", err)
-	}
-
-	if !info.IsDir() {
-		return fmt.Errorf("path '%s' is not a directory", path)
-	}
-
-	return nil
 }
 
 func validatePathWithinWorkdir(path string) (string, error) {

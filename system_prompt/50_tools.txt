@@ -21,7 +21,7 @@ Core:
 - `get_current_datetime`: {}.
 - `read_file`: { "path": "string" }. Required: path.
 - `write_file`: { "path": "string", "content": "string" }. Required: path, content.
-- `ls`: { "path": "string", "recursive": "boolean", "show_hidden": "boolean" }.
+- `ls`: { "path": "string", "recursive": "boolean", "show_hidden": "boolean" }. Use for directory listing (u-root `ls`).
 
 File operations:
 - `cat`: { "paths": ["string"], "path": "string" }.
@@ -41,7 +41,7 @@ Directory operations:
 - `basename`: { "path": "string" }. Required: path.
 
 Text processing:
-- `grep`: { "pattern": "string", "paths": ["string"], "path": "string", "ignore_case": "boolean", "invert": "boolean", "max_matches": "number" }. Required: pattern.
+- `grep`: { "pattern": "string", "paths": ["string"], "path": "string", "ignore_case": "boolean", "recursive": "boolean", "show_hidden": "boolean", "invert": "boolean", "max_matches": "number" }. Required: pattern. Directories are searched non-recursively unless `recursive` is true. `paths` supports glob patterns.
 - `head`: { "paths": ["string"], "path": "string", "lines": "number" }.
 - `tail`: { "paths": ["string"], "path": "string", "lines": "number" }.
 - `sort`: { "path": "string", "reverse": "boolean" }. Required: path.

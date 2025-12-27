@@ -360,6 +360,14 @@ func registerURootTools(r *Registry) {
 					"type":        "boolean",
 					"description": "Case-insensitive matching",
 				},
+				"recursive": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Search directories recursively",
+				},
+				"show_hidden": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Include hidden files when searching directories",
+				},
 				"invert": map[string]interface{}{
 					"type":        "boolean",
 					"description": "Select non-matching lines",
@@ -1552,7 +1560,10 @@ func grepText(ctx context.Context, args map[string]interface{}) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	resolvedPaths, err := resolveToolPaths(paths)
+
+	recursive := getBoolArg(args, "recursive")
+	showHidden := getBoolArg(args, "show_hidden")
+	files, err := collectGrepFiles(ctx, paths, recursive, showHidden)
 	if err != nil {
 		return "", err
 	}
@@ -1576,16 +1587,24 @@ func grepText(ctx context.Context, args map[string]interface{}) (string, error) 
 	invert := getBoolArg(args, "invert")
 	var output []string
 	matchCount := 0
-	multiFile := len(resolvedPaths) > 1
+	multiFile := len(files) > 1
 
-	for idx, path := range resolvedPaths {
+	for _, file := range files {
 		if err := ensureContext(ctx); err != nil {
 			return "", err
 		}
-		lines, err := readTextLines(path)
+		data, err := readFileLimited(file.Path, true)
 		if err != nil {
 			return "", err
 		}
+		if !isTextContent(data) {
+			if file.FromDir {
+				continue
+			}
+			return "", fmt.Errorf("file appears to be binary; tool supports text only")
+		}
+		text := strings.ReplaceAll(string(data), "\r\n", "\n")
+		lines := strings.Split(text, "\n")
 		for _, line := range lines {
 			match := re.MatchString(line)
 			if invert {
@@ -1593,7 +1612,7 @@ func grepText(ctx context.Context, args map[string]interface{}) (string, error) 
 			}
 			if match {
 				if multiFile {
-					output = append(output, fmt.Sprintf("%s:%s", paths[idx], line))
+					output = append(output, fmt.Sprintf("%s:%s", file.Display, line))
 				} else {
 					output = append(output, line)
 				}
@@ -1606,6 +1625,200 @@ func grepText(ctx context.Context, args map[string]interface{}) (string, error) 
 	}
 
 	return strings.Join(output, "\n"), nil
+}
+
+type grepFile struct {
+	Path    string
+	Display string
+	FromDir bool
+}
+
+type walkEntry struct {
+	Path  string
+	Rel   string
+	IsDir bool
+}
+
+type walkOptions struct {
+	maxDepth    int
+	maxEntries  int
+	showHidden  bool
+	pattern     string
+	typeFilter  string
+	regularOnly bool
+}
+
+func walkDirEntries(ctx context.Context, root string, opts walkOptions) ([]walkEntry, error) {
+	maxDepth := opts.maxDepth
+	if maxDepth <= 0 {
+		maxDepth = 1
+	}
+	matches := make([]walkEntry, 0, 64)
+	entries := 0
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ensureContext(ctx); err != nil {
+			return err
+		}
+		depth := relativeDepth(root, path)
+		if depth > maxDepth {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if rel != "." && !opts.showHidden && containsHiddenSegment(rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if opts.pattern != "" {
+			match, err := filepath.Match(opts.pattern, filepath.Base(path))
+			if err != nil {
+				return err
+			}
+			if !match {
+				return nil
+			}
+		}
+		if opts.typeFilter == "file" && d.IsDir() {
+			return nil
+		}
+		if opts.typeFilter == "dir" && !d.IsDir() {
+			return nil
+		}
+		if opts.regularOnly {
+			if d.IsDir() {
+				return nil
+			}
+			if !d.Type().IsRegular() {
+				return nil
+			}
+		}
+		matches = append(matches, walkEntry{Path: path, Rel: rel, IsDir: d.IsDir()})
+		entries++
+		if opts.maxEntries > 0 && entries >= opts.maxEntries {
+			return fmt.Errorf("directory entry limit exceeded")
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return matches, nil
+}
+
+func collectGrepFiles(ctx context.Context, inputPaths []string, recursive bool, showHidden bool) ([]grepFile, error) {
+	baseResolved, err := resolveBaseDir()
+	if err != nil {
+		return nil, err
+	}
+	expandedInputs := make([]string, 0, len(inputPaths))
+	expandedResolved := make([]string, 0, len(inputPaths))
+	for _, input := range inputPaths {
+		if hasGlobMeta(input) {
+			matches, err := expandGlobPattern(baseResolved, input)
+			if err != nil {
+				return nil, err
+			}
+			if len(matches) == 0 {
+				return nil, fmt.Errorf("pattern %q matched no files", input)
+			}
+			for _, match := range matches {
+				resolvedMatch, err := resolveToolPath(match)
+				if err != nil {
+					return nil, err
+				}
+				display := match
+				if !filepath.IsAbs(input) {
+					rel, err := filepath.Rel(baseResolved, resolvedMatch)
+					if err == nil {
+						display = rel
+					}
+				}
+				expandedInputs = append(expandedInputs, display)
+				expandedResolved = append(expandedResolved, resolvedMatch)
+			}
+			continue
+		}
+		resolved, err := resolveToolPath(input)
+		if err != nil {
+			return nil, err
+		}
+		expandedInputs = append(expandedInputs, input)
+		expandedResolved = append(expandedResolved, resolved)
+	}
+	files := make([]grepFile, 0, len(expandedResolved))
+	limits := getLimits()
+	for i, resolved := range expandedResolved {
+		input := expandedInputs[i]
+		info, err := os.Stat(resolved)
+		if err != nil {
+			return nil, err
+		}
+		if !info.IsDir() {
+			files = append(files, grepFile{Path: resolved, Display: input})
+			continue
+		}
+		maxDepth := 1
+		if recursive {
+			maxDepth = limits.MaxDirectoryDepth
+		}
+		entries, err := walkDirEntries(ctx, resolved, walkOptions{
+			maxDepth:    maxDepth,
+			maxEntries:  limits.MaxDirectoryEntries,
+			showHidden:  showHidden,
+			typeFilter:  "file",
+			regularOnly: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			display := input
+			if entry.Rel != "." {
+				display = filepath.Join(display, entry.Rel)
+			}
+			files = append(files, grepFile{
+				Path:    entry.Path,
+				Display: display,
+				FromDir: true,
+			})
+		}
+	}
+	return files, nil
+}
+
+func hasGlobMeta(path string) bool {
+	return strings.ContainsAny(path, "*?[")
+}
+
+func expandGlobPattern(baseResolved, input string) ([]string, error) {
+	if err := paths.ValidatePathString(input, maxPathLength); err != nil {
+		return nil, err
+	}
+	var pattern string
+	if filepath.IsAbs(input) {
+		pattern = filepath.Clean(input)
+	} else {
+		pattern = filepath.Clean(filepath.Join(baseResolved, input))
+	}
+	if !paths.HasPathPrefix(pattern, baseResolved) {
+		return nil, fmt.Errorf("path escapes working directory")
+	}
+	for _, dangerous := range dangerousPaths {
+		if strings.HasPrefix(pattern, dangerous) {
+			return nil, fmt.Errorf("access to %s is restricted for security", dangerous)
+		}
+	}
+	return filepath.Glob(pattern)
 }
 
 func headText(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -2653,62 +2866,22 @@ func findTool(ctx context.Context, args map[string]interface{}) (string, error) 
 		return "", fmt.Errorf("type must be 'file' or 'dir'")
 	}
 
-	var matches []string
-	entries := 0
-	err = filepath.WalkDir(resolved, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if err := ensureContext(ctx); err != nil {
-			return err
-		}
-		depth := relativeDepth(resolved, path)
-		if depth > maxDepth {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		rel, err := filepath.Rel(resolved, path)
-		if err != nil {
-			return err
-		}
-		if rel != "." && !showHidden && containsHiddenSegment(rel) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if pattern != "" {
-			match, err := filepath.Match(pattern, filepath.Base(path))
-			if err != nil {
-				return err
-			}
-			if !match {
-				return nil
-			}
-		}
-		if typeFilter == "file" && d.IsDir() {
-			return nil
-		}
-		if typeFilter == "dir" && !d.IsDir() {
-			return nil
-		}
-
-		matches = append(matches, path)
-		entries++
-		if entries >= maxEntries {
-			return fmt.Errorf("directory entry limit exceeded")
-		}
-		return nil
+	entries, err := walkDirEntries(ctx, resolved, walkOptions{
+		maxDepth:   maxDepth,
+		maxEntries: maxEntries,
+		showHidden: showHidden,
+		pattern:    pattern,
+		typeFilter: typeFilter,
 	})
 	if err != nil {
 		return "", err
 	}
-	if len(matches) == 0 {
+	if len(entries) == 0 {
 		return "", nil
+	}
+	matches := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		matches = append(matches, entry.Path)
 	}
 	return strings.Join(matches, "\n"), nil
 }
