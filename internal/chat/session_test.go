@@ -383,6 +383,47 @@ func TestMessagesSnapshotNormalizesEmptyToolArgs(t *testing.T) {
 	}
 }
 
+func TestMessagesSnapshotFillsEmptyContent(t *testing.T) {
+	s := &Session{
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: "",
+				ToolCalls: []openai.ToolCall{
+					{
+						ID:   "call-1",
+						Type: openai.ToolTypeFunction,
+						Function: openai.FunctionCall{
+							Name:      "grep",
+							Arguments: `{"pattern":"Version","path":"main.go"}`,
+						},
+					},
+				},
+			},
+			{
+				Role:       openai.ChatMessageRoleTool,
+				Content:    "",
+				Name:       "grep",
+				ToolCallID: "call-1",
+			},
+		},
+	}
+
+	snapshot := s.MessagesSnapshot()
+	if snapshot[0].Content == "" {
+		t.Errorf("expected snapshot assistant content to be non-empty")
+	}
+	if snapshot[1].Content == "" {
+		t.Errorf("expected snapshot tool content to be non-empty")
+	}
+	if s.Messages[0].Content != "" {
+		t.Errorf("expected original assistant content to remain empty, got %q", s.Messages[0].Content)
+	}
+	if s.Messages[1].Content != "" {
+		t.Errorf("expected original tool content to remain empty, got %q", s.Messages[1].Content)
+	}
+}
+
 // TestSessionConcurrentOperations verifies thread-safety of Session operations
 func TestSessionConcurrentOperations(t *testing.T) {
 	cfg := &config.Config{

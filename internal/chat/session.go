@@ -202,6 +202,10 @@ func (s *Session) MessagesSnapshot() []openai.ChatCompletionMessage {
 	msgs := make([]openai.ChatCompletionMessage, len(s.Messages))
 	copy(msgs, s.Messages)
 	for i := range msgs {
+		if msgs[i].Content == "" && len(msgs[i].MultiContent) == 0 {
+			// Avoid omitting content in JSON for providers that require the field.
+			msgs[i].Content = " "
+		}
 		if len(msgs[i].ToolCalls) == 0 {
 			continue
 		}
