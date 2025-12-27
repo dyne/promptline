@@ -19,6 +19,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,13 +42,20 @@ type createFileArgs struct {
 }
 
 type editFileArgs struct {
-	Path  string `json:"path" jsonschema:"description=Path to the file to edit,minLength=1"`
-	Edits string `json:"edits" jsonschema:"description=SEARCH/REPLACE blocks to apply,minLength=1"`
+	Path       string `json:"path" jsonschema:"description=Path to the file to edit,minLength=1"`
+	Edits      string `json:"edits" jsonschema:"description=SEARCH/REPLACE blocks to apply,minLength=1"`
+	Occurrence int    `json:"occurrence,omitempty" jsonschema:"description=1-based match occurrence to replace,minimum=1"`
+	ReplaceAll bool   `json:"replace_all,omitempty" jsonschema:"description=Replace all matches instead of one"`
 }
 
 type searchReplaceEdit struct {
 	Search  string
 	Replace string
+}
+
+type editApplyOptions struct {
+	Occurrence int
+	ReplaceAll bool
 }
 
 type editMatch struct {
@@ -78,7 +86,45 @@ func validateEditFileArgs(args map[string]interface{}) error {
 	if !ok || strings.TrimSpace(edits) == "" {
 		return fmt.Errorf("missing or invalid 'edits' parameter")
 	}
+	occurrence, hasOccurrence, err := getOptionalPositiveIntArg(args, "occurrence")
+	if err != nil {
+		return err
+	}
+	if hasOccurrence && occurrence < 1 {
+		return fmt.Errorf("missing or invalid 'occurrence' parameter")
+	}
+	if replaceAll, ok := args["replace_all"]; ok {
+		if _, ok := replaceAll.(bool); !ok {
+			return fmt.Errorf("missing or invalid 'replace_all' parameter")
+		}
+		if replaceAll.(bool) && hasOccurrence {
+			return fmt.Errorf("cannot set both 'occurrence' and 'replace_all'")
+		}
+	}
 	return nil
+}
+
+func getOptionalPositiveIntArg(args map[string]interface{}, key string) (int, bool, error) {
+	if args == nil {
+		return 0, false, nil
+	}
+	raw, ok := args[key]
+	if !ok {
+		return 0, false, nil
+	}
+	switch v := raw.(type) {
+	case float64:
+		if v != math.Trunc(v) {
+			return 0, false, fmt.Errorf("missing or invalid '%s' parameter", key)
+		}
+		return int(v), true, nil
+	case int:
+		return v, true, nil
+	case int64:
+		return int(v), true, nil
+	default:
+		return 0, false, fmt.Errorf("missing or invalid '%s' parameter", key)
+	}
 }
 
 func createFile(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -205,7 +251,29 @@ func editFile(ctx context.Context, args map[string]interface{}) (string, error) 
 		return "", err
 	}
 
-	updated, matches, err := applySearchReplaceEdits(string(originalBytes), edits)
+	occurrence, hasOccurrence, err := getOptionalPositiveIntArg(args, "occurrence")
+	if err != nil {
+		return "", err
+	}
+	if hasOccurrence && occurrence < 1 {
+		return "", fmt.Errorf("missing or invalid 'occurrence' parameter")
+	}
+	replaceAll := false
+	if rawReplaceAll, ok := args["replace_all"]; ok {
+		val, ok := rawReplaceAll.(bool)
+		if !ok {
+			return "", fmt.Errorf("missing or invalid 'replace_all' parameter")
+		}
+		replaceAll = val
+	}
+	if replaceAll && hasOccurrence {
+		return "", fmt.Errorf("cannot set both 'occurrence' and 'replace_all'")
+	}
+
+	updated, matches, err := applySearchReplaceEdits(string(originalBytes), edits, editApplyOptions{
+		Occurrence: occurrence,
+		ReplaceAll: replaceAll,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -318,11 +386,11 @@ func isInlineWhitespace(ch byte) bool {
 	return ch == ' ' || ch == '\t'
 }
 
-func applySearchReplaceEdits(content string, edits []searchReplaceEdit) (string, []editMatch, error) {
+func applySearchReplaceEdits(content string, edits []searchReplaceEdit, options editApplyOptions) (string, []editMatch, error) {
 	updated := content
 	matches := make([]editMatch, 0, len(edits))
 	for idx, edit := range edits {
-		next, match, err := applySingleEdit(updated, edit, idx+1)
+		next, match, err := applySingleEdit(updated, edit, idx+1, options)
 		if err != nil {
 			return "", nil, err
 		}
@@ -332,132 +400,187 @@ func applySearchReplaceEdits(content string, edits []searchReplaceEdit) (string,
 	return updated, matches, nil
 }
 
-func applySingleEdit(content string, edit searchReplaceEdit, index int) (string, editMatch, error) {
-	start, end, err := findExactMatch(content, edit.Search)
+func applySingleEdit(content string, edit searchReplaceEdit, index int, options editApplyOptions) (string, editMatch, error) {
+	matches, err := findExactMatches(content, edit.Search)
 	if err != nil {
 		return "", editMatch{}, fmt.Errorf("edit %d: %v", index, err)
 	}
-	if start >= 0 {
-		updated := replaceSpan(content, start, end, edit.Replace)
+	if len(matches) > 0 {
+		updated, err := applyMatches(content, edit.Replace, matches, options, "exact", index)
+		if err != nil {
+			return "", editMatch{}, err
+		}
 		return updated, editMatch{Mode: "exact"}, nil
 	}
 
-	start, end, err = findWhitespaceInsensitiveMatch(content, edit.Search)
+	matches, err = findWhitespaceInsensitiveMatches(content, edit.Search)
 	if err != nil {
 		return "", editMatch{}, fmt.Errorf("edit %d: %v", index, err)
 	}
-	if start >= 0 {
-		matched := content[start:end]
-		replacement := reindentReplacement(edit.Replace, indentOfFirstNonEmptyLine(matched))
-		replacement = applyLineEndings(matched, replacement)
-		updated := replaceSpan(content, start, end, replacement)
+	if len(matches) > 0 {
+		updated, err := applyMatches(content, edit.Replace, matches, options, "whitespace", index)
+		if err != nil {
+			return "", editMatch{}, err
+		}
 		return updated, editMatch{Mode: "whitespace"}, nil
 	}
 
-	start, end, err = findFuzzyMatch(content, edit.Search)
+	matches, err = findFuzzyMatches(content, edit.Search)
 	if err != nil {
 		return "", editMatch{}, fmt.Errorf("edit %d: %v", index, err)
 	}
-	if start >= 0 {
-		matched := content[start:end]
-		replacement := reindentReplacement(edit.Replace, indentOfFirstNonEmptyLine(matched))
-		replacement = applyLineEndings(matched, replacement)
-		updated := replaceSpan(content, start, end, replacement)
+	if len(matches) > 0 {
+		updated, err := applyMatches(content, edit.Replace, matches, options, "fuzzy", index)
+		if err != nil {
+			return "", editMatch{}, err
+		}
 		return updated, editMatch{Mode: "fuzzy"}, nil
 	}
 
 	return "", editMatch{}, fmt.Errorf("edit %d: search block not found", index)
 }
 
-func findExactMatch(content, search string) (int, int, error) {
-	idx := strings.Index(content, search)
-	if idx == -1 {
-		return -1, -1, nil
-	}
-	next := strings.Index(content[idx+len(search):], search)
-	if next != -1 {
-		return -1, -1, fmt.Errorf("search block matches multiple locations")
-	}
-	return idx, idx + len(search), nil
+type matchCandidate struct {
+	Start int
+	End   int
 }
 
-func findWhitespaceInsensitiveMatch(content, search string) (int, int, error) {
+func findExactMatches(content, search string) ([]matchCandidate, error) {
+	var matches []matchCandidate
+	if search == "" {
+		return matches, nil
+	}
+	for offset := 0; offset < len(content); {
+		idx := strings.Index(content[offset:], search)
+		if idx == -1 {
+			break
+		}
+		start := offset + idx
+		end := start + len(search)
+		matches = append(matches, matchCandidate{Start: start, End: end})
+		offset = end
+	}
+	return matches, nil
+}
+
+func findWhitespaceInsensitiveMatches(content, search string) ([]matchCandidate, error) {
 	contentLines, offsets := splitLinesWithOffsets(content)
 	searchLines := splitSearchLines(search)
 	if len(searchLines) == 0 {
-		return -1, -1, nil
+		return nil, nil
 	}
 
-	matches := 0
-	matchIndex := -1
+	var matches []matchCandidate
 	windowSize := len(searchLines)
 	for i := 0; i+windowSize <= len(contentLines); i++ {
 		if linesMatchWhitespace(contentLines[i:i+windowSize], searchLines) {
-			matches++
-			matchIndex = i
+			start := offsets[i]
+			end := len(content)
+			if i+windowSize < len(offsets) {
+				end = offsets[i+windowSize]
+			}
+			matches = append(matches, matchCandidate{Start: start, End: end})
 		}
 	}
-
-	if matches == 0 {
-		return -1, -1, nil
-	}
-	if matches > 1 {
-		return -1, -1, fmt.Errorf("search block matches multiple locations")
-	}
-
-	start := offsets[matchIndex]
-	end := len(content)
-	if matchIndex+windowSize < len(offsets) {
-		end = offsets[matchIndex+windowSize]
-	}
-	return start, end, nil
+	return matches, nil
 }
 
-func findFuzzyMatch(content, search string) (int, int, error) {
+func findFuzzyMatches(content, search string) ([]matchCandidate, error) {
 	contentLines, offsets := splitLinesWithOffsets(content)
 	searchLines := splitSearchLines(search)
 	if len(searchLines) == 0 {
-		return -1, -1, nil
+		return nil, nil
 	}
 
 	normalizedSearch := normalizeBlock(searchLines)
 	if len(normalizedSearch) == 0 {
-		return -1, -1, nil
+		return nil, nil
 	}
 
 	normalizedContent := normalizeContentLines(contentLines)
 	windowSize := len(searchLines)
 	bestScore := -1.0
-	bestIndex := -1
-	tied := false
+	var candidates []int
 
 	for i := 0; i+windowSize <= len(contentLines); i++ {
 		window := normalizeBlock(normalizedContent[i : i+windowSize])
 		score := similarityScore(normalizedSearch, window)
 		if score > bestScore+fuzzyTieEpsilon {
 			bestScore = score
-			bestIndex = i
-			tied = false
+			candidates = []int{i}
 			continue
 		}
 		if bestScore >= 0 && score >= bestScore-fuzzyTieEpsilon {
-			tied = true
+			candidates = append(candidates, i)
 		}
 	}
 
 	if bestScore < fuzzyMinSimilarity {
-		return -1, -1, nil
-	}
-	if tied {
-		return -1, -1, fmt.Errorf("search block matches multiple fuzzy locations")
+		return nil, nil
 	}
 
-	start := offsets[bestIndex]
-	end := len(content)
-	if bestIndex+windowSize < len(offsets) {
-		end = offsets[bestIndex+windowSize]
+	matches := make([]matchCandidate, 0, len(candidates))
+	for _, idx := range candidates {
+		start := offsets[idx]
+		end := len(content)
+		if idx+windowSize < len(offsets) {
+			end = offsets[idx+windowSize]
+		}
+		matches = append(matches, matchCandidate{Start: start, End: end})
 	}
-	return start, end, nil
+	return matches, nil
+}
+
+func applyMatches(content, replacement string, matches []matchCandidate, options editApplyOptions, mode string, index int) (string, error) {
+	selected, err := selectMatches(matches, options, mode)
+	if err != nil {
+		return "", fmt.Errorf("edit %d: %v", index, err)
+	}
+
+	replacements := make([]string, len(selected))
+	hasChange := false
+	for i, match := range selected {
+		matched := content[match.Start:match.End]
+		next := buildReplacement(mode, matched, replacement)
+		if next != matched {
+			hasChange = true
+		}
+		replacements[i] = next
+	}
+	if !hasChange {
+		return "", fmt.Errorf("edit %d: replacement is identical to matched content", index)
+	}
+
+	updated := content
+	for i := len(selected) - 1; i >= 0; i-- {
+		match := selected[i]
+		updated = replaceSpan(updated, match.Start, match.End, replacements[i])
+	}
+	return updated, nil
+}
+
+func selectMatches(matches []matchCandidate, options editApplyOptions, mode string) ([]matchCandidate, error) {
+	if options.ReplaceAll {
+		return matches, nil
+	}
+	if options.Occurrence > 0 {
+		if options.Occurrence > len(matches) {
+			return nil, fmt.Errorf("occurrence %d out of range for %s mode (matches: %d)", options.Occurrence, mode, len(matches))
+		}
+		return []matchCandidate{matches[options.Occurrence-1]}, nil
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("search block matches %d locations in %s mode; add 'occurrence' or 'replace_all'", len(matches), mode)
+	}
+	return matches, nil
+}
+
+func buildReplacement(mode, matched, replacement string) string {
+	if mode == "exact" {
+		return replacement
+	}
+	updated := reindentReplacement(replacement, indentOfFirstNonEmptyLine(matched))
+	return applyLineEndings(matched, updated)
 }
 
 func splitSearchLines(search string) []string {
