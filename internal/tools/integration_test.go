@@ -21,6 +21,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sashabaranov/go-openai"
@@ -99,5 +100,42 @@ func TestExecuteOpenAIToolCallRequiresConfirmationIntegration(t *testing.T) {
 	}
 	if !errors.Is(result.Error, ErrToolRequiresConfirmation) {
 		t.Fatalf("expected ErrToolRequiresConfirmation, got %v", result.Error)
+	}
+}
+
+func TestCreateFileValidationIntegration(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"create_file": true,
+		},
+	})
+
+	result := registry.Execute("create_file", map[string]interface{}{
+		"content": "missing path",
+	})
+	if result.Error == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(result.Error.Error(), "missing or invalid 'path' parameter") {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+}
+
+func TestCreateFileCustomValidationIntegration(t *testing.T) {
+	registry := NewRegistryWithPolicy(Policy{
+		Allow: map[string]bool{
+			"create_file": true,
+		},
+	})
+
+	result := registry.Execute("create_file", map[string]interface{}{
+		"path":    "../escape.txt",
+		"content": "content",
+	})
+	if result.Error == nil {
+		t.Fatal("expected path validation error")
+	}
+	if !strings.Contains(result.Error.Error(), "path escapes working directory") {
+		t.Fatalf("unexpected error: %v", result.Error)
 	}
 }
