@@ -198,3 +198,56 @@ type chmodArgs struct {
 	Path string `json:"path" jsonschema:"description=Path to modify"`
 	Mode string `json:"mode" jsonschema:"description=Octal permission mode (e.g., 644)"`
 }
+
+type noArgs struct{}
+
+type realpathArgs struct {
+	Path string `json:"path" jsonschema:"description=Path to resolve"`
+}
+
+type uniqArgs struct {
+	Path string `json:"path" jsonschema:"description=File path to process"`
+}
+
+type pathArg struct {
+	Path string `json:"path" jsonschema:"description=Path to evaluate"`
+}
+
+type dfArgs struct {
+	Path string `json:"path,omitempty" jsonschema:"description=Path to inspect (default: current directory)"`
+}
+
+type duArgs struct {
+	Path     string  `json:"path,omitempty" jsonschema:"description=Path to inspect (default: current directory)"`
+	MaxDepth float64 `json:"max_depth,omitempty" jsonschema:"description=Maximum depth to traverse"`
+}
+
+type psArgs struct {
+	Name  string  `json:"name,omitempty" jsonschema:"description=Filter processes by substring match"`
+	Limit float64 `json:"limit,omitempty" jsonschema:"description=Maximum number of processes to return"`
+}
+
+type pidofArgs struct {
+	Name string `json:"name" jsonschema:"description=Process name to match"`
+}
+
+type idArgs struct {
+	User string `json:"user,omitempty" jsonschema:"description=User name to inspect (default: current user)"`
+}
+
+type printenvArgs struct {
+	Name string `json:"name,omitempty" jsonschema:"description=Specific environment variable to print"`
+}
+
+type whichArgs struct {
+	Name string `json:"name" jsonschema:"description=Command name to locate"`
+}
+
+type mktempArgs struct {
+	Dir    bool   `json:"dir,omitempty" jsonschema:"description=Create a temporary directory instead of a file"`
+	Prefix string `json:"prefix,omitempty" jsonschema:"description=Prefix for the temporary name"`
+}
+
+type dateArgs struct {
+	Format string `json:"format,omitempty" jsonschema:"description=Go time layout or 'unix' (default: RFC3339)"`
+}
