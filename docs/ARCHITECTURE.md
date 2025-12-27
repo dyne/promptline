@@ -53,4 +53,3 @@ Messages in `[]openai.ChatCompletionMessage`:
 - `assistant` - AI responses/tool calls
 - `tool` - execution results
 
-Persists to `.promptline_conversation_history` (JSONL), loads on startup.
