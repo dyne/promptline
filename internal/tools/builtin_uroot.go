@@ -64,426 +64,426 @@ func registerURootTools(r *Registry) {
 	register(&ToolDefinition{
 		NameValue:        "ls",
 		DescriptionValue: "List directory contents",
-		ParametersValue: mustSchemaParametersFor[lsArgs](),
-		ExecuteFunc:  executeLs,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[lsArgs](),
+		ExecuteFunc:      executeLs,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "cat",
 		DescriptionValue: "Concatenate and print files",
-		ParametersValue: mustSchemaParametersFor[catArgs](),
-		ExecuteFunc:  wrapURootCommand(buildCatArgs, runCat),
-		ValidateFunc: validatePathsArg("paths", "path"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[catArgs](),
+		ExecuteFunc:      wrapURootCommand(buildCatArgs, runCat),
+		ValidateFunc:     validatePathsArg("paths", "path"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "cp",
 		DescriptionValue: "Copy files and directories",
-		ParametersValue: mustSchemaParametersFor[copyArgs](),
-		ExecuteFunc:  wrapURootCommand(buildCopyArgs, runCopy),
-		ValidateFunc: validateRequiredStrings([]string{"destination"}, []string{"sources"}),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[copyArgs](),
+		ExecuteFunc:      wrapURootCommand(buildCopyArgs, runCopy),
+		ValidateFunc:     validateRequiredStrings([]string{"destination"}, []string{"sources"}),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "mv",
 		DescriptionValue: "Move or rename files and directories",
-		ParametersValue: mustSchemaParametersFor[moveArgs](),
-		ExecuteFunc:  wrapURootCommand(buildMoveArgs, runMove),
-		ValidateFunc: validateRequiredStrings([]string{"destination"}, []string{"sources"}),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[moveArgs](),
+		ExecuteFunc:      wrapURootCommand(buildMoveArgs, runMove),
+		ValidateFunc:     validateRequiredStrings([]string{"destination"}, []string{"sources"}),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "rm",
 		DescriptionValue: "Remove files or directories",
-		ParametersValue: mustSchemaParametersFor[removeArgs](),
-		ExecuteFunc:  wrapURootCommand(buildRemoveArgs, runRemove),
-		ValidateFunc: validatePathsArg("paths", "path"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[removeArgs](),
+		ExecuteFunc:      wrapURootCommand(buildRemoveArgs, runRemove),
+		ValidateFunc:     validatePathsArg("paths", "path"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "ln",
 		DescriptionValue: "Create a link to a file",
-		ParametersValue: mustSchemaParametersFor[linkArgs](),
-		ExecuteFunc:  linkPath,
-		ValidateFunc: validateRequiredStrings([]string{"target", "link_path"}, nil),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[linkArgs](),
+		ExecuteFunc:      linkPath,
+		ValidateFunc:     validateRequiredStrings([]string{"target", "link_path"}, nil),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "touch",
 		DescriptionValue: "Create files or update timestamps",
-		ParametersValue: mustSchemaParametersFor[touchArgs](),
-		ExecuteFunc:  wrapURootCommand(buildTouchArgs, runTouch),
-		ValidateFunc: validatePathsArg("paths", "path"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[touchArgs](),
+		ExecuteFunc:      wrapURootCommand(buildTouchArgs, runTouch),
+		ValidateFunc:     validatePathsArg("paths", "path"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "truncate",
 		DescriptionValue: "Shrink or extend a file to a specified size",
-		ParametersValue: mustSchemaParametersFor[truncateArgs](),
-		ExecuteFunc:  truncateFile,
-		ValidateFunc: validateTruncateArgs,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[truncateArgs](),
+		ExecuteFunc:      truncateFile,
+		ValidateFunc:     validateTruncateArgs,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "readlink",
 		DescriptionValue: "Print resolved symbolic link target",
-		ParametersValue: mustSchemaParametersFor[readlinkArgs](),
-		ExecuteFunc:  readLinkPath,
-		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[readlinkArgs](),
+		ExecuteFunc:      readLinkPath,
+		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "realpath",
 		DescriptionValue: "Print absolute path with symlinks resolved",
-		ParametersValue: mustSchemaParametersFor[realpathArgs](),
-		ExecuteFunc:  realpathPath,
-		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[realpathArgs](),
+		ExecuteFunc:      realpathPath,
+		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "grep",
 		DescriptionValue: "Search text patterns in files",
-		ParametersValue: mustSchemaParametersFor[grepArgs](),
-		ExecuteFunc:  grepText,
-		ValidateFunc: validateGrepArgs,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[grepArgs](),
+		ExecuteFunc:      grepText,
+		ValidateFunc:     validateGrepArgs,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "head",
 		DescriptionValue: "Output the first part of files",
-		ParametersValue: mustSchemaParametersFor[headArgs](),
-		ExecuteFunc:  headText,
-		ValidateFunc: validatePathsArg("paths", "path"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[headArgs](),
+		ExecuteFunc:      headText,
+		ValidateFunc:     validatePathsArg("paths", "path"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "tail",
 		DescriptionValue: "Output the last part of files",
-		ParametersValue: mustSchemaParametersFor[tailArgs](),
-		ExecuteFunc:  tailText,
-		ValidateFunc: validatePathsArg("paths", "path"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[tailArgs](),
+		ExecuteFunc:      tailText,
+		ValidateFunc:     validatePathsArg("paths", "path"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "sort",
 		DescriptionValue: "Sort lines of text",
-		ParametersValue: mustSchemaParametersFor[sortArgs](),
-		ExecuteFunc:  sortText,
-		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[sortArgs](),
+		ExecuteFunc:      sortText,
+		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "uniq",
 		DescriptionValue: "Report or omit repeated lines",
-		ParametersValue: mustSchemaParametersFor[uniqArgs](),
-		ExecuteFunc:  uniqText,
-		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[uniqArgs](),
+		ExecuteFunc:      uniqText,
+		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "wc",
 		DescriptionValue: "Word, line, and byte count",
-		ParametersValue: mustSchemaParametersFor[wcArgs](),
-		ExecuteFunc:  wordCount,
-		ValidateFunc: validatePathsArg("paths", "path"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[wcArgs](),
+		ExecuteFunc:      wordCount,
+		ValidateFunc:     validatePathsArg("paths", "path"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "tr",
 		DescriptionValue: "Translate characters",
-		ParametersValue: mustSchemaParametersFor[translateArgs](),
-		ExecuteFunc:  translateText,
-		ValidateFunc: validateTranslateArgs,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[translateArgs](),
+		ExecuteFunc:      translateText,
+		ValidateFunc:     validateTranslateArgs,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "tee",
 		DescriptionValue: "Write input to files and standard output",
-		ParametersValue: mustSchemaParametersFor[teeArgs](),
-		ExecuteFunc:  teeText,
-		ValidateFunc: validateTeeArgs,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[teeArgs](),
+		ExecuteFunc:      teeText,
+		ValidateFunc:     validateTeeArgs,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "comm",
 		DescriptionValue: "Compare sorted files line by line",
-		ParametersValue: mustSchemaParametersFor[commArgs](),
-		ExecuteFunc:  compareFiles,
-		ValidateFunc: validateCommArgs,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[commArgs](),
+		ExecuteFunc:      compareFiles,
+		ValidateFunc:     validateCommArgs,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "strings",
 		DescriptionValue: "Print printable character sequences",
-		ParametersValue: mustSchemaParametersFor[stringsArgs](),
-		ExecuteFunc:  stringsText,
-		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[stringsArgs](),
+		ExecuteFunc:      stringsText,
+		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "more",
 		DescriptionValue: "Page through text",
-		ParametersValue: mustSchemaParametersFor[moreArgs](),
-		ExecuteFunc:  moreText,
-		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[moreArgs](),
+		ExecuteFunc:      moreText,
+		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "hexdump",
 		DescriptionValue: "Display file contents in hexadecimal",
-		ParametersValue: mustSchemaParametersFor[hexdumpArgs](),
-		ExecuteFunc:  hexDump,
-		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[hexdumpArgs](),
+		ExecuteFunc:      hexDump,
+		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "cmp",
 		DescriptionValue: "Compare two files byte by byte",
-		ParametersValue: mustSchemaParametersFor[cmpArgs](),
-		ExecuteFunc:  compareBytes,
-		ValidateFunc: validateCommArgs,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[cmpArgs](),
+		ExecuteFunc:      compareBytes,
+		ValidateFunc:     validateCommArgs,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "md5sum",
 		DescriptionValue: "Compute MD5 checksums",
-		ParametersValue: mustSchemaParametersFor[md5sumArgs](),
-		ExecuteFunc:  md5Sum,
-		ValidateFunc: validatePathsArg("paths", "path"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[md5sumArgs](),
+		ExecuteFunc:      md5Sum,
+		ValidateFunc:     validatePathsArg("paths", "path"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "shasum",
 		DescriptionValue: "Compute SHA checksums",
-		ParametersValue: mustSchemaParametersFor[shasumArgs](),
-		ExecuteFunc:  shaSum,
-		ValidateFunc: validatePathsArg("paths", "path"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[shasumArgs](),
+		ExecuteFunc:      shaSum,
+		ValidateFunc:     validatePathsArg("paths", "path"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "base64",
 		DescriptionValue: "Base64 encode or decode files",
-		ParametersValue: mustSchemaParametersFor[base64Args](),
-		ExecuteFunc:  base64Tool,
-		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[base64Args](),
+		ExecuteFunc:      base64Tool,
+		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "mkdir",
 		DescriptionValue: "Create directories",
-		ParametersValue: mustSchemaParametersFor[mkdirArgs](),
-		ExecuteFunc:  wrapURootCommand(buildMkdirArgs, runMkdir),
-		ValidateFunc: validatePathsArg("paths", "path"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[mkdirArgs](),
+		ExecuteFunc:      wrapURootCommand(buildMkdirArgs, runMkdir),
+		ValidateFunc:     validatePathsArg("paths", "path"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "pwd",
 		DescriptionValue: "Print the working directory",
-		ParametersValue: mustSchemaParametersFor[noArgs](),
-		ExecuteFunc:  printWorkingDirectory,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[noArgs](),
+		ExecuteFunc:      printWorkingDirectory,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "dirname",
 		DescriptionValue: "Strip last component from path",
-		ParametersValue: mustSchemaParametersFor[pathArg](),
-		ExecuteFunc:  dirNamePath,
-		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[pathArg](),
+		ExecuteFunc:      dirNamePath,
+		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "basename",
 		DescriptionValue: "Strip directory from filename",
-		ParametersValue: mustSchemaParametersFor[pathArg](),
-		ExecuteFunc:  baseNamePath,
-		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[pathArg](),
+		ExecuteFunc:      baseNamePath,
+		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "uname",
 		DescriptionValue: "Print system information",
-		ParametersValue: mustSchemaParametersFor[noArgs](),
-		ExecuteFunc:  unameTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[noArgs](),
+		ExecuteFunc:      unameTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "hostname",
 		DescriptionValue: "Print system hostname",
-		ParametersValue: mustSchemaParametersFor[noArgs](),
-		ExecuteFunc:  hostnameTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[noArgs](),
+		ExecuteFunc:      hostnameTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "uptime",
 		DescriptionValue: "Show how long the system has been running",
-		ParametersValue: mustSchemaParametersFor[noArgs](),
-		ExecuteFunc:  uptimeTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[noArgs](),
+		ExecuteFunc:      uptimeTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "free",
 		DescriptionValue: "Display memory usage",
-		ParametersValue: mustSchemaParametersFor[noArgs](),
-		ExecuteFunc:  freeTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[noArgs](),
+		ExecuteFunc:      freeTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "df",
 		DescriptionValue: "Report filesystem disk space usage",
-		ParametersValue: mustSchemaParametersFor[dfArgs](),
-		ExecuteFunc:  dfTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[dfArgs](),
+		ExecuteFunc:      dfTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "du",
 		DescriptionValue: "Estimate file space usage",
-		ParametersValue: mustSchemaParametersFor[duArgs](),
-		ExecuteFunc:  duTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[duArgs](),
+		ExecuteFunc:      duTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "ps",
 		DescriptionValue: "Report process status",
-		ParametersValue: mustSchemaParametersFor[psArgs](),
-		ExecuteFunc:  psTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[psArgs](),
+		ExecuteFunc:      psTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "pidof",
 		DescriptionValue: "Find process IDs by name",
-		ParametersValue: mustSchemaParametersFor[pidofArgs](),
-		ExecuteFunc:  pidofTool,
-		ValidateFunc: RequireNonEmptyArg("name", "missing or invalid 'name' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[pidofArgs](),
+		ExecuteFunc:      pidofTool,
+		ValidateFunc:     RequireNonEmptyArg("name", "missing or invalid 'name' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "id",
 		DescriptionValue: "Print user identity",
-		ParametersValue: mustSchemaParametersFor[idArgs](),
-		ExecuteFunc:  idTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[idArgs](),
+		ExecuteFunc:      idTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "echo",
 		DescriptionValue: "Display text",
-		ParametersValue: mustSchemaParametersFor[echoArgs](),
-		ExecuteFunc:  echoTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[echoArgs](),
+		ExecuteFunc:      echoTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "seq",
 		DescriptionValue: "Print sequence of numbers",
-		ParametersValue: mustSchemaParametersFor[seqArgs](),
-		ExecuteFunc:  seqTool,
-		ValidateFunc: validateSeqArgs,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[seqArgs](),
+		ExecuteFunc:      seqTool,
+		ValidateFunc:     validateSeqArgs,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "printenv",
 		DescriptionValue: "Print environment variables",
-		ParametersValue: mustSchemaParametersFor[printenvArgs](),
-		ExecuteFunc:  printenvTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[printenvArgs](),
+		ExecuteFunc:      printenvTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "tty",
 		DescriptionValue: "Print terminal name",
-		ParametersValue: mustSchemaParametersFor[noArgs](),
-		ExecuteFunc:  ttyTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[noArgs](),
+		ExecuteFunc:      ttyTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "which",
 		DescriptionValue: "Locate a command in PATH",
-		ParametersValue: mustSchemaParametersFor[whichArgs](),
-		ExecuteFunc:  whichTool,
-		ValidateFunc: RequireNonEmptyArg("name", "missing or invalid 'name' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[whichArgs](),
+		ExecuteFunc:      whichTool,
+		ValidateFunc:     RequireNonEmptyArg("name", "missing or invalid 'name' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "mkfifo",
 		DescriptionValue: "Create a named pipe",
-		ParametersValue: mustSchemaParametersFor[mkfifoArgs](),
-		ExecuteFunc:  mkfifoTool,
-		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[mkfifoArgs](),
+		ExecuteFunc:      mkfifoTool,
+		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "mktemp",
 		DescriptionValue: "Create a temporary file or directory",
-		ParametersValue: mustSchemaParametersFor[mktempArgs](),
-		ExecuteFunc:  mktempTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[mktempArgs](),
+		ExecuteFunc:      mktempTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "find",
 		DescriptionValue: "Search for files",
-		ParametersValue: mustSchemaParametersFor[findArgs](),
-		ExecuteFunc:  findTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[findArgs](),
+		ExecuteFunc:      findTool,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "chmod",
 		DescriptionValue: "Change file permissions",
-		ParametersValue: mustSchemaParametersFor[chmodArgs](),
-		ExecuteFunc:  chmodTool,
-		ValidateFunc: validateChmodArgs,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[chmodArgs](),
+		ExecuteFunc:      chmodTool,
+		ValidateFunc:     validateChmodArgs,
+		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
 		NameValue:        "date",
 		DescriptionValue: "Display date and time",
-		ParametersValue: mustSchemaParametersFor[dateArgs](),
-		ExecuteFunc:  dateTool,
-		VersionValue: urootToolVersion,
+		ParametersValue:  mustSchemaParametersFor[dateArgs](),
+		ExecuteFunc:      dateTool,
+		VersionValue:     urootToolVersion,
 	})
 }
 
@@ -681,7 +681,7 @@ func executeLs(ctx context.Context, args map[string]interface{}) (string, error)
 		return "", err
 	}
 	if !showHidden {
-		output = filterHiddenOutput(output)
+		output = filterHiddenOutput(output, resolved)
 	}
 	if strings.TrimSpace(output) == "" {
 		return "Directory is empty", nil
@@ -2889,7 +2889,7 @@ func resolveListPath(path string) (string, error) {
 	return validatePathWithinWorkdir(path)
 }
 
-func filterHiddenOutput(output string) string {
+func filterHiddenOutput(output, root string) string {
 	lines := strings.Split(output, "\n")
 	kept := lines[:0]
 	for _, line := range lines {
@@ -2898,7 +2898,11 @@ func filterHiddenOutput(output string) string {
 			kept = append(kept, line)
 			continue
 		}
-		if containsHiddenSegment(trimmed) {
+		candidate := strings.TrimSuffix(trimmed, ":")
+		if relative, err := filepath.Rel(root, candidate); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			candidate = relative
+		}
+		if containsHiddenSegment(candidate) {
 			continue
 		}
 		kept = append(kept, line)
