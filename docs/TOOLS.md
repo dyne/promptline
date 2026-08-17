@@ -26,3 +26,7 @@ To add a tool, register a context-aware implementation in
 schema, validate arguments, enforce the scoped-root policy, observe the caller
 context, and return bounded structured output. Do not add provider-specific
 model types or shell execution.
+
+The former v1 provider tool-call adapter is removed. New integrations use the
+stable stdio MCP surface and remain subject to the same instance approval and
+audit boundaries.

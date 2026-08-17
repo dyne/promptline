@@ -70,6 +70,13 @@ metadata. It is not an authorization source.
 
 ## Migration from v1
 
+## Breaking change
+
+Promptline v2 removes the OpenAI chat-completions client, its `config.json`
+schema, batch/TUI/readline interaction path, and local conversation history.
+Upgrading requires a compatible Codex CLI and an explicit named instance; there
+is no compatibility mode for the former API-key configuration.
+
 | v1 setting or behavior | v2 replacement |
 | --- | --- |
 | `api_key`, `api_url`, `OPENAI_API_KEY` | Authenticate and configure the Codex CLI; Promptline has no API client configuration. |

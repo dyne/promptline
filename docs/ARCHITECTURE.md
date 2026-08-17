@@ -44,3 +44,10 @@ panes. There is no daemon, control socket, WebSocket transport, second model
 runtime, local conversation history, internal index, search service, or
 automatic restart loop. See [ARCHITECTURE_V2.md](ARCHITECTURE_V2.md) for the
 complete compatibility and non-goal contract.
+
+## Upgrade boundary
+
+Version 2 is intentionally incompatible with the former chat-completions
+architecture. A running process owns one Codex app-server child and one
+primary thread; authentication and conversation history are no longer
+Promptline configuration or state.

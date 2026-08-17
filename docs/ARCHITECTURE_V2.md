@@ -63,3 +63,9 @@ second app-server child, production WebSocket transport, second model/chat
 runtime, hidden background service, automatic restart loop, or automatic tmux
 management.  It also has no internal Context-mode-like database, FTS,
 cross-instance search, embeddings, or generalized repository/SQLite layer.
+
+## Release compatibility
+
+This architecture is the v2 public compatibility boundary. Releases validate
+the checked-in stable protocol fixture and reject unsupported Codex binaries at
+startup rather than attempting to preserve v1 chat-completions behavior.
