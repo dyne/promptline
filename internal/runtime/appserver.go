@@ -29,8 +29,12 @@ func (a AppServer) StartTurn(ctx context.Context, thread, text, message string) 
 func (a AppServer) Interrupt(ctx context.Context, thread, turn string) error {
 	return a.API.Interrupt(ctx, thread, turn)
 }
-func (a AppServer) Events() <-chan appserver.Event { return a.Client.Events() }
-func (a AppServer) Done() <-chan struct{}          { return a.Client.Done() }
-func (a AppServer) Err() error                     { return a.Client.Err() }
+func (a AppServer) Events() <-chan appserver.Event           { return a.Client.Events() }
+func (a AppServer) Requests() <-chan appserver.ServerRequest { return a.Client.Requests() }
+func (a AppServer) ReplyRequest(ctx context.Context, id uint64, decision any) error {
+	return a.API.ReplyRequest(ctx, id, decision)
+}
+func (a AppServer) Done() <-chan struct{} { return a.Client.Done() }
+func (a AppServer) Err() error            { return a.Client.Err() }
 
 var _ = json.RawMessage{}

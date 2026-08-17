@@ -12,14 +12,15 @@ import (
 )
 
 type fakeClient struct {
-	events                                   chan appserver.Event
-	done                                     chan struct{}
-	startThreads, resumes, turns, interrupts int
-	resumeErr                                error
+	events                                            chan appserver.Event
+	requests                                          chan appserver.ServerRequest
+	done                                              chan struct{}
+	startThreads, resumes, turns, interrupts, replies int
+	resumeErr                                         error
 }
 
 func newFakeClient() *fakeClient {
-	return &fakeClient{events: make(chan appserver.Event, 8), done: make(chan struct{})}
+	return &fakeClient{events: make(chan appserver.Event, 8), requests: make(chan appserver.ServerRequest, 8), done: make(chan struct{})}
 }
 func (f *fakeClient) Initialize(context.Context, appserver.Initialize) error { return nil }
 func (f *fakeClient) Account(context.Context) ([]byte, error)                { return []byte(`{}`), nil }
@@ -40,6 +41,8 @@ func (f *fakeClient) StartTurn(context.Context, string, string, string) (appserv
 }
 func (f *fakeClient) Interrupt(context.Context, string, string) error { f.interrupts++; return nil }
 func (f *fakeClient) Events() <-chan appserver.Event                  { return f.events }
+func (f *fakeClient) Requests() <-chan appserver.ServerRequest        { return f.requests }
+func (f *fakeClient) ReplyRequest(context.Context, uint64, any) error { f.replies++; return nil }
 func (f *fakeClient) Done() <-chan struct{}                           { return f.done }
 func (f *fakeClient) Err() error                                      { return nil }
 
@@ -133,6 +136,17 @@ func TestRuntime_CloseIsIdempotent(t *testing.T) {
 	}
 	if p.closed != 1 {
 		t.Fatalf("process closed %d times", p.closed)
+	}
+}
+
+func TestRuntimeDeclinesUnhandledServerRequest(t *testing.T) {
+	r, f, _ := testRuntime(t)
+	defer r.Close(context.Background())
+	if err := r.handleRequest(context.Background(), appserver.ServerRequest{ID: 7, Method: "item/commandExecution/requestApproval"}); err != nil {
+		t.Fatal(err)
+	}
+	if f.replies != 1 {
+		t.Fatalf("replies=%d, want 1", f.replies)
 	}
 }
 

@@ -16,6 +16,7 @@ func TestParse(t *testing.T) {
 		{"unknown flag", []string{"--nope"}, true},
 		{"missing cwd", []string{"--instance", "ops"}, true},
 		{"version has no side effects", []string{"--version"}, false},
+		{"toolbox serve", []string{"toolbox", "serve", "--cwd", "."}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
