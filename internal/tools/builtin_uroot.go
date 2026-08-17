@@ -487,7 +487,7 @@ func registerURootTools(r *Registry) {
 	})
 }
 
-func wrapURootCommand(buildArgs func(map[string]interface{}) ([]string, error), run urootCommand) ExecutorFunc {
+func wrapURootCommand(buildArgs func(context.Context, map[string]interface{}) ([]string, error), run urootCommand) ExecutorFunc {
 	return func(ctx context.Context, args map[string]interface{}) (string, error) {
 		if err := ensureContext(ctx); err != nil {
 			return "", err
@@ -498,7 +498,7 @@ func wrapURootCommand(buildArgs func(map[string]interface{}) ([]string, error), 
 		if run == nil {
 			return "", fmt.Errorf("missing u-root command runner")
 		}
-		cmdArgs, err := buildArgs(args)
+		cmdArgs, err := buildArgs(ctx, args)
 		if err != nil {
 			return "", err
 		}
@@ -509,15 +509,13 @@ func wrapURootCommand(buildArgs func(map[string]interface{}) ([]string, error), 
 	}
 }
 
-func resolveToolPath(path string) (string, error) {
+// resolveToolPathContext resolves only beneath the registry-selected root.
+func resolveToolPathContext(ctx context.Context, path string) (string, error) {
 	if err := paths.ValidatePathString(path, maxPathLength); err != nil {
 		return "", err
 	}
 
-	baseResolved, err := resolveBaseDir()
-	if err != nil {
-		return "", err
-	}
+	baseResolved := configFromContext(ctx).WorkingDirectory
 
 	if filepath.IsAbs(path) {
 		resolved, err := ensureResolvedPathWithinBase(path, baseResolved)
@@ -527,18 +525,22 @@ func resolveToolPath(path string) (string, error) {
 		return resolved, nil
 	}
 
-	return resolvePathWithinBase(path, baseResolved)
+	resolved, err := resolvePathWithinBase(path, baseResolved)
+	if err != nil {
+		return "", err
+	}
+	if !pathAllowedByConfig(ctx, resolved) {
+		return "", fmt.Errorf("path is outside allowed tool base directories")
+	}
+	return resolved, nil
 }
 
-func resolveToolPathNoSymlink(path string) (string, error) {
+func resolveToolPathNoSymlinkContext(ctx context.Context, path string) (string, error) {
 	if err := paths.ValidatePathString(path, maxPathLength); err != nil {
 		return "", err
 	}
 
-	baseResolved, err := resolveBaseDir()
-	if err != nil {
-		return "", err
-	}
+	baseResolved := configFromContext(ctx).WorkingDirectory
 
 	var abs string
 	if filepath.IsAbs(path) {
@@ -557,11 +559,6 @@ func resolveToolPathNoSymlink(path string) (string, error) {
 	}
 	resolved := filepath.Join(parentResolved, filepath.Base(abs))
 
-	for _, dangerous := range dangerousPaths {
-		if strings.HasPrefix(resolved, dangerous) {
-			return "", fmt.Errorf("access to %s is restricted for security", dangerous)
-		}
-	}
 	if err := validatePathWhitelist(resolved, baseResolved); err != nil {
 		return "", err
 	}
@@ -585,31 +582,10 @@ func ensureResolvedPathWithinBase(path, baseResolved string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, dangerous := range dangerousPaths {
-		if strings.HasPrefix(resolved, dangerous) {
-			return "", fmt.Errorf("access to %s is restricted for security", dangerous)
-		}
-	}
 	if err := validatePathWhitelist(resolved, baseResolved); err != nil {
 		return "", err
 	}
 	return resolved, nil
-}
-
-func resolveBaseDir() (string, error) {
-	workdir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine working directory: %v", err)
-	}
-	baseAbs, err := filepath.Abs(workdir)
-	if err != nil {
-		return "", fmt.Errorf("invalid base directory: %v", err)
-	}
-	baseResolved, err := filepath.EvalSymlinks(baseAbs)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve base directory: %v", err)
-	}
-	return baseResolved, nil
 }
 
 func runCoreCommand(ctx context.Context, cmd core.Command, args []string) (string, error) {
@@ -654,7 +630,7 @@ func executeLs(ctx context.Context, args map[string]interface{}) (string, error)
 		return "", fmt.Errorf("path '%s' is not a directory", resolved)
 	}
 
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	var limiter strings.Builder
 	if recursive {
 		if err := walkDirectory(ctx, resolved, showHidden, limits, &limiter); err != nil {
@@ -689,16 +665,16 @@ func executeLs(ctx context.Context, args map[string]interface{}) (string, error)
 	return output, nil
 }
 
-func buildCatArgs(args map[string]interface{}) ([]string, error) {
+func buildCatArgs(ctx context.Context, args map[string]interface{}) ([]string, error) {
 	paths, err := extractPaths(args, "paths", "path")
 	if err != nil {
 		return nil, err
 	}
-	return resolveToolPaths(paths)
+	return resolveToolPathsContext(ctx, paths)
 }
 
 func runCat(ctx context.Context, args []string) (string, error) {
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	for _, path := range args {
 		info, err := os.Stat(path)
 		if err != nil {
@@ -707,6 +683,9 @@ func runCat(ctx context.Context, args []string) (string, error) {
 		if info.IsDir() {
 			return "", fmt.Errorf("path '%s' is a directory", path)
 		}
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("path '%s' is not a regular file", path)
+		}
 		if info.Size() > limits.MaxFileSizeBytes {
 			return "", fmt.Errorf("file exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
 		}
@@ -714,7 +693,7 @@ func runCat(ctx context.Context, args []string) (string, error) {
 	return runCoreCommand(ctx, corecat.New(), args)
 }
 
-func buildCopyArgs(args map[string]interface{}) ([]string, error) {
+func buildCopyArgs(ctx context.Context, args map[string]interface{}) ([]string, error) {
 	srcs, err := extractStringSliceArg(args, "sources")
 	if err != nil {
 		return nil, err
@@ -724,16 +703,16 @@ func buildCopyArgs(args map[string]interface{}) ([]string, error) {
 		return nil, err
 	}
 
-	resolvedSources, err := resolveToolPaths(srcs)
+	resolvedSources, err := resolveToolPathsContext(ctx, srcs)
 	if err != nil {
 		return nil, err
 	}
-	resolvedDest, err := resolveToolPath(dest)
+	resolvedDest, err := resolveToolPathContext(ctx, dest)
 	if err != nil {
 		return nil, err
 	}
 
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	for _, source := range resolvedSources {
 		info, err := os.Stat(source)
 		if err != nil {
@@ -766,7 +745,7 @@ func runCopy(ctx context.Context, args []string) (string, error) {
 	return runCoreCommand(ctx, corecp.New(), args)
 }
 
-func buildMoveArgs(args map[string]interface{}) ([]string, error) {
+func buildMoveArgs(ctx context.Context, args map[string]interface{}) ([]string, error) {
 	srcs, err := extractStringSliceArg(args, "sources")
 	if err != nil {
 		return nil, err
@@ -776,11 +755,11 @@ func buildMoveArgs(args map[string]interface{}) ([]string, error) {
 		return nil, err
 	}
 
-	resolvedSources, err := resolveToolPaths(srcs)
+	resolvedSources, err := resolveToolPathsContext(ctx, srcs)
 	if err != nil {
 		return nil, err
 	}
-	resolvedDest, err := resolveToolPath(dest)
+	resolvedDest, err := resolveToolPathContext(ctx, dest)
 	if err != nil {
 		return nil, err
 	}
@@ -801,12 +780,12 @@ func runMove(ctx context.Context, args []string) (string, error) {
 	return runCoreCommand(ctx, coremv.New(), args)
 }
 
-func buildRemoveArgs(args map[string]interface{}) ([]string, error) {
+func buildRemoveArgs(ctx context.Context, args map[string]interface{}) ([]string, error) {
 	pathsArg, err := extractPaths(args, "paths", "path")
 	if err != nil {
 		return nil, err
 	}
-	resolved, err := resolveToolPaths(pathsArg)
+	resolved, err := resolveToolPathsContext(ctx, pathsArg)
 	if err != nil {
 		return nil, err
 	}
@@ -826,12 +805,12 @@ func runRemove(ctx context.Context, args []string) (string, error) {
 	return runCoreCommand(ctx, corerm.New(), args)
 }
 
-func buildTouchArgs(args map[string]interface{}) ([]string, error) {
+func buildTouchArgs(ctx context.Context, args map[string]interface{}) ([]string, error) {
 	pathsArg, err := extractPaths(args, "paths", "path")
 	if err != nil {
 		return nil, err
 	}
-	resolved, err := resolveToolPaths(pathsArg)
+	resolved, err := resolveToolPathsContext(ctx, pathsArg)
 	if err != nil {
 		return nil, err
 	}
@@ -857,12 +836,12 @@ func runTouch(ctx context.Context, args []string) (string, error) {
 	return runCoreCommand(ctx, coretouch.New(), args)
 }
 
-func buildMkdirArgs(args map[string]interface{}) ([]string, error) {
+func buildMkdirArgs(ctx context.Context, args map[string]interface{}) ([]string, error) {
 	pathsArg, err := extractPaths(args, "paths", "path")
 	if err != nil {
 		return nil, err
 	}
-	resolved, err := resolveToolPaths(pathsArg)
+	resolved, err := resolveToolPathsContext(ctx, pathsArg)
 	if err != nil {
 		return nil, err
 	}
@@ -1053,10 +1032,7 @@ func walkDirEntries(ctx context.Context, root string, opts walkOptions) ([]walkE
 }
 
 func collectGrepFiles(ctx context.Context, inputPaths []string, recursive bool, showHidden bool) ([]grepFile, error) {
-	baseResolved, err := resolveBaseDir()
-	if err != nil {
-		return nil, err
-	}
+	baseResolved := configFromContext(ctx).WorkingDirectory
 	expandedInputs := make([]string, 0, len(inputPaths))
 	expandedResolved := make([]string, 0, len(inputPaths))
 	for _, input := range inputPaths {
@@ -1069,7 +1045,7 @@ func collectGrepFiles(ctx context.Context, inputPaths []string, recursive bool, 
 				return nil, fmt.Errorf("pattern %q matched no files", input)
 			}
 			for _, match := range matches {
-				resolvedMatch, err := resolveToolPath(match)
+				resolvedMatch, err := resolveToolPathContext(ctx, match)
 				if err != nil {
 					return nil, err
 				}
@@ -1085,7 +1061,7 @@ func collectGrepFiles(ctx context.Context, inputPaths []string, recursive bool, 
 			}
 			continue
 		}
-		resolved, err := resolveToolPath(input)
+		resolved, err := resolveToolPathContext(ctx, input)
 		if err != nil {
 			return nil, err
 		}
@@ -1093,7 +1069,7 @@ func collectGrepFiles(ctx context.Context, inputPaths []string, recursive bool, 
 		expandedResolved = append(expandedResolved, resolved)
 	}
 	files := make([]grepFile, 0, len(expandedResolved))
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	for i, resolved := range expandedResolved {
 		input := expandedInputs[i]
 		info, err := os.Stat(resolved)
@@ -1150,11 +1126,6 @@ func expandGlobPattern(baseResolved, input string) ([]string, error) {
 	if !paths.HasPathPrefix(pattern, baseResolved) {
 		return nil, fmt.Errorf("path escapes working directory")
 	}
-	for _, dangerous := range dangerousPaths {
-		if strings.HasPrefix(pattern, dangerous) {
-			return nil, fmt.Errorf("access to %s is restricted for security", dangerous)
-		}
-	}
 	return filepath.Glob(pattern)
 }
 
@@ -1174,7 +1145,7 @@ func sortText(ctx context.Context, args map[string]interface{}) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -1199,7 +1170,7 @@ func uniqText(ctx context.Context, args map[string]interface{}) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -1231,7 +1202,7 @@ func wordCount(ctx context.Context, args map[string]interface{}) (string, error)
 	if err != nil {
 		return "", err
 	}
-	resolvedPaths, err := resolveToolPaths(paths)
+	resolvedPaths, err := resolveToolPathsContext(ctx, paths)
 	if err != nil {
 		return "", err
 	}
@@ -1274,7 +1245,7 @@ func translateText(ctx context.Context, args map[string]interface{}) (string, er
 
 	var input string
 	if path, ok := getStringLike(args["path"]); ok {
-		resolved, err := resolveToolPath(path)
+		resolved, err := resolveToolPathContext(ctx, path)
 		if err != nil {
 			return "", err
 		}
@@ -1313,11 +1284,11 @@ func teeText(ctx context.Context, args map[string]interface{}) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolvedPaths, err := resolveToolPaths(pathsArg)
+	resolvedPaths, err := resolveToolPathsContext(ctx, pathsArg)
 	if err != nil {
 		return "", err
 	}
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	if limits.MaxFileSizeBytes > 0 && int64(len(content)) > limits.MaxFileSizeBytes {
 		return "", fmt.Errorf("content exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
 	}
@@ -1341,11 +1312,11 @@ func compareFiles(ctx context.Context, args map[string]interface{}) (string, err
 	if err != nil {
 		return "", err
 	}
-	resolved1, err := resolveToolPath(path1)
+	resolved1, err := resolveToolPathContext(ctx, path1)
 	if err != nil {
 		return "", err
 	}
-	resolved2, err := resolveToolPath(path2)
+	resolved2, err := resolveToolPathContext(ctx, path2)
 	if err != nil {
 		return "", err
 	}
@@ -1394,7 +1365,7 @@ func stringsText(ctx context.Context, args map[string]interface{}) (string, erro
 	if err != nil {
 		return "", err
 	}
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -1439,7 +1410,7 @@ func hexDump(ctx context.Context, args map[string]interface{}) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -1498,11 +1469,11 @@ func compareBytes(ctx context.Context, args map[string]interface{}) (string, err
 	if err != nil {
 		return "", err
 	}
-	resolved1, err := resolveToolPath(path1)
+	resolved1, err := resolveToolPathContext(ctx, path1)
 	if err != nil {
 		return "", err
 	}
-	resolved2, err := resolveToolPath(path2)
+	resolved2, err := resolveToolPathContext(ctx, path2)
 	if err != nil {
 		return "", err
 	}
@@ -1570,7 +1541,7 @@ func md5Sum(ctx context.Context, args map[string]interface{}) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolvedPaths, err := resolveToolPaths(pathsArg)
+	resolvedPaths, err := resolveToolPathsContext(ctx, pathsArg)
 	if err != nil {
 		return "", err
 	}
@@ -1610,7 +1581,7 @@ func shaSum(ctx context.Context, args map[string]interface{}) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolvedPaths, err := resolveToolPaths(pathsArg)
+	resolvedPaths, err := resolveToolPathsContext(ctx, pathsArg)
 	if err != nil {
 		return "", err
 	}
@@ -1657,7 +1628,7 @@ func base64Tool(ctx context.Context, args map[string]interface{}) (string, error
 	if err != nil {
 		return "", err
 	}
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -1795,7 +1766,7 @@ func dfTool(ctx context.Context, args map[string]interface{}) (string, error) {
 	if path == "" {
 		path = "."
 	}
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -1831,7 +1802,7 @@ func duTool(ctx context.Context, args map[string]interface{}) (string, error) {
 	if path == "" {
 		path = "."
 	}
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -1840,7 +1811,7 @@ func duTool(ctx context.Context, args map[string]interface{}) (string, error) {
 		return "", err
 	}
 
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	maxDepth := limits.MaxDirectoryDepth
 	if depth, err := extractIntArg(args, "max_depth", 0); err != nil {
 		return "", err
@@ -1875,7 +1846,7 @@ func psTool(ctx context.Context, args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("limit must be positive")
 	}
 
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	if limits.MaxDirectoryEntries > 0 && limit > limits.MaxDirectoryEntries {
 		limit = limits.MaxDirectoryEntries
 	}
@@ -2024,7 +1995,7 @@ func seqTool(ctx context.Context, args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("step must be negative when start > end")
 	}
 
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	maxEntries := limits.MaxDirectoryEntries
 	if maxEntries <= 0 {
 		maxEntries = 1000
@@ -2100,7 +2071,7 @@ func mkfifoTool(ctx context.Context, args map[string]interface{}) (string, error
 	if err != nil {
 		return "", err
 	}
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -2125,10 +2096,7 @@ func mktempTool(ctx context.Context, args map[string]interface{}) (string, error
 	if err := ensureContext(ctx); err != nil {
 		return "", err
 	}
-	baseResolved, err := resolveBaseDir()
-	if err != nil {
-		return "", err
-	}
+	baseResolved := configFromContext(ctx).WorkingDirectory
 	tempRoot := filepath.Join(baseResolved, ".tmp")
 	if err := os.MkdirAll(tempRoot, 0o700); err != nil {
 		return "", err
@@ -2171,12 +2139,12 @@ func findTool(ctx context.Context, args map[string]interface{}) (string, error) 
 	if path == "" {
 		path = "."
 	}
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
 
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	maxDepth := limits.MaxDirectoryDepth
 	if depth, err := extractIntArg(args, "max_depth", 0); err != nil {
 		return "", err
@@ -2242,7 +2210,7 @@ func chmodTool(ctx context.Context, args map[string]interface{}) (string, error)
 	if err != nil {
 		return "", err
 	}
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -2488,7 +2456,7 @@ func findProcessIDs(ctx context.Context, name string) ([]int, error) {
 	}
 	sort.Ints(pids)
 
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	maxEntries := limits.MaxDirectoryEntries
 	if maxEntries <= 0 {
 		maxEntries = 2000
@@ -2535,11 +2503,11 @@ func linkPath(ctx context.Context, args map[string]interface{}) (string, error) 
 		return "", err
 	}
 
-	resolvedTarget, err := resolveToolPath(target)
+	resolvedTarget, err := resolveToolPathContext(ctx, target)
 	if err != nil {
 		return "", err
 	}
-	resolvedLink, err := resolveToolPath(linkPathArg)
+	resolvedLink, err := resolveToolPathContext(ctx, linkPathArg)
 	if err != nil {
 		return "", err
 	}
@@ -2618,12 +2586,12 @@ func truncateFile(ctx context.Context, args map[string]interface{}) (string, err
 	if err != nil {
 		return "", err
 	}
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	if limits.MaxFileSizeBytes > 0 && size > limits.MaxFileSizeBytes {
 		return "", fmt.Errorf("size exceeds maximum of %d bytes", limits.MaxFileSizeBytes)
 	}
 
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -2653,7 +2621,7 @@ func readLinkPath(ctx context.Context, args map[string]interface{}) (string, err
 	if err != nil {
 		return "", err
 	}
-	resolved, err := resolveToolPathNoSymlink(path)
+	resolved, err := resolveToolPathNoSymlinkContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -2668,10 +2636,7 @@ func readLinkPath(ctx context.Context, args map[string]interface{}) (string, err
 		if err != nil {
 			return "", err
 		}
-		baseResolved, err := resolveBaseDir()
-		if err != nil {
-			return "", err
-		}
+		baseResolved := configFromContext(ctx).WorkingDirectory
 		final, err = ensureResolvedPathWithinBase(final, baseResolved)
 		if err != nil {
 			return "", err
@@ -2680,20 +2645,14 @@ func readLinkPath(ctx context.Context, args map[string]interface{}) (string, err
 	}
 
 	if filepath.IsAbs(linkTarget) {
-		baseResolved, err := resolveBaseDir()
-		if err != nil {
-			return "", err
-		}
+		baseResolved := configFromContext(ctx).WorkingDirectory
 		if _, err := ensureResolvedPathWithinBase(linkTarget, baseResolved); err != nil {
 			return "", err
 		}
 		return linkTarget, nil
 	}
 
-	baseResolved, err := resolveBaseDir()
-	if err != nil {
-		return "", err
-	}
+	baseResolved := configFromContext(ctx).WorkingDirectory
 	relTarget := filepath.Clean(filepath.Join(filepath.Dir(resolved), linkTarget))
 	if _, err := ensureResolvedPathWithinBase(relTarget, baseResolved); err != nil {
 		return "", err
@@ -2710,7 +2669,7 @@ func realpathPath(ctx context.Context, args map[string]interface{}) (string, err
 		return "", err
 	}
 
-	resolved, err := resolveToolPath(path)
+	resolved, err := resolveToolPathContext(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -2719,10 +2678,7 @@ func realpathPath(ctx context.Context, args map[string]interface{}) (string, err
 	if err != nil {
 		return "", err
 	}
-	baseResolved, err := resolveBaseDir()
-	if err != nil {
-		return "", err
-	}
+	baseResolved := configFromContext(ctx).WorkingDirectory
 	final, err = ensureResolvedPathWithinBase(final, baseResolved)
 	if err != nil {
 		return "", err
@@ -2804,10 +2760,10 @@ func extractPaths(args map[string]interface{}, primary, fallback string) ([]stri
 	return nil, fmt.Errorf("missing or invalid '%s' parameter", primary)
 }
 
-func resolveToolPaths(paths []string) ([]string, error) {
+func resolveToolPathsContext(ctx context.Context, paths []string) ([]string, error) {
 	resolved := make([]string, 0, len(paths))
 	for _, path := range paths {
-		resolvedPath, err := resolveToolPath(path)
+		resolvedPath, err := resolveToolPathContext(ctx, path)
 		if err != nil {
 			return nil, err
 		}
@@ -2932,7 +2888,7 @@ func readHeadTail(ctx context.Context, args map[string]interface{}, head bool, d
 	if err != nil {
 		return "", err
 	}
-	resolvedPaths, err := resolveToolPaths(pathsArg)
+	resolvedPaths, err := resolveToolPathsContext(ctx, pathsArg)
 	if err != nil {
 		return "", err
 	}
@@ -2984,7 +2940,7 @@ func readFileLimited(path string, allowBinary bool) ([]byte, error) {
 	if info.IsDir() {
 		return nil, fmt.Errorf("path '%s' is a directory", path)
 	}
-	limits := getLimits()
+	limits := DefaultLimits()
 	if limits.MaxFileSizeBytes > 0 && info.Size() > limits.MaxFileSizeBytes {
 		return nil, fmt.Errorf("file exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
 	}
@@ -3006,7 +2962,7 @@ func ensureFileWithinLimit(path string) error {
 	if info.IsDir() {
 		return fmt.Errorf("path '%s' is a directory", path)
 	}
-	limits := getLimits()
+	limits := DefaultLimits()
 	if limits.MaxFileSizeBytes > 0 && info.Size() > limits.MaxFileSizeBytes {
 		return fmt.Errorf("file exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
 	}

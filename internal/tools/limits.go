@@ -16,8 +16,6 @@
 
 package tools
 
-import "sync"
-
 // Limits configures size and traversal bounds for tool operations.
 type Limits struct {
 	MaxFileSizeBytes    int64
@@ -31,11 +29,6 @@ const (
 	defaultMaxDirectoryEntries       = 2000
 )
 
-var (
-	limitsMu      sync.RWMutex
-	currentLimits = DefaultLimits()
-)
-
 // DefaultLimits returns the default resource limits for tool operations.
 func DefaultLimits() Limits {
 	return Limits{
@@ -43,19 +36,6 @@ func DefaultLimits() Limits {
 		MaxDirectoryDepth:   defaultMaxDirectoryDepth,
 		MaxDirectoryEntries: defaultMaxDirectoryEntries,
 	}
-}
-
-// ConfigureLimits sets the global limits for tool operations.
-func ConfigureLimits(l Limits) {
-	limitsMu.Lock()
-	defer limitsMu.Unlock()
-	currentLimits = normalizeLimits(l)
-}
-
-func getLimits() Limits {
-	limitsMu.RLock()
-	defer limitsMu.RUnlock()
-	return currentLimits
 }
 
 func normalizeLimits(l Limits) Limits {

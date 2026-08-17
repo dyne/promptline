@@ -19,7 +19,6 @@ package tools
 import (
 	"regexp"
 	"strings"
-	"sync"
 )
 
 // OutputFilterConfig controls sanitization and truncation for tool outputs.
@@ -31,11 +30,7 @@ type OutputFilterConfig struct {
 
 const defaultMaxOutputChars = 4000
 
-var (
-	outputFiltersMu sync.RWMutex
-	outputFilters   = DefaultOutputFilterConfig()
-	ansiPattern     = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x1b]*(?:\x07|\x1b\\)`)
-)
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x1b]*(?:\x07|\x1b\\)`)
 
 // DefaultOutputFilterConfig returns default output filtering settings.
 func DefaultOutputFilterConfig() OutputFilterConfig {
@@ -46,19 +41,6 @@ func DefaultOutputFilterConfig() OutputFilterConfig {
 	}
 }
 
-// ConfigureOutputFilters updates output sanitization settings.
-func ConfigureOutputFilters(config OutputFilterConfig) {
-	outputFiltersMu.Lock()
-	defer outputFiltersMu.Unlock()
-	outputFilters = normalizeOutputFilterConfig(config)
-}
-
-func getOutputFilters() OutputFilterConfig {
-	outputFiltersMu.RLock()
-	defer outputFiltersMu.RUnlock()
-	return outputFilters
-}
-
 func normalizeOutputFilterConfig(config OutputFilterConfig) OutputFilterConfig {
 	if config.MaxChars <= 0 {
 		config.MaxChars = defaultMaxOutputChars
@@ -66,8 +48,8 @@ func normalizeOutputFilterConfig(config OutputFilterConfig) OutputFilterConfig {
 	return config
 }
 
-func sanitizeToolOutput(output string) (string, bool) {
-	config := getOutputFilters()
+func sanitizeToolOutputWithConfig(output string, config OutputFilterConfig) (string, bool) {
+	config = normalizeOutputFilterConfig(config)
 	sanitized := output
 	if config.StripANSI {
 		sanitized = ansiPattern.ReplaceAllString(sanitized, "")

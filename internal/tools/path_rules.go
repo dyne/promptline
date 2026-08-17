@@ -16,22 +16,6 @@
 
 package tools
 
-import "sync"
-
-var (
-	pathRulesMu     sync.RWMutex
-	allowedBaseDirs []string
-)
-
-// ConfigurePathWhitelist sets optional base directories that tools may access.
-func ConfigurePathWhitelist(paths []string) {
-	pathRulesMu.Lock()
-	defer pathRulesMu.Unlock()
-	allowedBaseDirs = append([]string{}, paths...)
-}
-
-func getPathWhitelist() []string {
-	pathRulesMu.RLock()
-	defer pathRulesMu.RUnlock()
-	return append([]string{}, allowedBaseDirs...)
-}
+// Path authority is supplied by the Registry configuration carried in the
+// execution context. Legacy resolver helpers retain the working-directory
+// default until the filesystem-root migration is complete.

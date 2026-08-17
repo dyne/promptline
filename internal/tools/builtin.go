@@ -92,30 +92,13 @@ const (
 	maxPathLength = 4096
 )
 
-// Dangerous path patterns that should be blocked
-var dangerousPaths = []string{
-	"/etc/", "/sys/", "/proc/", "/dev/",
-	"/boot/", "/root/", "/var/run/", "/var/lib/",
-}
-
 // validatePath checks if a path is safe to access
 func validatePath(path string) error {
 	if err := paths.ValidatePathString(path, maxPathLength); err != nil {
 		return err
 	}
-
-	// Clean and get absolute path
-	cleanPath := filepath.Clean(path)
-	absPath, err := filepath.Abs(cleanPath)
-	if err != nil {
-		return fmt.Errorf("invalid path: %v", err)
-	}
-
-	// Check against dangerous paths
-	for _, dangerous := range dangerousPaths {
-		if strings.HasPrefix(absPath, dangerous) {
-			return fmt.Errorf("access to %s is restricted for security", dangerous)
-		}
+	if filepath.IsAbs(path) {
+		return fmt.Errorf("absolute paths are not allowed; select a configured root")
 	}
 
 	return nil
@@ -149,8 +132,11 @@ func readFile(ctx context.Context, args map[string]interface{}) (string, error) 
 	if err != nil {
 		return "", err
 	}
+	if !pathAllowedByConfig(ctx, resolved) {
+		return "", fmt.Errorf("path is outside allowed tool base directories")
+	}
 
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	info, err := os.Stat(resolved)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %v", err)
@@ -200,13 +186,6 @@ func validatePathWithinWorkdir(path string) (string, error) {
 		return "", fmt.Errorf("invalid path: %v", err)
 	}
 
-	// Prevent access to masked/dangerous paths even if under workdir.
-	for _, dangerous := range dangerousPaths {
-		if strings.HasPrefix(absPath, dangerous) {
-			return "", fmt.Errorf("access to %s is restricted for security", dangerous)
-		}
-	}
-
 	baseAbs, err := os.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("failed to determine working directory: %v", err)
@@ -230,12 +209,6 @@ func resolvePathWithinBase(path, baseDir string) (string, error) {
 	resolved, err := paths.ResolveWithinBase(path, baseDir)
 	if err != nil {
 		return "", err
-	}
-
-	for _, dangerous := range dangerousPaths {
-		if strings.HasPrefix(resolved, dangerous) {
-			return "", fmt.Errorf("access to %s is restricted for security", dangerous)
-		}
 	}
 
 	baseAbs, err := filepath.Abs(baseDir)
@@ -274,12 +247,6 @@ func resolvePathWithinBaseAllowMissing(path, baseDir string) (string, error) {
 	candidate := filepath.Clean(filepath.Join(baseResolved, cleanRel))
 	if !paths.HasPathPrefix(candidate, baseResolved) {
 		return "", fmt.Errorf("path escapes working directory")
-	}
-
-	for _, dangerous := range dangerousPaths {
-		if strings.HasPrefix(candidate, dangerous) {
-			return "", fmt.Errorf("access to %s is restricted for security", dangerous)
-		}
 	}
 
 	resolved, err := resolveExistingAncestor(candidate, baseResolved)
@@ -329,25 +296,7 @@ func resolveExistingAncestor(candidate, baseResolved string) (string, error) {
 }
 
 func validatePathWhitelist(absPath, baseResolved string) error {
-	whitelist := getPathWhitelist()
-	if len(whitelist) == 0 {
-		return nil
-	}
-
-	for _, entry := range whitelist {
-		if strings.TrimSpace(entry) == "" {
-			continue
-		}
-		allowed, err := paths.ResolveWhitelistEntry(entry, baseResolved)
-		if err != nil {
-			return err
-		}
-		if paths.HasPathPrefix(absPath, allowed) {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("path is outside allowed tool base directories")
+	return nil
 }
 
 func isTextContent(data []byte) bool {

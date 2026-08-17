@@ -45,6 +45,12 @@ var (
 
 	// ErrToolInCooldown indicates a tool is in a cooldown window.
 	ErrToolInCooldown = errors.New("tool is in cooldown")
+
+	// ErrToolCancelled indicates caller cancellation stopped a tool.
+	ErrToolCancelled = errors.New("tool execution cancelled")
+
+	// ErrToolTimeout indicates the configured deadline stopped a tool.
+	ErrToolTimeout = errors.New("tool execution timed out")
 )
 
 // NewToolExecutionError wraps a tool execution error with a shared error code.

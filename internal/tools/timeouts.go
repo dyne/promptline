@@ -18,6 +18,8 @@ package tools
 
 import "time"
 
+const defaultToolTimeout = 30 * time.Second
+
 // TimeoutConfig configures per-tool execution timeouts.
 type TimeoutConfig struct {
 	Default time.Duration
@@ -27,6 +29,7 @@ type TimeoutConfig struct {
 // DefaultTimeoutConfig returns the default timeout configuration.
 func DefaultTimeoutConfig() TimeoutConfig {
 	return TimeoutConfig{
+		Default: defaultToolTimeout,
 		PerTool: map[string]time.Duration{},
 	}
 }

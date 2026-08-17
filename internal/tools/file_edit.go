@@ -168,7 +168,7 @@ func createFile(ctx context.Context, args map[string]interface{}) (string, error
 	}
 	overwrite := parsed.Overwrite
 
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	if int64(len(content)) > limits.MaxFileSizeBytes {
 		return "", fmt.Errorf("content exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
 	}
@@ -184,6 +184,9 @@ func createFile(ctx context.Context, args map[string]interface{}) (string, error
 	resolved, err := resolvePathWithinBaseAllowMissing(path, workdir)
 	if err != nil {
 		return "", err
+	}
+	if !pathAllowedByConfig(ctx, resolved) {
+		return "", fmt.Errorf("path is outside allowed tool base directories")
 	}
 
 	mode := os.FileMode(0o644)
@@ -247,6 +250,9 @@ func editFile(ctx context.Context, args map[string]interface{}) (string, error) 
 	if err != nil {
 		return "", err
 	}
+	if !pathAllowedByConfig(ctx, resolved) {
+		return "", fmt.Errorf("path is outside allowed tool base directories")
+	}
 
 	info, err := os.Stat(resolved)
 	if err != nil {
@@ -256,7 +262,7 @@ func editFile(ctx context.Context, args map[string]interface{}) (string, error) 
 		return "", fmt.Errorf("path '%s' is a directory", resolved)
 	}
 
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	if info.Size() > limits.MaxFileSizeBytes {
 		return "", fmt.Errorf("file exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
 	}

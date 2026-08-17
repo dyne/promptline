@@ -23,7 +23,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -442,20 +444,13 @@ func TestCreateFileRequiresOverwriteFlag(t *testing.T) {
 
 func TestReadFileSizeLimit(t *testing.T) {
 	defaults := DefaultLimits()
-	ConfigureLimits(Limits{
-		MaxFileSizeBytes:    4,
-		MaxDirectoryDepth:   defaults.MaxDirectoryDepth,
-		MaxDirectoryEntries: defaults.MaxDirectoryEntries,
-	})
-	t.Cleanup(func() {
-		ConfigureLimits(defaults)
-	})
 
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
 			"read_file": true,
 		},
 	})
+	registry.config.Limits = Limits{MaxFileSizeBytes: 4, MaxDirectoryDepth: defaults.MaxDirectoryDepth, MaxDirectoryEntries: defaults.MaxDirectoryEntries}
 	absDir, relDir := tempDirInCwd(t)
 	filePath := filepath.Join(absDir, "big.txt")
 	if err := os.WriteFile(filePath, []byte("12345"), 0o644); err != nil {
@@ -475,20 +470,13 @@ func TestReadFileSizeLimit(t *testing.T) {
 
 func TestCreateFileSizeLimit(t *testing.T) {
 	defaults := DefaultLimits()
-	ConfigureLimits(Limits{
-		MaxFileSizeBytes:    4,
-		MaxDirectoryDepth:   defaults.MaxDirectoryDepth,
-		MaxDirectoryEntries: defaults.MaxDirectoryEntries,
-	})
-	t.Cleanup(func() {
-		ConfigureLimits(defaults)
-	})
 
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
 			"create_file": true,
 		},
 	})
+	registry.config.Limits = Limits{MaxFileSizeBytes: 4, MaxDirectoryDepth: defaults.MaxDirectoryDepth, MaxDirectoryEntries: defaults.MaxDirectoryEntries}
 	_, relDir := tempDirInCwd(t)
 	result := registry.Execute("create_file", map[string]interface{}{
 		"path":    filepath.Join(relDir, "big.txt"),
@@ -565,6 +553,7 @@ func TestCreateFileRespectsPathWhitelist(t *testing.T) {
 			"create_file": true,
 		},
 	})
+	registry.config.Roots = []string{absAllowed}
 	allowedResult := registry.Execute("create_file", map[string]interface{}{
 		"path":    filepath.Join(relAllowed, "ok.txt"),
 		"content": "ok",
@@ -591,20 +580,13 @@ func TestCreateFileRespectsPathWhitelist(t *testing.T) {
 
 func TestListDirectoryEntryLimit(t *testing.T) {
 	defaults := DefaultLimits()
-	ConfigureLimits(Limits{
-		MaxFileSizeBytes:    defaults.MaxFileSizeBytes,
-		MaxDirectoryDepth:   defaults.MaxDirectoryDepth,
-		MaxDirectoryEntries: 2,
-	})
-	t.Cleanup(func() {
-		ConfigureLimits(defaults)
-	})
 
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
 			"ls": true,
 		},
 	})
+	registry.config.Limits = Limits{MaxFileSizeBytes: defaults.MaxFileSizeBytes, MaxDirectoryDepth: defaults.MaxDirectoryDepth, MaxDirectoryEntries: 2}
 	dir := t.TempDir()
 	for i := 0; i < 3; i++ {
 		path := filepath.Join(dir, fmt.Sprintf("file-%d.txt", i))
@@ -626,20 +608,13 @@ func TestListDirectoryEntryLimit(t *testing.T) {
 
 func TestListDirectoryDepthLimit(t *testing.T) {
 	defaults := DefaultLimits()
-	ConfigureLimits(Limits{
-		MaxFileSizeBytes:    defaults.MaxFileSizeBytes,
-		MaxDirectoryDepth:   1,
-		MaxDirectoryEntries: defaults.MaxDirectoryEntries,
-	})
-	t.Cleanup(func() {
-		ConfigureLimits(defaults)
-	})
 
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
 			"ls": true,
 		},
 	})
+	registry.config.Limits = Limits{MaxFileSizeBytes: defaults.MaxFileSizeBytes, MaxDirectoryDepth: 1, MaxDirectoryEntries: defaults.MaxDirectoryEntries}
 	dir := t.TempDir()
 	levelOne := filepath.Join(dir, "level1")
 	levelTwo := filepath.Join(levelOne, "level2")
@@ -776,23 +751,17 @@ func TestExecuteToolTimeout(t *testing.T) {
 func TestGetToolNames(t *testing.T) {
 	registry := NewRegistry()
 	names := registry.GetToolNames()
-
-	if len(names) == 0 {
-		t.Fatal("expected tools to be registered")
+	sort.Strings(names)
+	want := []string{
+		"base64", "basename", "cat", "chmod", "cmp", "comm", "cp", "create_file", "date", "df", "dirname", "du", "echo", "edit_file", "find", "free", "get_current_datetime", "grep", "head", "hexdump", "hostname", "id", "ln", "ls", "md5sum", "mkdir", "mkfifo", "mktemp", "more", "mv", "pidof", "printenv", "ps", "pwd", "read_file", "readlink", "realpath", "rm", "seq", "shasum", "sort", "strings", "tail", "tee", "touch", "tr", "truncate", "tty", "uname", "uniq", "uptime", "wc", "which",
 	}
-
-	// Check for expected tools
-	expectedTools := []string{"ls", "read_file", "create_file", "edit_file", "get_current_datetime"}
-	for _, expected := range expectedTools {
-		found := false
-		for _, name := range names {
-			if name == expected {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected tool %s to be registered", expected)
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("tool registry changed:\n got: %v\nwant: %v", names, want)
+	}
+	for _, tool := range registry.GetTools() {
+		params := tool.Parameters()
+		if params == nil || params["type"] != "object" {
+			t.Errorf("tool %q has invalid parameter schema: %#v", tool.Name(), params)
 		}
 	}
 }
@@ -1212,8 +1181,8 @@ func TestValidatePath(t *testing.T) {
 		wantErr bool
 	}{
 		{"valid relative path", "./file.txt", false},
-		{"valid absolute path in home", "/home/user/file.txt", false},
-		{"valid tmp path", "/tmp/test.txt", false},
+		{"absolute path needs selected root", "/home/user/file.txt", true},
+		{"tmp absolute path needs selected root", "/tmp/test.txt", true},
 		{"empty path", "", true},
 		{"too long path", strings.Repeat("a", 4097), true},
 	}
@@ -1445,15 +1414,6 @@ func TestFormatToolResult(t *testing.T) {
 }
 
 func TestFormatToolResultSanitizesOutput(t *testing.T) {
-	defaults := DefaultOutputFilterConfig()
-	ConfigureOutputFilters(OutputFilterConfig{
-		MaxChars:     4,
-		StripANSI:    true,
-		StripControl: true,
-	})
-	t.Cleanup(func() {
-		ConfigureOutputFilters(defaults)
-	})
 
 	toolCall := openai.ToolCall{
 		Function: openai.FunctionCall{
@@ -1466,6 +1426,7 @@ func TestFormatToolResultSanitizesOutput(t *testing.T) {
 		Result:   "\x1b[31mhello\x1b[0m\x07",
 		Error:    nil,
 	}
+	result.outputFilters = OutputFilterConfig{MaxChars: 4, StripANSI: true, StripControl: true}
 
 	output := FormatToolResult(toolCall, result, false)
 	if strings.Contains(output, "\x1b") {
