@@ -101,12 +101,17 @@ func NewSessionWithClient(cfg *config.Config, client ChatClient) *Session {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	tools.ConfigureLimits(cfg.ToolLimitsConfig())
-	tools.ConfigurePathWhitelist(cfg.ToolPathWhitelistConfig())
-	toolRegistry := tools.NewRegistryWithPolicy(cfg.ToolPolicy())
-	toolRegistry.ConfigureRateLimits(cfg.ToolRateLimitsConfig())
-	toolRegistry.ConfigureTimeouts(cfg.ToolTimeoutsConfig())
-	tools.ConfigureOutputFilters(cfg.ToolOutputFiltersConfig())
+	toolboxConfig := tools.DefaultConfig()
+	toolboxConfig.Limits = cfg.ToolLimitsConfig()
+	toolboxConfig.Roots = cfg.ToolPathWhitelistConfig()
+	toolboxConfig.Policy = cfg.ToolPolicy()
+	toolboxConfig.RateLimits = cfg.ToolRateLimitsConfig()
+	toolboxConfig.Timeouts = cfg.ToolTimeoutsConfig()
+	toolboxConfig.OutputFilters = cfg.ToolOutputFiltersConfig()
+	toolRegistry, err := tools.NewRegistryWithConfig(toolboxConfig)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create tool registry: %v", err))
+	}
 
 	if client == nil {
 		clientConfig := openai.DefaultConfig(cfg.APIKey)

@@ -211,16 +211,8 @@ func TestURootFileOperationsValidation(t *testing.T) {
 }
 
 func TestURootFileOperationsSizeLimit(t *testing.T) {
-	ConfigureLimits(Limits{
-		MaxFileSizeBytes:    4,
-		MaxDirectoryDepth:   defaultMaxDirectoryDepth,
-		MaxDirectoryEntries: defaultMaxDirectoryEntries,
-	})
-	t.Cleanup(func() {
-		ConfigureLimits(DefaultLimits())
-	})
-
 	registry := NewRegistry()
+	registry.config.Limits = Limits{MaxFileSizeBytes: 4, MaxDirectoryDepth: defaultMaxDirectoryDepth, MaxDirectoryEntries: defaultMaxDirectoryEntries}
 	dir := makeTempDir(t)
 	path := writeTestFile(t, dir, "big.txt", "12345")
 
@@ -391,7 +383,7 @@ func TestURootTextProcessing(t *testing.T) {
 			t.Fatalf("expected 2 grep recursive lines, got %d", len(lines))
 		}
 		expectedLines := map[string]bool{
-			filepath.Join(dirRel, "root.txt") + ":version 1":           true,
+			filepath.Join(dirRel, "root.txt") + ":version 1":          true,
 			filepath.Join(dirRel, "sub", "nested.txt") + ":version 2": true,
 		}
 		for _, line := range lines {
@@ -431,8 +423,8 @@ func TestURootTextProcessing(t *testing.T) {
 			t.Fatalf("expected 4 grep glob lines, got %d", len(lines))
 		}
 		expectedLines := map[string]bool{
-			filepath.Join(dirRel, "glob1.go") + ":Version A":     true,
-			filepath.Join(dirRel, "glob2.go") + ":Version B":     true,
+			filepath.Join(dirRel, "glob1.go") + ":Version A":       true,
+			filepath.Join(dirRel, "glob2.go") + ":Version B":       true,
 			filepath.Join(dirRel, "g1", "glob.txt") + ":Version C": true,
 			filepath.Join(dirRel, "g2", "glob.txt") + ":Version D": true,
 		}

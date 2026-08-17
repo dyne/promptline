@@ -14,6 +14,8 @@ AI calls functions to interact with system. OpenAI tool-calling protocol.
 ## Built-in
 
 Promptline ships with safe, Go-native tools (including u-root implementations). It does not execute system binaries.
+Filesystem operations are scoped to the configured toolbox roots; a path outside
+those roots, including one reached through a symlink, is denied.
 
 Core:
 - `get_current_datetime` - RFC3339 timestamp
@@ -100,7 +102,17 @@ Defaults applied when not set in `config.json`:
 }
 ```
 
-- `default_seconds` of `0` means no default timeout; per-tool overrides still apply.
+- The toolbox supplies nonzero defaults for execution time and resource limits;
+  per-tool overrides remain available for narrower policies.
+
+## Portability
+
+The toolbox is implemented in Go and u-root rather than by invoking host
+utilities. Linux and macOS share the portable tool surface. Platform-specific
+information tools may return an unsupported-platform error where their OS data
+source is unavailable. `mkfifo` is available only on Unix platforms; callers
+should treat it as unavailable elsewhere. Checksum tools (`md5sum` and
+`shasum`) exist for compatibility and file identification, not for security.
 
 ## Adding Tools
 

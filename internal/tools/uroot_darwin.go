@@ -113,7 +113,7 @@ func findProcessIDsFallback(ctx context.Context, name string) ([]int, error) {
 		return kps[i].Proc.P_pid < kps[j].Proc.P_pid
 	})
 
-	limits := getLimits()
+	limits := limitsFromContext(ctx)
 	maxEntries := limits.MaxDirectoryEntries
 	if maxEntries <= 0 {
 		maxEntries = 2000
