@@ -28,8 +28,11 @@ import (
 	"github.com/rs/zerolog"
 
 	"promptline/internal/appserver"
+	"promptline/internal/governance"
 	"promptline/internal/instance"
+	"promptline/internal/mcp"
 	pruntime "promptline/internal/runtime"
+	"promptline/internal/tools"
 )
 
 var (
@@ -60,6 +63,18 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if cmd.ToolboxServe {
+		registry, err := tools.NewRegistryWithConfig(tools.Config{WorkingDirectory: in.WorkingDirectory(), Roots: []string{in.WorkingRoot()}})
+		if err != nil {
+			return err
+		}
+		defer registry.Close()
+		server, err := mcp.NewServer(registry, input, output, in.OutputCaps().StdoutBytes)
+		if err != nil {
+			return err
+		}
+		return server.Serve(context.Background())
+	}
 	lock, err := in.AcquireLock()
 	if err != nil {
 		return err
@@ -78,6 +93,22 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 		_ = lock.Close()
 		return err
 	}
+	journal, err := governance.OpenJournal(governance.JournalConfig{Directory: filepath.Join(in.StateDir(), "audit")})
+	if err != nil {
+		_ = r.Close(context.Background())
+		return fmt.Errorf("open audit journal: %w", err)
+	}
+	defer journal.Close()
+	r.SetRequestHandler(func(requestCtx context.Context, request appserver.ServerRequest) error {
+		decision, decisionErr := governance.HandleServerRequest(requestCtx, governance.Policy{Roots: []string{in.WorkingRoot()}}, nil, journal, request)
+		if decisionErr != nil {
+			decision = map[string]string{"decision": string(governance.DecisionDecline)}
+		}
+		if err := client.ReplyRequest(requestCtx, request.ID, decision); err != nil {
+			return err
+		}
+		return decisionErr
+	})
 	if err := r.Start(ctx, pruntime.Options{New: cmd.New, ResumeID: cmd.ResumeID}, Version); err != nil {
 		_ = r.Close(context.Background())
 		return err

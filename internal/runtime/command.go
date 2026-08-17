@@ -11,14 +11,19 @@ import (
 )
 
 type Command struct {
-	Instance instance.Config
-	New      bool
-	ResumeID string
-	Debug    bool
-	Version  bool
+	Instance     instance.Config
+	New          bool
+	ResumeID     string
+	Debug        bool
+	Version      bool
+	ToolboxServe bool
 }
 
 func Parse(args []string, stderr io.Writer) (Command, error) {
+	toolboxServe := len(args) >= 2 && args[0] == "toolbox" && args[1] == "serve"
+	if toolboxServe {
+		args = args[2:]
+	}
 	fs := flag.NewFlagSet("promptline", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var c Command
@@ -51,5 +56,6 @@ func Parse(args []string, stderr io.Writer) (Command, error) {
 		return Command{}, err
 	}
 	c.Instance.WorkingDirectory, c.Instance.WorkingRoot = cwd, cwd
+	c.ToolboxServe = toolboxServe
 	return c, nil
 }

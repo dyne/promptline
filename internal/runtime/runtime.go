@@ -42,6 +42,15 @@ type Process interface {
 	Close(context.Context) error
 }
 
+// RequestHandler answers one server-initiated effect request. It is kept out
+// of the transport package so policy and terminal concerns remain injectable.
+type RequestHandler func(context.Context, appserver.ServerRequest) error
+
+type requestClient interface {
+	Requests() <-chan appserver.ServerRequest
+	ReplyRequest(context.Context, uint64, any) error
+}
+
 type Renderer interface {
 	Prompt() error
 	Text(string) error
@@ -66,14 +75,24 @@ type Runtime struct {
 	closing   bool
 	closeOnce sync.Once
 	closeErr  error
+	requests  requestClient
+	handler   RequestHandler
 }
 
 func New(in *instance.Instance, api Client, process Process, lock *instance.Lock) (*Runtime, error) {
 	if in == nil || api == nil || process == nil || lock == nil {
 		return nil, errors.New("runtime requires instance, client, process, and lock")
 	}
-	return &Runtime{instance: in, api: api, process: process, lock: lock}, nil
+	r := &Runtime{instance: in, api: api, process: process, lock: lock}
+	if requests, ok := api.(requestClient); ok {
+		r.requests = requests
+	}
+	return r, nil
 }
+
+// SetRequestHandler installs the sole approval/effect response path. A nil
+// handler is safe: every request is declined, never implicitly approved.
+func (r *Runtime) SetRequestHandler(handler RequestHandler) { r.handler = handler }
 
 func (r *Runtime) Start(ctx context.Context, opts Options, version string) error {
 	if err := r.api.Initialize(ctx, appserver.Initialize{ClientName: "promptline", ClientVersion: version}); err != nil {
@@ -214,8 +233,32 @@ func (r *Runtime) Run(ctx context.Context, input io.Reader, render Renderer) err
 			if err := r.renderEvent(event, render); err != nil {
 				return err
 			}
+		case request := <-r.requestStream():
+			if err := r.handleRequest(ctx, request); err != nil {
+				return err
+			}
 		}
 	}
+}
+
+func (r *Runtime) requestStream() <-chan appserver.ServerRequest {
+	if r.requests == nil {
+		return nil
+	}
+	return r.requests.Requests()
+}
+
+func (r *Runtime) handleRequest(ctx context.Context, request appserver.ServerRequest) error {
+	if r.requests == nil {
+		return nil
+	}
+	if r.handler != nil {
+		if err := r.handler(ctx, request); err != nil {
+			return err
+		}
+		return nil
+	}
+	return r.requests.ReplyRequest(ctx, request.ID, map[string]string{"decision": "decline"})
 }
 
 func (r *Runtime) command(ctx context.Context, line string, render Renderer) (bool, error) {
