@@ -1,17 +1,18 @@
 ## Validation
 
-Promptline applies validation in layers to guard against malformed tool arguments,
-especially when using untrusted LLM providers.
+Promptline v2 validates arguments received through its bounded Codex
+app-server and toolbox MCP boundaries. It does not accept requests from a
+configurable set of chat-completions providers.
 
 ### Defense-in-depth flow
 
-1. Provider schema enforcement (best-effort)
+1. Stable MCP/app-server schema validation
 2. Local struct validation via `go-playground/validator/v10`
-3. Custom validators and security checks in tool implementations
+3. Custom validators, scoped-root checks, limits, and approval policy
 
-The local validator layer protects against buggy providers or local models that
-ignore JSON Schema constraints. Custom validators still run to enforce security
-rules like path whitelisting and file size limits.
+The local validator layer protects against malformed or unexpected protocol
+input. Custom validators still enforce scoped-root authority and bounded file
+and traversal limits.
 
 ### Adding validation to a tool
 
@@ -26,10 +27,10 @@ Common tag patterns:
 - `oneof=val1 val2` for enums
 - `omitempty` to skip validation when a field is absent
 
-### When validator matters most
+### When validation matters most
 
 Validator checks are most valuable when:
 
-- Using local models (Ollama, LM Studio)
-- Integrating alternative providers (Claude, custom APIs)
-- Handling tool calls from untrusted sources
+- Handling malformed MCP requests
+- Enforcing filesystem and resource boundaries
+- Maintaining compatibility with a versioned Codex app-server protocol
