@@ -86,6 +86,14 @@ func TestExecuteListDirectory(t *testing.T) {
 }
 
 func TestListDirectoryTableDriven(t *testing.T) {
+	// ls reads package-global limits. Reset them here so this table remains
+	// independent of limit-specific tests when the package test order changes.
+	defaults := DefaultLimits()
+	ConfigureLimits(defaults)
+	t.Cleanup(func() {
+		ConfigureLimits(defaults)
+	})
+
 	registry := NewRegistryWithPolicy(Policy{
 		Allow: map[string]bool{
 			"ls": true,
@@ -224,6 +232,26 @@ func TestListDirectoryTableDriven(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestListDirectoryRecursiveWithHiddenTempParent(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), ".tmp")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", parent)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "visible.txt"), []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewRegistryWithPolicy(Policy{Allow: map[string]bool{"ls": true}})
+	result := registry.Execute("ls", map[string]interface{}{"path": dir, "recursive": true})
+	if result.Error != nil {
+		t.Fatal(result.Error)
+	}
+	if !strings.Contains(result.Result, "visible.txt") {
+		t.Fatalf("expected visible file through hidden temp parent, got: %s", result.Result)
 	}
 }
 
