@@ -18,7 +18,7 @@ var inheritedEnvironmentKeys = map[string]bool{
 	"ALL_PROXY": true, "COLORTERM": true, "CODEX_API_KEY": true, "CODEX_AUTH_TOKEN": true,
 	"CODEX_CONFIG": true, "CODEX_HOME": true, "HTTP_PROXY": true, "HTTPS_PROXY": true,
 	"LANG": true, "LC_ALL": true, "LC_CTYPE": true, "LC_MESSAGES": true, "NO_COLOR": true,
-	"NO_PROXY": true, "OPENAI_API_KEY": true, "OPENAI_BASE_URL": true, "TERM": true,
+	"NO_PROXY": true, "TERM": true,
 }
 
 // ChildEnvironment builds a deterministic, allow-listed environment for an

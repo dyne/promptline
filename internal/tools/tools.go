@@ -72,7 +72,7 @@ type ExecuteOptions struct {
 //
 // Thread-safety: Registry is safe for concurrent use from multiple goroutines.
 // All access to tools and permissions maps is protected by a RWMutex.
-// Read operations (getTool, getPermission, GetToolNames, GetTools, OpenAITools)
+// Read operations (getTool, getPermission, GetToolNames, GetTools)
 // use RLock for concurrent reads. Write operations (RegisterTool, applyPolicy,
 // AllowTool, SetAllowed, SetRequireConfirmation) use Lock for exclusive access.
 type Registry struct {
@@ -482,7 +482,7 @@ func applyPolicyLevel(current PermissionLevel, name string, policy Policy) Permi
 	return level
 }
 
-// FormatToolResult creates a provider-neutral user-friendly tool display.
+// FormatToolCallResult creates a provider-neutral user-friendly tool display.
 func FormatToolCallResult(function, arguments string, result *ToolResult, truncate bool) string {
 	var argsStr string
 	if arguments != "" {
