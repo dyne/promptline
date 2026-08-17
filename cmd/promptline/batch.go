@@ -49,7 +49,7 @@ func runBatch(logger zerolog.Logger) error {
 	defer session.Close()
 	session.ToolApprover = newToolApprover()
 	session.Logger = &logger
-	session.DryRun = *dryRun
+	session.DryRun = false
 
 	// Read input from stdin
 	scanner := bufio.NewScanner(os.Stdin)
