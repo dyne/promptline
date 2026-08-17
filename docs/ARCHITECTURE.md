@@ -1,55 +1,46 @@
-# Architecture
+# Promptline v2 architecture
 
-Streaming console for OpenAI-compatible chat APIs.
+Promptline is a foreground Unix terminal host for exactly one named instance,
+one `codex app-server --stdio` child, and one primary Codex thread. It is not
+an OpenAI-compatible chat-completions client.
 
-## Structure
-
-```
-cmd/promptline/main.go      entry, console loop, execution
-internal/chat/session.go     conversation, streaming, history
-internal/tools/tools.go      tool registry, permissions
-internal/tools/builtin.go    tool implementations
-internal/config/config.go    config loader
-```
-
-## Flow
+## Ownership
 
 ```
-User → Session.StreamResponse() → API
-         ↓
-      Stream Events (content/tool_call/error)
-         ↓
-      Tool Execution
-         ↓
-      Recursive Stream (with results)
-         ↓
-      Console Output
+operator / external tmux pane
+  └─ promptline --instance NAME
+       └─ codex app-server --stdio
 ```
 
-## Streaming
+`cmd/promptline/main.go` composes the instance, app-server process, runtime,
+governance policy, audit journal, and optional toolbox MCP server. Promptline
+exclusively owns the child lifecycle and its stdin/stdout/stderr: app-server
+stdout is JSONL protocol, while terminal output remains separate. The runtime
+selects one stored or explicitly new primary thread, serializes foreground
+turns, and reaps the child during shutdown.
 
-`StreamResponseWithContext()` emits via channel:
+`internal/appserver` owns bounded JSONL RPC, protocol compatibility checks,
+thread/turn primitives, events, server requests, and one child process.
+`internal/runtime` owns line-oriented terminal interaction, thread selection,
+turn state, interrupts, and shutdown. Codex is authoritative for conversation
+and turn history; Promptline persists only the last primary-thread ID and its
+own operational state.
 
-- `StreamEventContent` - text chunks
-- `StreamEventToolCall` - function call with JSON args
-- `StreamEventError` - errors
+`internal/governance` evaluates structured effect requests, asks or declines
+through the controlling terminal, and writes redacted append-only audit events.
+`internal/tools` is a provider-neutral embedded Unix toolbox. It is exposed to
+Codex through the instance-scoped stdio MCP server in `internal/mcp`.
 
-Tool calls execute immediately, inject results into history, continue streaming.
+## Boundaries and defaults
 
-## Permissions
+State is private to `<state-root>/<instance>`: directories use mode `0700`,
+files use `0600`, and an advisory lock prevents duplicate foreground owners.
+Child environments are allow-listed and redacted. Filesystem toolbox access is
+limited to configured roots. Mutations and privilege expansion fail closed when
+approval input is unavailable or invalid.
 
-Per tool:
-1. **Allow** - execute without asking
-2. **Ask** - prompt before executing
-3. **Deny** - reject
-
-Default: ask for all tools unless configured otherwise.
-
-## History
-
-Messages in `[]openai.ChatCompletionMessage`:
-- `system` - instructions
-- `user` - human input
-- `assistant` - AI responses/tool calls
-- `tool` - execution results
-
+tmux remains external: Promptline neither creates nor manages sessions or
+panes. There is no daemon, control socket, WebSocket transport, second model
+runtime, local conversation history, internal index, search service, or
+automatic restart loop. See [ARCHITECTURE_V2.md](ARCHITECTURE_V2.md) for the
+complete compatibility and non-goal contract.

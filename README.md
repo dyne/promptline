@@ -1,92 +1,99 @@
-# Promptline
+# Promptline v2
 
-Terminal interface for streaming chat with OpenAI-compatible APIs. Written in Go.
+Promptline is a foreground host for one `codex app-server --stdio` child and
+one primary Codex thread. It is for Unix administration: run it only with a
+narrow working root and the least privilege necessary.
+
+Promptline is not an OpenAI-compatible chat-completions client. Codex owns
+authentication and conversation history. Promptline owns the terminal,
+instance lock/state, approvals, the embedded toolbox, and audit journal.
 
 ## Build
 
-```bash
-make build
-./promptline
-```
-
-Requires Go 1.22+ and `OPENAI_API_KEY` set or config.json
-
-## Config.json
-
-```json
-{
-  "api_key": "sk-...",
-  "api_url": "https://api.openai.com/v1",
-  "model": "gpt-4o-mini",
-  "tools": {
-    "allow": ["read_file", "ls"],
-    "ask": ["create_file", "edit_file"]
-  },
-  "tool_limits": {
-    "max_file_size_bytes": 10485760,
-    "max_directory_depth": 8,
-    "max_directory_entries": 2000
-  },
-  "tool_rate_limits": {
-    "default_per_minute": 60,
-    "per_tool": {},
-    "cooldown_seconds": {}
-  },
-  "tool_timeouts": {
-    "default_seconds": 0,
-    "per_tool_seconds": {}
-  }
-}
-```
-
-## Usage
+Go 1.24 is required.
 
 ```bash
-./promptline                          # interactive
-./promptline -d                       # debug mode
-echo "query" | ./promptline -         # batch/pipe
+GOCACHE="$PWD/.gocache" /usr/local/go/bin/go build -o promptline ./cmd/promptline
+./promptline --version
+./promptline --help
 ```
 
-Commands: `/help` `/clear` `/history` `/debug` `/permissions` `/quit`
+Install and authenticate a compatible Codex CLI before starting Promptline.
+Promptline verifies the configured binary before it creates or resumes a
+thread.
 
-Keys: `Ctrl+↑/↓` history
+## Operation
 
-## Tools
+Use tmux externally to run independent named instances. Promptline does not
+create, manage, or multiplex tmux sessions.
 
-AI can call functions to read/write files and perform safe operations. Promptline does not execute system binaries. Permissions in config control allow/ask/deny behavior.
+```bash
+tmux new-session -s promptline-ops
+./promptline --instance ops --cwd /srv/ops --state-root /var/lib/promptline/instances
 
-Built-in includes core file and system tools (u-root based). Full list and descriptions in [docs/TOOLS](docs/TOOLS.md).
+# In a separate pane or session:
+./promptline --instance docs --cwd /srv/docs --state-root /var/lib/promptline/instances
+```
 
-Add your own in [internal/tools/builtin.go](internal/tools/builtin.go) or [internal/tools/builtin_uroot.go](internal/tools/builtin_uroot.go) - see [docs](docs/).
+Each instance has private `0700` state under
+`<state-root>/<instance>`, including `codex-home`, its durable primary-thread
+record, lock, and audit journal. Stop with `/quit`, EOF, or `SIGTERM`. `Ctrl-C`
+interrupts an active turn; it does not create another thread.
 
-## Docs
+By default, a later launch resumes the stored primary thread. Use `--new` to
+explicitly replace it, or `--resume THREAD_ID` to request a specific thread:
 
-- [ARCHITECTURE](docs/ARCHITECTURE.md) - how it works
-- [TOOLS](docs/TOOLS.md) - adding tools, permissions
+```bash
+./promptline --instance ops --cwd /srv/ops --state-root /var/lib/promptline/instances
+./promptline --instance ops --cwd /srv/ops --state-root /var/lib/promptline/instances --new
+```
+
+If the app-server reports that a stored thread cannot be resumed, Promptline
+fails closed and tells the operator to use `--new`; it never silently creates
+replacement history. After an app-server crash, restart the same command to
+perform the stored resume.
+
+## Toolbox and approvals
+
+`promptline toolbox serve` is an internal stdio MCP server used to expose the
+embedded Go/u-root toolbox to Codex. It is not a network daemon.
+
+```bash
+./promptline toolbox serve --instance ops --cwd /srv/ops --state-root /var/lib/promptline/instances
+```
+
+Mutating effects and privilege expansion are asked or denied by default.
+Prompts are read from the controlling terminal; unavailable or malformed input
+declines the request. The journal is append-only JSONL under
+`<state-root>/<instance>/audit` and records bounded, redacted operational
+metadata. It is not an authorization source.
+
+## Migration from v1
+
+| v1 setting or behavior | v2 replacement |
+| --- | --- |
+| `api_key`, `api_url`, `OPENAI_API_KEY` | Authenticate and configure the Codex CLI; Promptline has no API client configuration. |
+| `model` in `config.json` | Optional `--model` when supported by the configured Codex CLI. |
+| Local chat and command history | Codex thread history; Promptline persists only a primary-thread ID. |
+| Batch/TUI/readline command path | Foreground line-oriented terminal input. |
+| Tool policy in `config.json` | Promptline approval policy and per-instance toolbox configuration. |
+
+An optional external Context-mode Codex plugin may be installed and passed
+through as Codex configuration. Promptline does not bundle, index, search, or
+reimplement it.
+
+## Troubleshooting and non-goals
+
+Use `--codex /absolute/path/to/codex` when the desired binary is not on
+`PATH`. An unsupported version, malformed version output, or missing stable
+app-server capability is an actionable startup error, not a best-effort mode.
+
+Promptline has no daemon, control socket, WebSocket transport, automatic
+restart, automatic tmux integration, second model runtime, internal database,
+or search/index service. See [the v2 architecture](docs/ARCHITECTURE_V2.md)
+and [toolbox documentation](docs/TOOLS.md) for boundaries and portability.
 
 ## License
 
-Copyright (C) 2025-2026 Dyne.org foundation
-
-Designed and written by Denis "[Jaromil](https://jaromil.dyne.org)"
-Roio.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public
-License along with this program.  If not, see
-<https://www.gnu.org/licenses/>.
-
-<p align="center">
-  <a href="https://dyne.org">
-    <img src="https://files.dyne.org/software_by_dyne.png" width="170">
-  </a>
-</p>
+Copyright (C) 2025-2026 Dyne.org foundation. Licensed under the GNU Affero
+General Public License, version 3 or later.

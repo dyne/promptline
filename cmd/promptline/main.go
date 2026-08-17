@@ -25,19 +25,12 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/rs/zerolog"
-
 	"promptline/internal/appserver"
 	"promptline/internal/governance"
 	"promptline/internal/instance"
 	"promptline/internal/mcp"
 	pruntime "promptline/internal/runtime"
 	"promptline/internal/tools"
-)
-
-var (
-	// Retained only until the v1 UI is removed by v2-cutover.
-	dryRun = new(bool)
 )
 
 // Version is set at build time via ldflags. Defaults to "dev".
@@ -127,43 +120,4 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 		}
 	}()
 	return r.Run(ctx, input, pruntime.Terminal{Out: output})
-}
-
-func initLogger(debug bool, logFilePath string) (zerolog.Logger, io.Closer, error) {
-	// Set log level
-	zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	if debug {
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	}
-
-	// Configure output
-	var output io.Writer
-	var closer io.Closer
-	if debug {
-		if logFilePath == "" {
-			cwd, cwdErr := os.Getwd()
-			if cwdErr != nil {
-				return zerolog.Logger{}, nil, fmt.Errorf("failed to determine default log path: %w", cwdErr)
-			}
-			logFilePath = filepath.Join(cwd, "promptline_debug.log")
-		}
-
-		file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			// Fall back to a temp file if the default location is not writable.
-			tmp, tmpErr := os.CreateTemp("", "promptline_debug_*.log")
-			if tmpErr != nil {
-				return zerolog.Logger{}, nil, fmt.Errorf("failed to open log file: %w", err)
-			}
-			file = tmp
-		}
-		closer = file
-		output = file
-	} else {
-		// Logging is disabled when debug mode is off
-		output = io.Discard
-	}
-
-	// Create logger with timestamp
-	return zerolog.New(output).With().Timestamp().Logger(), closer, nil
 }

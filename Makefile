@@ -1,6 +1,6 @@
 # Makefile for promptline
 
-.PHONY: build install clean test coverage help release test-race fmt vet benchmarks prompt
+.PHONY: build install clean test coverage help release test-race fmt vet benchmarks
 
 GO ?= go
 GOOS ?= $(shell $(GO) env GOOS)
@@ -21,7 +21,6 @@ help:
 	@echo "  make test-race - Run tests with race detector"
 	@echo "  make coverage  - Run tests with coverage and display report"
 	@echo "  make help      - Show this help message"
-	@echo "  make prompt    - Show a reusable system prompt"
 	@echo ""
 	@echo "Version can be set via VERSION variable: make VERSION=v1.0.0 release"
 
@@ -69,13 +68,3 @@ fmt:
 # Vet code
 vet:
 	$(GO) vet ./...
-
-# All system prompts are in sorting order, from 01 to 49 are reusable on
-# any LLM prompt, from 50 up they are specific to promptline.
-# To obtain a reusable prompts just do 'make prompt' in parent dir.
-prompt:
-	@printf "%s\n" \
-		system_prompt/0[1-9]*.txt \
-	 	| sort -n | xargs cat
-
-# system_prompt/[1-4][0-9]*.txt \

@@ -1,204 +1,28 @@
-# Tools
+# Promptline v2 toolbox
 
-AI calls functions to interact with system. OpenAI tool-calling protocol.
+The toolbox is an instance-owned MCP capability. Promptline starts it as
+`promptline toolbox serve`; it uses stdio JSONL and never opens a network
+listener. Codex discovers tools through stable MCP `initialize`, `tools/list`,
+and `tools/call` requests.
 
-## Flow
+Tools are implemented in Go and u-root. Promptline does not execute `sh -c`,
+`bash -c`, or installed host utilities. Filesystem authority comes from the
+configured instance roots; traversal, absolute-path ambiguity, symlink escape,
+and unsupported special files are denied.
 
-1. Advertise tools in request
-2. Model returns `tool_calls` with name + JSON args
-3. Check permission (allow/ask/deny)
-4. Execute or reject
-5. Inject result into conversation
-6. Stream final response
+Every tool is bounded by instance output, execution, traversal, and directory
+entry limits. Effects require Promptline's approval policy. A missing terminal
+or an interrupted prompt fails closed. Audit events are redacted, append-only,
+and retained under the instance audit directory.
 
-## Built-in
+The portable surface includes filesystem, directory, text-processing, checksum,
+system-information, and utility operations registered by `internal/tools`.
+`md5sum` and `shasum` are compatibility/file-identification tools, not security
+primitives. Unix-only operations such as `mkfifo` report unsupported-platform
+errors where unavailable.
 
-Promptline ships with safe, Go-native tools (including u-root implementations). It does not execute system binaries.
-Filesystem operations are scoped to the configured toolbox roots; a path outside
-those roots, including one reached through a symlink, is denied.
-
-Core:
-- `get_current_datetime` - RFC3339 timestamp
-- `read_file` - read from disk
-- `create_file` - create a text file (overwrite flag, auto-create parent dirs)
-- `edit_file` - apply SEARCH/REPLACE edits to a text file
-- `ls` - list directory (path, recursive, show_hidden). Use this for directory listing (u-root `ls`).
-
-`edit_file` format:
-```
-<<<<<<< SEARCH
-[original code block]
-=======
-[replacement code block]
->>>>>>> REPLACE
-```
-
-Markers are canonical with 7 `<` or `>` and a single space, but the parser also accepts 6 or 8 markers and extra whitespace between the marker run and the keyword.
-
-Matching is progressive (exact, then whitespace-insensitive, then fuzzy). If the search block matches multiple locations, provide `occurrence` (1-based) to pick one match or `replace_all: true` to update all matches (mutually exclusive). No-op replacements (replacement identical to matched content) are rejected.
-
-File operations:
-- `cat` `cp` `mv` `rm` `ln` `touch` `truncate` `readlink` `realpath`
-
-Directory operations:
-- `mkdir` `pwd` `dirname` `basename`
-
-Text processing:
-- `grep` `head` `tail` `sort` `uniq` `wc` `tr` `tee` `comm` `strings` `more`
-
-Notes:
-- `grep` accepts file or directory paths. For directories, it searches regular files in that directory; set `recursive: true` to traverse subdirectories and `show_hidden: true` to include hidden entries.
-- `grep` path inputs support glob patterns (for example `cmd/**/*.go` is not supported, but `cmd/*.go` and `cmd/*/main.go` are).
-- Directory traversal for `grep` (and `find`) respects tool limits (max depth and max entries).
-
-File viewing/analysis:
-- `hexdump` `cmp` `md5sum` `shasum` `base64`
-
-System information:
-- `uname` `hostname` `uptime` `free` `df` `du` `ps` `pidof` `id`
-
-Misc safe:
-- `echo` `seq` `printenv` `tty` `which` `mkfifo` `mktemp` `find` `chmod` `date`
-
-## Permissions
-
-Default:
-- **Ask**: all tools (prompt required)
-
-Override in `config.json`:
-
-```json
-{
-  "tools": {
-    "allow": ["ls", "read_file"],
-    "ask": ["create_file", "edit_file"],
-    "deny": []
-  }
-}
-```
-
-New tools are asked by default.
-
-## Limits and Timeouts
-
-Defaults applied when not set in `config.json`:
-
-```json
-{
-  "tool_limits": {
-    "max_file_size_bytes": 10485760,
-    "max_directory_depth": 8,
-    "max_directory_entries": 2000
-  },
-  "tool_rate_limits": {
-    "default_per_minute": 60,
-    "per_tool": {},
-    "cooldown_seconds": {}
-  },
-  "tool_timeouts": {
-    "default_seconds": 0,
-    "per_tool_seconds": {}
-  }
-}
-```
-
-- The toolbox supplies nonzero defaults for execution time and resource limits;
-  per-tool overrides remain available for narrower policies.
-
-## Portability
-
-The toolbox is implemented in Go and u-root rather than by invoking host
-utilities. Linux and macOS share the portable tool surface. Platform-specific
-information tools may return an unsupported-platform error where their OS data
-source is unavailable. `mkfifo` is available only on Unix platforms; callers
-should treat it as unavailable elsewhere. Checksum tools (`md5sum` and
-`shasum`) exist for compatibility and file identification, not for security.
-
-## Adding Tools
-
-Edit `internal/tools/builtin.go` or `internal/tools/builtin_uroot.go`. Avoid `exec.Command`; tools must not shell out to system binaries.
-
-```go
-// implement
-func myTool(args map[string]interface{}) (string, error) {
-    param, ok := args["param"].(string)
-    if !ok {
-        return "", fmt.Errorf("missing param")
-    }
-    
-    result := doStuff(param)
-    return result, nil
-}
-
-// register in registerBuiltInTools()
-func registerBuiltInTools(r *Registry) {
-    // ... existing tools ...
-    
-    r.RegisterTool(&Tool{
-        Name:        "my_tool",
-        Description: "Does something useful",
-        Parameters:  "param: string - what it does",
-        Executor:    myTool,
-    })
-}
-```
-
-### Validation
-
-Always validate args:
-
-```go
-func myTool(args map[string]interface{}) (string, error) {
-    // required string
-    name, ok := args["name"].(string)
-    if !ok {
-        return "", fmt.Errorf("missing name")
-    }
-    
-    // optional with default
-    count, ok := args["count"].(float64)  // JSON numbers are float64
-    if !ok {
-        count = 1.0
-    }
-    
-    // boolean
-    verbose, _ := args["verbose"].(bool)  // defaults to false
-    
-    // your logic
-}
-```
-
-### Errors
-
-Return descriptive errors, wrap with `%w`:
-
-```go
-result, err := executeQuery(query)
-if err != nil {
-    return "", fmt.Errorf("query failed: %w", err)
-}
-```
-
-### Security
-
-Tools that access filesystem, network, or modify data require:
-- Input validation/sanitization
-- Path restrictions
-- Rate limiting
-- User approval
-
-Security model:
-- Promptline does not execute system binaries.
-- All built-in tools are implemented in Go (u-root or stdlib).
-
-Default policy asks before running any tool unless configured otherwise.
-
-## Structure
-
-```
-internal/tools/
-├── tools.go           # registry and execution
-├── builtin.go         # core tools
-├── builtin_uroot.go   # u-root implementations
-└── [your tool files]
-```
+To add a tool, register a context-aware implementation in
+`internal/tools/builtin.go` or `internal/tools/builtin_uroot.go`. Define a
+schema, validate arguments, enforce the scoped-root policy, observe the caller
+context, and return bounded structured output. Do not add provider-specific
+model types or shell execution.
