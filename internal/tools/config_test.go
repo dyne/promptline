@@ -13,6 +13,14 @@ func TestNewRegistryWithConfig_IsolatedAndImmutable(t *testing.T) {
 	t.Parallel()
 	leftRoot := t.TempDir()
 	rightRoot := t.TempDir()
+	leftResolved, err := filepath.EvalSymlinks(leftRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rightResolved, err := filepath.EvalSymlinks(rightRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	left, err := NewRegistryWithConfig(Config{WorkingDirectory: leftRoot, Roots: []string{leftRoot}, Limits: Limits{MaxFileSizeBytes: 101}, RateLimits: RateLimitConfig{DefaultPerMinute: 1}, Timeouts: TimeoutConfig{Default: time.Second}, Policy: PolicyFromLists([]string{"get_current_datetime"}, nil, nil)})
 	if err != nil {
 		t.Fatal(err)
@@ -28,11 +36,11 @@ func TestNewRegistryWithConfig_IsolatedAndImmutable(t *testing.T) {
 	if leftConfig.Limits.MaxFileSizeBytes != 101 || rightConfig.Limits.MaxFileSizeBytes != 202 {
 		t.Fatalf("configs crossed: left=%d right=%d", leftConfig.Limits.MaxFileSizeBytes, rightConfig.Limits.MaxFileSizeBytes)
 	}
-	if leftConfig.Roots[0] != leftRoot || rightConfig.Roots[0] != rightRoot {
+	if leftConfig.Roots[0] != leftResolved || rightConfig.Roots[0] != rightResolved {
 		t.Fatalf("roots crossed: left=%q right=%q", leftConfig.Roots, rightConfig.Roots)
 	}
-	leftConfig.Roots[0] = rightRoot
-	if left.Config().Roots[0] != leftRoot {
+	leftConfig.Roots[0] = rightResolved
+	if left.Config().Roots[0] != leftResolved {
 		t.Fatal("returned config mutated registry")
 	}
 	if left.getPermission("get_current_datetime").Level != PermissionAllow || right.getPermission("get_current_datetime").Level != PermissionAsk {
