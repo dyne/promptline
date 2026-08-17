@@ -42,7 +42,7 @@ func runTUIMode(logger zerolog.Logger) {
 	defer session.Close()
 	session.ToolApprover = newToolApprover()
 	session.Logger = &logger
-	session.DryRun = *dryRun
+	session.DryRun = false
 
 	canceler := &operationCanceler{}
 	interrupts := make(chan os.Signal, 1)

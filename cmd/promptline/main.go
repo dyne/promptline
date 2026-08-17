@@ -17,56 +17,85 @@
 package main
 
 import (
-	"flag"
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/rs/zerolog"
+
+	"promptline/internal/appserver"
+	"promptline/internal/instance"
+	pruntime "promptline/internal/runtime"
 )
 
 var (
-	debugMode = flag.Bool("d", false, "Enable debug mode")
-	logFile   = flag.String("log-file", "", "Log file path (logs disabled by default)")
-	dryRun    = flag.Bool("dry-run", false, "Validate tool calls without executing them")
-	version   = flag.Bool("version", false, "Display version information and exit")
+	// Retained only until the v1 UI is removed by v2-cutover.
+	dryRun = new(bool)
 )
 
 // Version is set at build time via ldflags. Defaults to "dev".
 var Version = "dev"
 
 func main() {
-	flag.Parse()
-
-	// Handle version flag
-	if *version {
-		fmt.Printf("promptline version %s\n", Version)
-		os.Exit(0)
-	}
-
-	// Initialize logger
-	logger, closer, err := initLogger(*debugMode, *logFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	if closer != nil {
-		defer func() {
-			_ = closer.Close()
-		}()
-	}
-	logger.Info().Str("version", Version).Msg("Promptline starting")
-
-	// Check if we're running in batch mode (with "-" argument)
-	args := flag.Args()
-	if len(args) > 0 && args[0] == "-" {
-		runBatchMode(logger)
+	if err := run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, "promptline:", err)
 		return
 	}
+}
 
-	// Run in normal TUI mode
-	runTUIMode(logger)
+func run(args []string, input io.Reader, output, stderr io.Writer) error {
+	cmd, err := pruntime.Parse(args, stderr)
+	if err != nil {
+		return err
+	}
+	if cmd.Version {
+		_, err := fmt.Fprintf(output, "promptline version %s\n", Version)
+		return err
+	}
+	in, err := instance.New(cmd.Instance)
+	if err != nil {
+		return err
+	}
+	lock, err := in.AcquireLock()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	process, err := appserver.Start(ctx, in)
+	if err != nil {
+		_ = lock.Close()
+		return err
+	}
+	client := pruntime.AppServer{API: appserver.NewAPI(process.Client), Client: process.Client}
+	r, err := pruntime.New(in, client, process, lock)
+	if err != nil {
+		_ = process.Close(context.Background())
+		_ = lock.Close()
+		return err
+	}
+	if err := r.Start(ctx, pruntime.Options{New: cmd.New, ResumeID: cmd.ResumeID}, Version); err != nil {
+		_ = r.Close(context.Background())
+		return err
+	}
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	go func() {
+		for sig := range signals {
+			if sig == os.Interrupt && r.HasActiveTurn() {
+				_ = r.Interrupt(context.Background())
+				continue
+			}
+			cancel()
+			return
+		}
+	}()
+	return r.Run(ctx, input, pruntime.Terminal{Out: output})
 }
 
 func initLogger(debug bool, logFilePath string) (zerolog.Logger, io.Closer, error) {
