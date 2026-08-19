@@ -304,7 +304,7 @@ func (r *Runtime) command(ctx context.Context, line string, render Renderer) (bo
 }
 
 func (r *Runtime) renderEvent(event appserver.Event, render Renderer) error {
-	if strings.Contains(event.Method, "completed") || strings.Contains(event.Method, "failed") {
+	if event.Method == "turn/completed" {
 		r.mu.Lock()
 		id := r.turnID
 		r.mu.Unlock()
