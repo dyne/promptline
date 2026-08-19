@@ -17,6 +17,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"testing"
 
@@ -33,6 +34,26 @@ func TestVersionVariable(t *testing.T) {
 	// Default value should be "dev" if not set via ldflags
 	if Version != "dev" {
 		t.Logf("Note: Version is set to %q (may be set via ldflags)", Version)
+	}
+}
+
+func TestExitCodeReportsFatalErrors(t *testing.T) {
+	var stderr bytes.Buffer
+	if code := exitCode([]string{"--unknown"}, nil, io.Discard, &stderr); code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("promptline:")) {
+		t.Fatalf("missing fatal error prefix: %q", stderr.String())
+	}
+}
+
+func TestExitCodeReturnsSuccessForVersion(t *testing.T) {
+	var output bytes.Buffer
+	if code := exitCode([]string{"--version"}, nil, &output, io.Discard); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if !bytes.Contains(output.Bytes(), []byte("promptline version")) {
+		t.Fatalf("missing version output: %q", output.String())
 	}
 }
 

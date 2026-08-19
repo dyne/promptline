@@ -37,10 +37,15 @@ import (
 var Version = "dev"
 
 func main() {
-	if err := run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "promptline:", err)
-		return
+	os.Exit(exitCode(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}
+
+func exitCode(args []string, input io.Reader, output, stderr io.Writer) int {
+	if err := run(args, input, output, stderr); err != nil {
+		fmt.Fprintln(stderr, "promptline:", err)
+		return 1
 	}
+	return 0
 }
 
 func run(args []string, input io.Reader, output, stderr io.Writer) error {
