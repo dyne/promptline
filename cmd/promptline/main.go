@@ -57,7 +57,11 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 		return err
 	}
 	if cmd.ToolboxServe {
-		registry, err := tools.NewRegistryWithConfig(tools.Config{WorkingDirectory: in.WorkingDirectory(), Roots: []string{in.WorkingRoot()}})
+		toolConfig := tools.DefaultConfig()
+		toolConfig.WorkingDirectory = in.WorkingDirectory()
+		toolConfig.Roots = []string{in.WorkingRoot()}
+		toolConfig.Policy = mcp.ReadOnlyToolPolicy()
+		registry, err := tools.NewRegistryWithConfig(toolConfig)
 		if err != nil {
 			return err
 		}

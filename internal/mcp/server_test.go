@@ -77,6 +77,26 @@ func TestCodexConfigIsInstanceScoped(t *testing.T) {
 	}
 }
 
+func TestReadOnlyToolPolicyAllowsInspectionAndRequiresApprovalForMutation(t *testing.T) {
+	root := t.TempDir()
+	config := tools.DefaultConfig()
+	config.WorkingDirectory = root
+	config.Roots = []string{root}
+	config.Policy = ReadOnlyToolPolicy()
+	registry, err := tools.NewRegistryWithConfig(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+
+	if result := registry.ExecuteContext(t.Context(), "pwd", map[string]any{}); result.Error != nil {
+		t.Fatalf("read-only tool failed: %v", result.Error)
+	}
+	if result := registry.ExecuteContext(t.Context(), "mkdir", map[string]any{"path": "created"}); result.Error == nil {
+		t.Fatal("mutating tool ran without approval")
+	}
+}
+
 func TestServerRejectsInvalidCall(t *testing.T) {
 	registry := tools.NewRegistry()
 	t.Cleanup(func() { _ = registry.Close() })
