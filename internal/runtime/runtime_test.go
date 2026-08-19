@@ -127,6 +127,37 @@ func TestRuntime_RunRendersTurnAndClosesOnEOF(t *testing.T) {
 	}
 }
 
+func TestRuntime_ItemCompletionDoesNotCompleteTurn(t *testing.T) {
+	r, _, _ := testRuntime(t)
+	defer r.Close(context.Background())
+	if err := r.Start(context.Background(), Options{}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.StartTurn(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	render := &fakeRenderer{}
+	item := appserver.Event{
+		Method: "item/completed",
+		Params: []byte(`{"item":{"id":"item-1","turnId":"turn-1","type":"agentMessage","text":"answer"}}`),
+	}
+	if err := r.renderEvent(item, render); err != nil {
+		t.Fatal(err)
+	}
+	if !r.HasActiveTurn() {
+		t.Fatal("item completion ended the active turn")
+	}
+	if !strings.Contains(render.String(), "answer") {
+		t.Fatalf("completed item was not rendered: %q", render.String())
+	}
+	if err := r.renderEvent(appserver.Event{Method: "turn/completed"}, render); err != nil {
+		t.Fatal(err)
+	}
+	if r.HasActiveTurn() {
+		t.Fatal("turn completion left the turn active")
+	}
+}
+
 func TestRuntime_CloseIsIdempotent(t *testing.T) {
 	r, _, p := testRuntime(t)
 	if err := r.Close(context.Background()); err != nil {
