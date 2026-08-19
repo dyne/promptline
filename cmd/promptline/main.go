@@ -18,6 +18,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -42,6 +44,9 @@ func main() {
 
 func exitCode(args []string, input io.Reader, output, stderr io.Writer) int {
 	if err := run(args, input, output, stderr); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		fmt.Fprintln(stderr, "promptline:", err)
 		return 1
 	}
