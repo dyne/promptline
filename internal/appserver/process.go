@@ -27,8 +27,13 @@ type Process struct {
 var sensitiveDiagnostic = regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password|authorization|cookie)\s*[:=]\s*[^\s]+`)
 
 func Start(ctx context.Context, in *instance.Instance) (*Process, error) {
-	if err := Probe(ctx, in.CodexExecutable()); err != nil {
+	startupCtx, cancel := context.WithTimeout(ctx, in.Timeouts().Startup)
+	defer cancel()
+	if err := Probe(startupCtx, in.CodexExecutable()); err != nil {
 		return nil, err
+	}
+	if err := startupCtx.Err(); err != nil {
+		return nil, fmt.Errorf("app-server startup: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, in.CodexExecutable(), "app-server", "--stdio")
 	cmd.Dir = in.WorkingDirectory()

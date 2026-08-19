@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"promptline/internal/appserver"
 	"promptline/internal/instance"
@@ -18,13 +19,20 @@ type fakeClient struct {
 	done                                              chan struct{}
 	startThreads, resumes, turns, interrupts, replies int
 	resumeErr                                         error
+	initializeWait                                    bool
 }
 
 func newFakeClient() *fakeClient {
 	return &fakeClient{events: make(chan appserver.Event, 8), requests: make(chan appserver.ServerRequest, 8), done: make(chan struct{})}
 }
-func (f *fakeClient) Initialize(context.Context, appserver.Initialize) error { return nil }
-func (f *fakeClient) Account(context.Context) ([]byte, error)                { return []byte(`{}`), nil }
+func (f *fakeClient) Initialize(ctx context.Context, _ appserver.Initialize) error {
+	if f.initializeWait {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return nil
+}
+func (f *fakeClient) Account(context.Context) ([]byte, error) { return []byte(`{}`), nil }
 func (f *fakeClient) StartThread(context.Context, string, string) (appserver.Thread, error) {
 	f.startThreads++
 	return appserver.Thread{ID: "new-thread"}, nil
@@ -50,6 +58,13 @@ func (f *fakeClient) Err() error                                      { return n
 type fakeProcess struct{ closed int }
 
 func (p *fakeProcess) Close(context.Context) error { p.closed++; return nil }
+
+type blockingProcess struct{}
+
+func (*blockingProcess) Close(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
 
 type fakeRenderer struct{ strings.Builder }
 
@@ -171,6 +186,46 @@ func TestRuntime_CloseIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRuntimeStartupUsesInstanceTimeout(t *testing.T) {
+	r, client, _ := testRuntimeWithTimeouts(t, instance.Timeouts{Startup: 10 * time.Millisecond})
+	client.initializeWait = true
+	started := time.Now()
+	err := r.Start(context.Background(), Options{}, "test")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("start error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("startup timeout took %v", elapsed)
+	}
+	_ = r.Close(context.Background())
+}
+
+func TestRuntimeCloseUsesInstanceTimeout(t *testing.T) {
+	in, err := instance.New(instance.Config{
+		Name: "close-timeout", StateRoot: t.TempDir(), WorkingRoot: t.TempDir(),
+		Timeouts: instance.Timeouts{Shutdown: 10 * time.Millisecond},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := in.AcquireLock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := New(in, newFakeClient(), &blockingProcess{}, lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	err = r.Close(context.Background())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("close error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("shutdown timeout took %v", elapsed)
+	}
+}
+
 func TestRuntimeDeclinesUnhandledServerRequest(t *testing.T) {
 	r, f, _ := testRuntime(t)
 	defer r.Close(context.Background())
@@ -215,3 +270,23 @@ func TestRuntimeRequestHandlerConsumesTerminalInputThroughRun(t *testing.T) {
 }
 
 var _ io.Reader = strings.NewReader("")
+
+func testRuntimeWithTimeouts(t *testing.T, timeouts instance.Timeouts) (*Runtime, *fakeClient, *fakeProcess) {
+	t.Helper()
+	in, err := instance.New(instance.Config{
+		Name: "test-timeouts", StateRoot: t.TempDir(), WorkingRoot: t.TempDir(), Timeouts: timeouts,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := in.AcquireLock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, process := newFakeClient(), &fakeProcess{}
+	r, err := New(in, client, process, lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r, client, process
+}

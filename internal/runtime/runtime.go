@@ -95,6 +95,8 @@ func New(in *instance.Instance, api Client, process Process, lock *instance.Lock
 func (r *Runtime) SetRequestHandler(handler RequestHandler) { r.handler = handler }
 
 func (r *Runtime) Start(ctx context.Context, opts Options, version string) error {
+	ctx, cancel := context.WithTimeout(ctx, r.instance.Timeouts().Startup)
+	defer cancel()
 	if err := r.api.Initialize(ctx, appserver.Initialize{ClientName: "promptline", ClientVersion: version}); err != nil {
 		return fmt.Errorf("initialize app-server: %w", err)
 	}
@@ -326,11 +328,13 @@ func (r *Runtime) renderEvent(event appserver.Event, render Renderer) error {
 
 func (r *Runtime) Close(ctx context.Context) error {
 	r.closeOnce.Do(func() {
+		closeCtx, cancel := context.WithTimeout(ctx, r.instance.Timeouts().Shutdown)
+		defer cancel()
 		r.mu.Lock()
 		r.closing = true
 		r.mu.Unlock()
 		var errs []error
-		if err := r.process.Close(ctx); err != nil {
+		if err := r.process.Close(closeCtx); err != nil {
 			errs = append(errs, err)
 		}
 		if err := r.lock.Close(); err != nil {
