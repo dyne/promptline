@@ -44,7 +44,7 @@ type Process interface {
 
 // RequestHandler answers one server-initiated effect request. It is kept out
 // of the transport package so policy and terminal concerns remain injectable.
-type RequestHandler func(context.Context, appserver.ServerRequest) error
+type RequestHandler func(context.Context, appserver.ServerRequest, io.Reader) error
 
 type requestClient interface {
 	Requests() <-chan appserver.ServerRequest
@@ -234,7 +234,7 @@ func (r *Runtime) Run(ctx context.Context, input io.Reader, render Renderer) err
 				return err
 			}
 		case request := <-r.requestStream():
-			if err := r.handleRequest(ctx, request); err != nil {
+			if err := r.handleRequest(ctx, request, &lineReader{lines: lines}); err != nil {
 				return err
 			}
 		}
@@ -248,17 +248,38 @@ func (r *Runtime) requestStream() <-chan appserver.ServerRequest {
 	return r.requests.Requests()
 }
 
-func (r *Runtime) handleRequest(ctx context.Context, request appserver.ServerRequest) error {
+func (r *Runtime) handleRequest(ctx context.Context, request appserver.ServerRequest, input io.Reader) error {
 	if r.requests == nil {
 		return nil
 	}
 	if r.handler != nil {
-		if err := r.handler(ctx, request); err != nil {
+		if err := r.handler(ctx, request, input); err != nil {
 			return err
 		}
 		return nil
 	}
 	return r.requests.ReplyRequest(ctx, request.ID, map[string]string{"decision": "decline"})
+}
+
+// lineReader is the sole consumer of terminal input while an approval is
+// pending. The scanner in Run remains the only reader of the underlying
+// stream, preventing approval responses from racing regular turn input.
+type lineReader struct {
+	lines   <-chan string
+	pending []byte
+}
+
+func (r *lineReader) Read(p []byte) (int, error) {
+	for len(r.pending) == 0 {
+		line, ok := <-r.lines
+		if !ok {
+			return 0, io.EOF
+		}
+		r.pending = append([]byte(line), '\n')
+	}
+	n := copy(p, r.pending)
+	r.pending = r.pending[n:]
+	return n, nil
 }
 
 func (r *Runtime) command(ctx context.Context, line string, render Renderer) (bool, error) {

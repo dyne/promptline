@@ -84,10 +84,11 @@ func (s *Server) handle(ctx context.Context, req request) error {
 			return s.reply(req.ID, nil, -32602, "invalid tools/call parameters")
 		}
 		result := s.registry.ExecuteContext(ctx, params.Name, params.Arguments)
-		content := []map[string]string{{"type": "text", "text": result.Result}}
 		if result.Error != nil {
+			content := []map[string]string{{"type": "text", "text": result.Error.Error()}}
 			return s.reply(req.ID, map[string]any{"content": content, "isError": true}, 0, "")
 		}
+		content := []map[string]string{{"type": "text", "text": result.Result}}
 		return s.reply(req.ID, map[string]any{"content": content}, 0, "")
 	default:
 		return s.reply(req.ID, nil, -32601, "method not found")

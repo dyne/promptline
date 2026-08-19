@@ -73,6 +73,32 @@ func TestRegistryExecuteContext_CancellationAndClose(t *testing.T) {
 	}
 }
 
+func TestRegistryFilesystemToolsUseConfiguredWorkingDirectoryAndRoots(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "inside.txt"), []byte("inside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "outside.txt"), []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewRegistryWithConfig(Config{WorkingDirectory: root, Roots: []string{root}, Policy: PolicyFromLists([]string{"read_file", "pwd"}, nil, nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+
+	if result := registry.ExecuteContext(context.Background(), "read_file", map[string]any{"path": "inside.txt"}); result.Error != nil || result.Result != "inside" {
+		t.Fatalf("configured-root read = %#v", result)
+	}
+	if result := registry.ExecuteContext(context.Background(), "read_file", map[string]any{"path": filepath.Join(outside, "outside.txt")}); result.Error == nil {
+		t.Fatal("read outside configured roots succeeded")
+	}
+	if result := registry.ExecuteContext(context.Background(), "pwd", map[string]any{}); result.Error != nil || result.Result != root {
+		t.Fatalf("configured working directory = %#v, want %q", result, root)
+	}
+}
+
 func TestRegistryExecuteContext_Timeout(t *testing.T) {
 	t.Parallel()
 	registry, err := NewRegistryWithConfig(Config{WorkingDirectory: t.TempDir(), Timeouts: TimeoutConfig{Default: time.Millisecond}})

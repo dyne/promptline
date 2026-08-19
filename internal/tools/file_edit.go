@@ -176,12 +176,7 @@ func createFile(ctx context.Context, args map[string]interface{}) (string, error
 		return "", fmt.Errorf("content appears to be binary; create_file supports text only")
 	}
 
-	workdir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine working directory: %v", err)
-	}
-
-	resolved, err := resolvePathWithinBaseAllowMissing(path, workdir)
+	resolved, err := resolvePathWithinBaseAllowMissing(path, configFromContext(ctx).WorkingDirectory)
 	if err != nil {
 		return "", err
 	}
@@ -241,12 +236,7 @@ func editFile(ctx context.Context, args map[string]interface{}) (string, error) 
 		return "", err
 	}
 
-	workdir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine working directory: %v", err)
-	}
-
-	resolved, err := resolvePathWithinBase(path, workdir)
+	resolved, err := resolvePathWithinBase(path, configFromContext(ctx).WorkingDirectory)
 	if err != nil {
 		return "", err
 	}
