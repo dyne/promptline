@@ -113,7 +113,7 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 	}
 	defer journal.Close()
 	r.SetRequestHandler(func(requestCtx context.Context, request appserver.ServerRequest, approvalInput io.Reader) error {
-		prompt := governance.TerminalPrompt{Input: approvalInput, Output: output}
+		prompt := approvalPrompt(in.ApprovalMode(), approvalInput, output)
 		decision, decisionErr := governance.HandleServerRequest(requestCtx, governance.Policy{Roots: []string{in.WorkingRoot()}}, prompt, journal, request)
 		if decisionErr != nil {
 			decision = map[string]string{"decision": string(governance.DecisionDecline)}
@@ -141,4 +141,11 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 		}
 	}()
 	return r.Run(ctx, input, pruntime.Terminal{Out: output})
+}
+
+func approvalPrompt(mode instance.ApprovalMode, input io.Reader, output io.Writer) governance.Prompt {
+	if mode != instance.ApprovalAsk {
+		return nil
+	}
+	return governance.TerminalPrompt{Input: input, Output: output}
 }

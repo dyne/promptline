@@ -3,6 +3,8 @@ package runtime
 import (
 	"io"
 	"testing"
+
+	"promptline/internal/instance"
 )
 
 func TestParse(t *testing.T) {
@@ -42,5 +44,18 @@ func TestParseToolboxDefaultsOnAndCanBeDisabled(t *testing.T) {
 	}
 	if command.Instance.ToolboxEnabled {
 		t.Fatal("--toolbox=false did not disable toolbox")
+	}
+}
+
+func TestParseApprovalMode(t *testing.T) {
+	command, err := Parse([]string{"--cwd", ".", "--approval", "ask"}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command.Instance.ApprovalMode != instance.ApprovalAsk {
+		t.Fatalf("approval mode = %q, want ask", command.Instance.ApprovalMode)
+	}
+	if _, err := Parse([]string{"--cwd", ".", "--approval", "always"}, io.Discard); err == nil {
+		t.Fatal("invalid approval mode accepted")
 	}
 }
