@@ -123,12 +123,7 @@ func readFile(ctx context.Context, args map[string]interface{}) (string, error) 
 		return "", err
 	}
 
-	workdir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine working directory: %v", err)
-	}
-
-	resolved, err := resolvePathWithinBase(path, workdir)
+	resolved, err := resolvePathWithinBase(path, configFromContext(ctx).WorkingDirectory)
 	if err != nil {
 		return "", err
 	}
@@ -296,6 +291,9 @@ func resolveExistingAncestor(candidate, baseResolved string) (string, error) {
 }
 
 func validatePathWhitelist(absPath, baseResolved string) error {
+	if !paths.HasPathPrefix(absPath, baseResolved) {
+		return fmt.Errorf("path escapes working directory")
+	}
 	return nil
 }
 

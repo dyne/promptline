@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
@@ -142,11 +143,43 @@ func TestRuntime_CloseIsIdempotent(t *testing.T) {
 func TestRuntimeDeclinesUnhandledServerRequest(t *testing.T) {
 	r, f, _ := testRuntime(t)
 	defer r.Close(context.Background())
-	if err := r.handleRequest(context.Background(), appserver.ServerRequest{ID: 7, Method: "item/commandExecution/requestApproval"}); err != nil {
+	if err := r.handleRequest(context.Background(), appserver.ServerRequest{ID: 7, Method: "item/commandExecution/requestApproval"}, strings.NewReader("")); err != nil {
 		t.Fatal(err)
 	}
 	if f.replies != 1 {
 		t.Fatalf("replies=%d, want 1", f.replies)
+	}
+}
+
+func TestRuntimeRequestHandlerConsumesTerminalInputThroughRun(t *testing.T) {
+	r, f, _ := testRuntime(t)
+	if err := r.Start(context.Background(), Options{}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	r.SetRequestHandler(func(_ context.Context, request appserver.ServerRequest, input io.Reader) error {
+		line, err := bufio.NewReader(input).ReadString('\n')
+		if err != nil {
+			return err
+		}
+		got = line
+		return f.ReplyRequest(context.Background(), request.ID, map[string]string{"decision": "accept"})
+	})
+	inputReader, inputWriter := io.Pipe()
+	f.requests <- appserver.ServerRequest{ID: 8, Method: "item/commandExecution/requestApproval"}
+	done := make(chan error, 1)
+	go func() { done <- r.Run(context.Background(), inputReader, &fakeRenderer{}) }()
+	if _, err := io.WriteString(inputWriter, "yes\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := inputWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got != "yes\n" || f.replies != 1 {
+		t.Fatalf("approval input=%q replies=%d", got, f.replies)
 	}
 }
 

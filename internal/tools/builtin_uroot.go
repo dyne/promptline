@@ -522,6 +522,9 @@ func resolveToolPathContext(ctx context.Context, path string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if !pathAllowedByConfig(ctx, resolved) {
+			return "", fmt.Errorf("path is outside allowed tool base directories")
+		}
 		return resolved, nil
 	}
 
@@ -562,6 +565,9 @@ func resolveToolPathNoSymlinkContext(ctx context.Context, path string) (string, 
 	if err := validatePathWhitelist(resolved, baseResolved); err != nil {
 		return "", err
 	}
+	if !pathAllowedByConfig(ctx, resolved) {
+		return "", fmt.Errorf("path is outside allowed tool base directories")
+	}
 	return resolved, nil
 }
 
@@ -593,11 +599,7 @@ func runCoreCommand(ctx context.Context, cmd core.Command, args []string) (strin
 	var stderr bytes.Buffer
 	cmd.SetIO(strings.NewReader(""), &stdout, &stderr)
 
-	workdir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine working directory: %v", err)
-	}
-	cmd.SetWorkingDir(workdir)
+	cmd.SetWorkingDir(configFromContext(ctx).WorkingDirectory)
 
 	if err := cmd.RunContext(ctx, args...); err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
@@ -618,7 +620,7 @@ func executeLs(ctx context.Context, args map[string]interface{}) (string, error)
 	recursive := getBoolArg(args, "recursive")
 	showHidden := getBoolArg(args, "show_hidden")
 
-	resolved, err := resolveListPath(path)
+	resolved, err := resolveListPath(ctx, path)
 	if err != nil {
 		return "", err
 	}
@@ -2539,11 +2541,7 @@ func printWorkingDirectory(ctx context.Context, args map[string]interface{}) (st
 	if err := ensureContext(ctx); err != nil {
 		return "", err
 	}
-	workdir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine working directory: %v", err)
-	}
-	return workdir, nil
+	return configFromContext(ctx).WorkingDirectory, nil
 }
 
 func dirNamePath(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -2834,15 +2832,11 @@ func validateTruncateArgs(args map[string]interface{}) error {
 	return nil
 }
 
-func resolveListPath(path string) (string, error) {
+func resolveListPath(ctx context.Context, path string) (string, error) {
 	if strings.TrimSpace(path) == "" || path == "." {
-		workdir, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("failed to determine working directory: %v", err)
-		}
-		return workdir, nil
+		return configFromContext(ctx).WorkingDirectory, nil
 	}
-	return validatePathWithinWorkdir(path)
+	return resolveToolPathContext(ctx, path)
 }
 
 func filterHiddenOutput(output, root string) string {

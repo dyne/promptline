@@ -92,3 +92,30 @@ func TestServerRejectsInvalidCall(t *testing.T) {
 		t.Fatalf("unexpected response: %s", output.String())
 	}
 }
+
+func TestServerIncludesToolErrorText(t *testing.T) {
+	registry := tools.NewRegistry()
+	t.Cleanup(func() { _ = registry.Close() })
+	var output bytes.Buffer
+	server, err := NewServer(registry, strings.NewReader("{\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"missing\",\"arguments\":{}}}\n"), &output, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Serve(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Result.IsError || len(response.Result.Content) != 1 || response.Result.Content[0].Text == "" {
+		t.Fatalf("missing tool error detail: %s", output.String())
+	}
+}

@@ -92,8 +92,9 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 		return fmt.Errorf("open audit journal: %w", err)
 	}
 	defer journal.Close()
-	r.SetRequestHandler(func(requestCtx context.Context, request appserver.ServerRequest) error {
-		decision, decisionErr := governance.HandleServerRequest(requestCtx, governance.Policy{Roots: []string{in.WorkingRoot()}}, nil, journal, request)
+	r.SetRequestHandler(func(requestCtx context.Context, request appserver.ServerRequest, approvalInput io.Reader) error {
+		prompt := governance.TerminalPrompt{Input: approvalInput, Output: output}
+		decision, decisionErr := governance.HandleServerRequest(requestCtx, governance.Policy{Roots: []string{in.WorkingRoot()}}, prompt, journal, request)
 		if decisionErr != nil {
 			decision = map[string]string{"decision": string(governance.DecisionDecline)}
 		}
