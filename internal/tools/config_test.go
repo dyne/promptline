@@ -75,6 +75,10 @@ func TestRegistryExecuteContext_CancellationAndClose(t *testing.T) {
 
 func TestRegistryFilesystemToolsUseConfiguredWorkingDirectoryAndRoots(t *testing.T) {
 	root := t.TempDir()
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "inside.txt"), []byte("inside"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -94,8 +98,8 @@ func TestRegistryFilesystemToolsUseConfiguredWorkingDirectoryAndRoots(t *testing
 	if result := registry.ExecuteContext(context.Background(), "read_file", map[string]any{"path": filepath.Join(outside, "outside.txt")}); result.Error == nil {
 		t.Fatal("read outside configured roots succeeded")
 	}
-	if result := registry.ExecuteContext(context.Background(), "pwd", map[string]any{}); result.Error != nil || result.Result != root {
-		t.Fatalf("configured working directory = %#v, want %q", result, root)
+	if result := registry.ExecuteContext(context.Background(), "pwd", map[string]any{}); result.Error != nil || result.Result != resolvedRoot {
+		t.Fatalf("configured working directory = %#v, want %q", result, resolvedRoot)
 	}
 }
 
