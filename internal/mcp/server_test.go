@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -69,11 +71,35 @@ func TestCodexConfigIsInstanceScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "mcp-test") || !strings.Contains(string(data), "toolbox") {
+	config := string(data)
+	if !strings.Contains(config, "[mcp_servers.promptline-toolbox]") ||
+		!strings.Contains(config, `command = "/usr/local/bin/promptline"`) ||
+		!strings.Contains(config, `"--instance", "mcp-test"`) {
 		t.Fatalf("unexpected config: %s", data)
+	}
+	if strings.HasPrefix(strings.TrimSpace(config), "{") {
+		t.Fatalf("Codex config must be TOML, got JSON: %s", data)
 	}
 	if _, err := CodexConfig("promptline", in); err == nil {
 		t.Fatal("relative executable accepted")
+	}
+	if err := InstallCodexConfig("/usr/local/bin/promptline", in); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(in.CodexHome(), "config.toml")
+	installed, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(installed) != config {
+		t.Fatalf("installed config differs:\n%s", installed)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("config mode = %o, want 600", info.Mode().Perm())
 	}
 }
 
