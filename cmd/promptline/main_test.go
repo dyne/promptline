@@ -57,6 +57,19 @@ func TestExitCodeReturnsSuccessForVersion(t *testing.T) {
 	}
 }
 
+func TestExitCodeReturnsSuccessForHelp(t *testing.T) {
+	var stderr bytes.Buffer
+	if code := exitCode([]string{"--help"}, nil, io.Discard, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("Usage of promptline:")) {
+		t.Fatalf("missing help output: %q", stderr.String())
+	}
+	if bytes.Contains(stderr.Bytes(), []byte("promptline: flag: help requested")) {
+		t.Fatalf("help was reported as fatal: %q", stderr.String())
+	}
+}
+
 func TestApprovalPromptHonorsMode(t *testing.T) {
 	if prompt := approvalPrompt(instance.ApprovalDeny, nil, io.Discard); prompt != nil {
 		t.Fatal("deny mode created an interactive prompt")
