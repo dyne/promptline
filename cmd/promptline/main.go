@@ -78,6 +78,22 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	if in.ToolboxEnabled() {
+		executable, err := os.Executable()
+		if err != nil {
+			_ = lock.Close()
+			return fmt.Errorf("resolve Promptline executable: %w", err)
+		}
+		executable, err = filepath.EvalSymlinks(executable)
+		if err != nil {
+			_ = lock.Close()
+			return fmt.Errorf("resolve Promptline executable symlinks: %w", err)
+		}
+		if err := mcp.InstallCodexConfig(executable, in); err != nil {
+			_ = lock.Close()
+			return err
+		}
+	}
 	process, err := appserver.Start(ctx, in)
 	if err != nil {
 		_ = lock.Close()

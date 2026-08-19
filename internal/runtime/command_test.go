@@ -27,3 +27,20 @@ func TestParse(t *testing.T) {
 		})
 	}
 }
+
+func TestParseToolboxDefaultsOnAndCanBeDisabled(t *testing.T) {
+	command, err := Parse([]string{"--cwd", "."}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !command.Instance.ToolboxEnabled {
+		t.Fatal("toolbox should be enabled by default")
+	}
+	command, err = Parse([]string{"--cwd", ".", "--toolbox=false"}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command.Instance.ToolboxEnabled {
+		t.Fatal("--toolbox=false did not disable toolbox")
+	}
+}

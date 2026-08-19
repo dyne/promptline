@@ -32,6 +32,7 @@ func Parse(args []string, stderr io.Writer) (Command, error) {
 	fs.StringVar(&c.Instance.StateRoot, "state-root", "", "private state root")
 	fs.StringVar(&c.Instance.CodexExecutable, "codex", "codex", "Codex executable")
 	fs.StringVar(&c.Instance.Model, "model", "", "Codex model")
+	fs.BoolVar(&c.Instance.ToolboxEnabled, "toolbox", true, "enable the instance toolbox MCP server")
 	fs.BoolVar(&c.New, "new", false, "start a new primary thread")
 	fs.StringVar(&c.ResumeID, "resume", "", "resume this primary thread ID")
 	fs.BoolVar(&c.Debug, "debug", false, "enable terminal diagnostics")
