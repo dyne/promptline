@@ -16,7 +16,13 @@
 
 package main
 
-import "testing"
+import (
+	"io"
+	"testing"
+
+	"promptline/internal/governance"
+	"promptline/internal/instance"
+)
 
 func TestVersionVariable(t *testing.T) {
 	// Test that Version variable exists and has default value
@@ -27,5 +33,15 @@ func TestVersionVariable(t *testing.T) {
 	// Default value should be "dev" if not set via ldflags
 	if Version != "dev" {
 		t.Logf("Note: Version is set to %q (may be set via ldflags)", Version)
+	}
+}
+
+func TestApprovalPromptHonorsMode(t *testing.T) {
+	if prompt := approvalPrompt(instance.ApprovalDeny, nil, io.Discard); prompt != nil {
+		t.Fatal("deny mode created an interactive prompt")
+	}
+	prompt := approvalPrompt(instance.ApprovalAsk, nil, io.Discard)
+	if _, ok := prompt.(governance.TerminalPrompt); !ok {
+		t.Fatalf("ask mode prompt = %T, want TerminalPrompt", prompt)
 	}
 }

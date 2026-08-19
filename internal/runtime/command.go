@@ -33,6 +33,8 @@ func Parse(args []string, stderr io.Writer) (Command, error) {
 	fs.StringVar(&c.Instance.CodexExecutable, "codex", "codex", "Codex executable")
 	fs.StringVar(&c.Instance.Model, "model", "", "Codex model")
 	fs.BoolVar(&c.Instance.ToolboxEnabled, "toolbox", true, "enable the instance toolbox MCP server")
+	approvalMode := string(instance.ApprovalDeny)
+	fs.StringVar(&approvalMode, "approval", approvalMode, "approval mode: deny or ask")
 	fs.BoolVar(&c.New, "new", false, "start a new primary thread")
 	fs.StringVar(&c.ResumeID, "resume", "", "resume this primary thread ID")
 	fs.BoolVar(&c.Debug, "debug", false, "enable terminal diagnostics")
@@ -45,6 +47,10 @@ func Parse(args []string, stderr io.Writer) (Command, error) {
 	}
 	if c.New && c.ResumeID != "" {
 		return Command{}, errors.New("--new and --resume are mutually exclusive")
+	}
+	c.Instance.ApprovalMode = instance.ApprovalMode(approvalMode)
+	if c.Instance.ApprovalMode != instance.ApprovalDeny && c.Instance.ApprovalMode != instance.ApprovalAsk {
+		return Command{}, fmt.Errorf("invalid approval mode %q", approvalMode)
 	}
 	if c.Version {
 		return c, nil
