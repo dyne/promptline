@@ -278,12 +278,13 @@ func (r *Registry) ExecuteContextWithOptions(ctx context.Context, function strin
 		defer cancel()
 	}
 
+	if err := tool.Validate(args); err != nil {
+		result.Error = fmt.Errorf("%w: %v", ErrInvalidArguments, err)
+		result.Result = fmt.Sprintf("Error: %v", result.Error)
+		return result
+	}
+
 	if opts.DryRun {
-		if err := tool.Validate(args); err != nil {
-			result.Error = fmt.Errorf("%w: %v", ErrInvalidArguments, err)
-			result.Result = fmt.Sprintf("Error: %v", result.Error)
-			return result
-		}
 		result.Result = formatDryRunResult(function, args)
 		return result
 	}

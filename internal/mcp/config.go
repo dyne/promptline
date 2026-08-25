@@ -12,18 +12,10 @@ import (
 	"promptline/internal/tools"
 )
 
-var readOnlyTools = []string{
-	"base64", "basename", "cat", "cmp", "comm", "date", "df", "dirname",
-	"du", "echo", "find", "free", "get_current_datetime", "grep", "head",
-	"hexdump", "hostname", "id", "ls", "md5sum", "more", "pidof", "printenv",
-	"ps", "pwd", "read_file", "readlink", "realpath", "seq", "shasum", "sort",
-	"strings", "tail", "tr", "tty", "uname", "uniq", "uptime", "wc", "which",
-}
-
 // ReadOnlyToolPolicy allows observation-only tools in the noninteractive MCP
 // subprocess. Mutating tools remain ask-by-default and therefore fail closed.
 func ReadOnlyToolPolicy() tools.Policy {
-	return tools.PolicyFromLists(readOnlyTools, nil, nil)
+	return tools.ReadOnlyToolPolicy()
 }
 
 // CodexConfig returns the complete Promptline-owned Codex configuration for an

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -137,6 +138,29 @@ func TestRegistryRegisterToolRejectsEmptyAndDuplicateNames(t *testing.T) {
 	}
 }
 
+func TestRegistryExecuteContextValidatesBeforeExecution(t *testing.T) {
+	registry := NewRegistry()
+	t.Cleanup(func() { _ = registry.Close() })
+	executed := false
+	if err := registry.RegisterTool(&ToolDefinition{
+		NameValue:    "validated",
+		ValidateFunc: func(map[string]interface{}) error { return errors.New("bad arguments") },
+		ExecuteFunc: func(context.Context, map[string]interface{}) (string, error) {
+			executed = true
+			return "unexpected", nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result := registry.ExecuteContextWithOptions(t.Context(), "validated", nil, ExecuteOptions{Force: true})
+	if !errors.Is(result.Error, ErrInvalidArguments) {
+		t.Fatalf("error = %v, want invalid arguments", result.Error)
+	}
+	if executed {
+		t.Fatal("tool executed after validation failed")
+	}
+}
+
 func TestRegistryRoots_RejectPrefixCollisionAndSymlinkEscape(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -185,5 +209,54 @@ func TestURootScopedRoots_RejectOutsideAndCrossRootPaths(t *testing.T) {
 		"destination": filepath.Join(otherRoot, "copy.txt"),
 	}); result.Error == nil {
 		t.Fatal("cross-root copy was allowed")
+	}
+}
+
+func TestRegistryRepresentativeToolBoundaries(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "visible.txt"), []byte("visible"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".hidden.txt"), []byte("hidden"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := NewRegistryWithConfig(Config{
+		WorkingDirectory: root,
+		Roots:            []string{root},
+		Policy:           PolicyFromLists([]string{"cat", "ls", "mkdir"}, nil, nil),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+
+	tests := []struct {
+		name string
+		tool string
+		args map[string]interface{}
+		want string
+	}{
+		{name: "cat text", tool: "cat", args: map[string]interface{}{"path": "visible.txt"}, want: "visible"},
+		{name: "ls omits hidden by default", tool: "ls", args: map[string]interface{}{"path": "."}, want: "visible.txt"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := registry.ExecuteContext(t.Context(), tt.tool, tt.args)
+			if result.Error != nil || !strings.Contains(result.Result, tt.want) {
+				t.Fatalf("%s result = %#v, want %q", tt.tool, result, tt.want)
+			}
+		})
+	}
+
+	if result := registry.ExecuteContextWithOptions(t.Context(), "mkdir", map[string]interface{}{"path": "validated-only"}, ExecuteOptions{DryRun: true}); result.Error != nil {
+		t.Fatalf("dry-run validation failed: %v", result.Error)
+	}
+	if _, err := os.Stat(filepath.Join(root, "validated-only")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run changed filesystem: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if result := registry.ExecuteContext(ctx, "cat", map[string]interface{}{"path": "visible.txt"}); !errors.Is(result.Error, context.Canceled) {
+		t.Fatalf("cancelled cat error = %v", result.Error)
 	}
 }
