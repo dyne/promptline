@@ -51,3 +51,42 @@ turn completion, tool results, persisted state, and clean shutdown.
 
 Secret redaction is an exception: it is a safety transformation independent of
 layout and remains covered by semantic tests.
+
+## Local targets and release gate
+
+Run all commands from the repository root. The Makefile defaults to Go 1.24 at
+`/usr/local/go/bin/go` and puts compilation cache data in `.gocache`; set `GO`
+or `GOCACHE` only when an explicit local override is needed.
+
+- `make test-unit` is the fast default loop.
+- `make test-protocol` runs the app-server and MCP wire-contract packages.
+- `make test-integration` and `make test-race-integration` run the isolated
+  subprocess scenarios, with and without the race detector.
+- `make test-stress` repeats the concurrent boundary packages under `-race`.
+- `make test-fuzz-smoke` fuzzes selected bounded protocol and path parsers for
+  five seconds each; it is a smoke gate, not a coverage measurement.
+- `make check-coverage` prints and enforces the behavioral-boundary floors.
+- `make vet`, `make benchmarks`, and `make build-linux`, `make build-darwin`,
+  and `make build-windows` supply static, performance-smoke, and portability
+  evidence. `make test-all` runs the complete local release gate.
+
+All targets fail on their first failed command. Temporary coverage profiles are
+created under the system temporary directory and removed by their script; no
+target writes generated files into tracked package directories.
+
+## Behavior-weighted coverage policy
+
+`scripts/check-coverage.sh` reports statement coverage separately for the
+app-server, governance, instance, MCP, paths, runtime, and toolbox packages.
+Its floors are 87%, 84%, 76%, 81%, 84%, 74%, and 67%, respectively. They are
+rounded down from the post-refactor behavioral suites so the gate catches a
+meaningful regression without turning small compiler or Go-version differences
+into noise.
+
+The command entrypoint, `main`, and replaceable terminal adapters are excluded
+from hard floors. Their low-value statement count would otherwise reward prompt
+snapshots, formatting branches, and trivial getters. Coverage is one signal:
+race, stress, fuzz, integration, and portability gates remain independent
+requirements. To check that the failure path works locally, temporarily raise
+one package floor in the script, run `make check-coverage`, and restore the
+unchanged floor before committing.

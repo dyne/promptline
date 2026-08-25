@@ -30,6 +30,10 @@ GOCACHE="$PWD/.gocache" /usr/local/go/bin/go test ./...
 GOCACHE="$PWD/.gocache" /usr/local/go/bin/go test -tags=integration ./...
 ```
 
+For focused protocol, race, fuzz, coverage, benchmark, and portability
+commands, use the repository Make targets in [docs/TESTING.md](docs/TESTING.md).
+`make test-all` is the complete local release gate.
+
 The integration suite runs against a local mock Codex app-server and exercises
 the real Promptline toolbox MCP server with basic embedded u-root tools. It does
 not require network access, Codex credentials, or a live account. Tests select
@@ -69,9 +73,9 @@ Each instance has private `0700` state under
 record, lock, and audit journal. Stop with `/quit`, EOF, or `SIGTERM`. `Ctrl-C`
 interrupts an active turn; it does not create another thread.
 
-After a prompt is accepted, Promptline prints `[ working ]`, streams agent text
-as it arrives, reports tool lifecycle progress, and surfaces app-server turn
-errors before returning to the `>` prompt.
+After a prompt is accepted, Promptline streams the resulting turn and returns
+to input only after the turn completes or fails. Its behavioral tests observe
+typed lifecycle events and persisted effects rather than terminal wording.
 
 When `--state-root` is omitted, Promptline creates and uses
 `~/.promptline/instances` for a regular user and
@@ -95,9 +99,9 @@ the app-server transport closes.
 
 `promptline mcp-server` is a standalone stdio MCP server exposing the embedded
 Go/u-root toolbox to Codex or another MCP harness. It does not start Codex,
-create an instance, acquire a lock, or open a network listener. The
+create an instance, acquire a lock, or open a network listener.
 Before showing the first prompt, Promptline requires Codex to report this server
-with its core tools and prints `[ toolbox ready: N tools ]`. New and resumed
+with its core tools. New and resumed
 threads receive the same tool schemas in a model-facing `toolbox` namespace and
 instruct Codex to prefer it over the built-in shell for supported Unix
 operations. Calls to that namespace are routed through app-server's
@@ -143,8 +147,9 @@ rather than producing repeated reconnect messages and a later HTTP 401.
 
 Promptline has no daemon, control socket, WebSocket transport, automatic
 restart, automatic tmux integration, second model runtime, internal database,
-or search/index service. See [the architecture](docs/ARCHITECTURE.md)
-and [toolbox documentation](docs/TOOLS.md) for boundaries and portability.
+or search/index service. See [the architecture](docs/ARCHITECTURE.md),
+[toolbox documentation](docs/TOOLS.md), and [test guidance](docs/TESTING.md)
+for boundaries, portability, and maintenance commands.
 
 ## License
 

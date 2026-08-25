@@ -10,10 +10,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -29,11 +26,12 @@ jobs:
         shell: bash
         run: |
           test -z "$(gofmt -l .)"
-          go vet ./...
-      - name: Test
+          make vet
+      - name: Unit and protocol contracts
         run: |
-          go test -count=1 ./...
-          go test -race -count=1 ./...
+          make test-unit
+          make test-protocol
+          make check-coverage
       - name: Verify dependency and protocol surface
         shell: bash
         run: |
@@ -44,9 +42,57 @@ jobs:
           ./promptline --version
           ./promptline --help
 
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/cache@v4
+        with:
+          path: .gocache
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+      - run: make test-integration
+
+  race-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/cache@v4
+        with:
+          path: .gocache
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+      - run: make test-race-integration
+      - run: make test-stress
+
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make test-fuzz-smoke
+
+  compile:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [linux, darwin, windows]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make build-${{ matrix.target }}
+
   semantic-versioning:
     name: 🤖 Semantic versioning
-    needs: [build-and-test]
+    needs: [build-and-test, integration, race-integration, fuzz-smoke, compile]
     runs-on: ubuntu-latest
     outputs:
       new_release_published: ${{ steps.semantic-release.outputs.new_release_published }}
