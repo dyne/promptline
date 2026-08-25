@@ -29,12 +29,12 @@ import (
 	"runtime/debug"
 	"syscall"
 
+	"promptline/internal/application"
 	"promptline/internal/appserver"
 	"promptline/internal/governance"
 	"promptline/internal/instance"
 	"promptline/internal/mcp"
 	pruntime "promptline/internal/runtime"
-	"promptline/internal/tools"
 )
 
 // Version is set at build time via ldflags. Defaults to "dev".
@@ -66,11 +66,7 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 		return printVersionReport(output, cmd.Instance.CodexExecutable)
 	}
 	if cmd.ToolboxServe {
-		toolConfig := tools.DefaultConfig()
-		toolConfig.WorkingDirectory = cmd.Instance.WorkingDirectory
-		toolConfig.Roots = []string{cmd.Instance.WorkingRoot}
-		toolConfig.Policy = mcp.ReadOnlyToolPolicy()
-		registry, err := tools.NewRegistryWithConfig(toolConfig)
+		registry, err := application.Toolbox(cmd.Instance.WorkingDirectory, cmd.Instance.WorkingRoot)
 		if err != nil {
 			return err
 		}
@@ -93,11 +89,7 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 	defer cancel()
 	var dynamicTools []appserver.DynamicToolNamespace
 	if in.ToolboxEnabled() {
-		toolConfig := tools.DefaultConfig()
-		toolConfig.WorkingDirectory = in.WorkingDirectory()
-		toolConfig.Roots = []string{in.WorkingRoot()}
-		toolConfig.Policy = mcp.ReadOnlyToolPolicy()
-		registry, registryErr := tools.NewRegistryWithConfig(toolConfig)
+		registry, registryErr := application.Toolbox(in.WorkingDirectory(), in.WorkingRoot())
 		if registryErr != nil {
 			_ = lock.Close()
 			return fmt.Errorf("describe toolbox tools: %w", registryErr)

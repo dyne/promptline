@@ -22,6 +22,7 @@ var (
 	ErrNoStoredThread         = errors.New("no saved primary thread is available to resume")
 	ErrAuthenticationRequired = errors.New("codex authentication required")
 	ErrToolboxUnavailable     = errors.New("promptline toolbox MCP server is unavailable")
+	errNoPrimaryThread        = errors.New("no primary thread selected")
 )
 
 // API is the deliberately small app-server surface used by the terminal.
@@ -107,24 +108,17 @@ type Options struct {
 
 // Runtime has one selected thread and serializes turns for one instance.
 type Runtime struct {
-	instance           *instance.Instance
-	api                Client
-	process            Process
-	lock               *instance.Lock
-	threadID           string
-	mu                 sync.Mutex
-	turnID             string
-	closing            bool
-	closeOnce          sync.Once
-	closeErr           error
-	requests           requestClient
-	handler            RequestHandler
-	streamedAgentItems map[string]struct{}
-	turnHasOutput      bool
-	streamOpen         bool
-	turnErrorRendered  bool
-	toolboxTools       int
-	observer           Observer
+	instance     *instance.Instance
+	api          Client
+	process      Process
+	lock         *instance.Lock
+	closeOnce    sync.Once
+	closeErr     error
+	requests     requestClient
+	handler      RequestHandler
+	state        runtimeState
+	toolboxTools int
+	observer     Observer
 }
 
 func New(in *instance.Instance, api Client, process Process, lock *instance.Lock) (*Runtime, error) {
@@ -132,11 +126,11 @@ func New(in *instance.Instance, api Client, process Process, lock *instance.Lock
 		return nil, errors.New("runtime requires instance, client, process, and lock")
 	}
 	r := &Runtime{
-		instance:           in,
-		api:                api,
-		process:            process,
-		lock:               lock,
-		streamedAgentItems: map[string]struct{}{},
+		instance: in,
+		api:      api,
+		process:  process,
+		lock:     lock,
+		state:    newRuntimeState(),
 	}
 	if requests, ok := api.(requestClient); ok {
 		r.requests = requests
@@ -215,9 +209,7 @@ func (r *Runtime) Start(ctx context.Context, opts Options, version string) error
 	if thread.ID == "" {
 		return errors.New("app-server returned a thread without an ID")
 	}
-	r.mu.Lock()
-	r.threadID = thread.ID
-	r.mu.Unlock()
+	r.state.setThread(thread.ID)
 	if r.instance.ToolboxEnabled() {
 		toolCount, err := r.requireToolbox(ctx, thread.ID)
 		if err != nil {
@@ -252,60 +244,38 @@ func (r *Runtime) requireToolbox(ctx context.Context, threadID string) (int, err
 	return 0, fmt.Errorf("%w: Codex did not load promptline-toolbox from its instance config", ErrToolboxUnavailable)
 }
 
-func (r *Runtime) ThreadID() string { r.mu.Lock(); defer r.mu.Unlock(); return r.threadID }
+func (r *Runtime) ThreadID() string { return r.state.thread() }
 
-func (r *Runtime) HasActiveTurn() bool { r.mu.Lock(); defer r.mu.Unlock(); return r.turnID != "" }
+func (r *Runtime) HasActiveTurn() bool { return r.state.hasActiveTurn() }
 
 func (r *Runtime) StartTurn(ctx context.Context, text string) (appserver.Turn, error) {
-	r.mu.Lock()
-	if r.closing {
-		r.mu.Unlock()
-		return appserver.Turn{}, ErrShuttingDown
-	}
-	if r.turnID != "" {
-		r.mu.Unlock()
-		return appserver.Turn{}, ErrActiveTurn
-	}
-	threadID := r.threadID
-	r.mu.Unlock()
-	if threadID == "" {
-		return appserver.Turn{}, errors.New("no primary thread selected")
+	threadID, err := r.state.beginTurn()
+	if err != nil {
+		return appserver.Turn{}, err
 	}
 	turn, err := r.api.StartTurn(ctx, threadID, text, "", r.instance.Model())
 	if err != nil {
+		r.state.rejectTurn()
 		return appserver.Turn{}, fmt.Errorf("start turn: %w", err)
 	}
 	if turn.ID == "" {
+		r.state.rejectTurn()
 		return appserver.Turn{}, errors.New("app-server returned a turn without an ID")
 	}
-	r.mu.Lock()
-	r.turnID = turn.ID
-	r.streamedAgentItems = map[string]struct{}{}
-	r.turnHasOutput = false
-	r.streamOpen = false
-	r.turnErrorRendered = false
-	r.mu.Unlock()
+	r.state.acceptTurn(turn.ID)
 	r.observe(Event{Kind: EventTurnAccepted, ThreadID: threadID, TurnID: turn.ID})
 	return turn, nil
 }
 
 func (r *Runtime) Interrupt(ctx context.Context) error {
-	r.mu.Lock()
-	threadID, turnID := r.threadID, r.turnID
-	r.mu.Unlock()
+	threadID, turnID := r.state.activeTurn()
 	if turnID == "" {
 		return nil
 	}
 	return r.api.Interrupt(ctx, threadID, turnID)
 }
 
-func (r *Runtime) completeTurn(turnID string) {
-	r.mu.Lock()
-	if r.turnID == turnID {
-		r.turnID = ""
-	}
-	r.mu.Unlock()
-}
+func (r *Runtime) completeTurn(turnID string) bool { return r.state.completeTurn(turnID) }
 
 // Run reads one foreground terminal stream. It never reads or writes protocol stdout.
 func (r *Runtime) Run(ctx context.Context, input io.Reader, render Renderer) error {
@@ -420,9 +390,7 @@ func (r *Runtime) handleDynamicToolCall(ctx context.Context, request appserver.S
 	if err := json.Unmarshal(request.Params, &call); err != nil {
 		return r.replyDynamicToolError(ctx, request.ID, "invalid toolbox call: "+err.Error())
 	}
-	r.mu.Lock()
-	threadID := r.threadID
-	r.mu.Unlock()
+	threadID := r.state.thread()
 	if call.Namespace != "toolbox" || call.Tool == "" || call.ThreadID != threadID {
 		return r.replyDynamicToolError(ctx, request.ID, "invalid toolbox namespace, tool, or thread")
 	}
@@ -515,13 +483,7 @@ func (r *Runtime) renderEvent(event appserver.Event, render Renderer) error {
 		return nil
 	} // additive notifications are not terminal UI errors
 	if item.Type == "agentMessage" || item.Type == "text" {
-		r.mu.Lock()
-		_, streamed := r.streamedAgentItems[item.ID]
-		if !streamed && item.Text != "" {
-			r.turnHasOutput = true
-		}
-		r.mu.Unlock()
-		if streamed || item.Text == "" {
+		if r.state.reduceItem(item.ID, item.Text) {
 			return nil
 		}
 		return render.Text(item.Text)
@@ -539,23 +501,13 @@ func (r *Runtime) renderAgentMessageDelta(params []byte, render Renderer) error 
 	if err != nil || delta.Delta == "" {
 		return nil
 	}
-	r.mu.Lock()
-	r.streamedAgentItems[delta.ItemID] = struct{}{}
-	r.turnHasOutput = true
-	r.streamOpen = true
-	r.mu.Unlock()
+	r.state.markDelta(delta.ItemID)
 	return render.Delta(delta.Delta)
 }
 
 func (r *Runtime) renderTurnCompletion(params []byte, render Renderer) error {
 	completion, _ := appserver.DecodeTurnCompletion(params)
-	r.mu.Lock()
-	turnID := r.turnID
-	streamOpen := r.streamOpen
-	hasOutput := r.turnHasOutput
-	errorRendered := r.turnErrorRendered
-	r.streamOpen = false
-	r.mu.Unlock()
+	turnID, streamOpen, hasOutput, errorRendered := r.state.beginCompletion()
 	if streamOpen {
 		if err := render.Text(""); err != nil {
 			return err
@@ -571,8 +523,7 @@ func (r *Runtime) renderTurnCompletion(params []byte, render Renderer) error {
 			return err
 		}
 	}
-	r.completeTurn(turnID)
-	if turnID != "" {
+	if r.completeTurn(turnID) {
 		kind := EventTurnCompleted
 		if completion.Status == "failed" {
 			kind = EventTurnFailed
@@ -587,11 +538,7 @@ func (r *Runtime) renderErrorEvent(params []byte, render Renderer) error {
 	if err != nil {
 		return nil
 	}
-	r.mu.Lock()
-	streamOpen := r.streamOpen
-	r.streamOpen = false
-	r.turnErrorRendered = true
-	r.mu.Unlock()
+	streamOpen := r.state.beginError()
 	if streamOpen {
 		if err := render.Text(""); err != nil {
 			return err
@@ -604,10 +551,7 @@ func (r *Runtime) Close(ctx context.Context) error {
 	r.closeOnce.Do(func() {
 		closeCtx, cancel := context.WithTimeout(ctx, r.instance.Timeouts().Shutdown)
 		defer cancel()
-		r.mu.Lock()
-		r.closing = true
-		threadID := r.threadID
-		r.mu.Unlock()
+		threadID := r.state.beginShutdown()
 		var errs []error
 		if threadID != "" {
 			if err := r.api.Unsubscribe(closeCtx, threadID); err != nil {
