@@ -33,3 +33,8 @@ Validator checks are most valuable when:
 - Handling malformed MCP requests
 - Enforcing filesystem and resource boundaries
 - Maintaining compatibility with a versioned Codex app-server protocol
+
+Validation failures are returned as typed or wrapped errors at the protocol and
+tool boundaries. Tests assert semantic outcomes and structured tool results,
+not terminal prompts or error formatting. Run `make test-protocol` for focused
+checks and `make test-all` before release work.

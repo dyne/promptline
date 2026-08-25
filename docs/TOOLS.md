@@ -31,11 +31,13 @@ system-information, and utility operations registered by `internal/tools`.
 primitives. Unix-only operations such as `mkfifo` report unsupported-platform
 errors where unavailable.
 
-To add a tool, register a context-aware implementation in
-`internal/tools/builtin.go` or `internal/tools/builtin_uroot.go`. Define a
-schema, validate arguments, enforce the scoped-root policy, observe the caller
-context, and return bounded structured output. Do not add provider-specific
-model types or shell execution.
+To add a tool, add a context-aware implementation and catalog entry under
+`internal/tools`. The catalog is authoritative for registration and the
+read-only/mutating policy class. Define an object schema, validate arguments,
+enforce the scoped-root policy, observe the caller context, and return bounded
+structured output. Update the catalog contract tests so registry, MCP list, and
+dynamic definitions stay aligned. Do not add provider-specific model types or
+shell execution.
 
 New integrations use the stable stdio MCP surface and remain subject to the
 same instance approval and audit boundaries.

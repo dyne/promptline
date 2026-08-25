@@ -166,7 +166,7 @@ func TestProcess_CloseDeadlineKillsUncooperativeChild(t *testing.T) {
 		if open {
 			t.Fatal("wait result was not consumed by Close")
 		}
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("wait channel was not closed")
 	}
 }

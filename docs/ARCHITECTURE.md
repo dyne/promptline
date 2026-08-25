@@ -65,6 +65,22 @@ the instance-private `CODEX_HOME` has no account, startup fails with the exact
 instance-scoped `codex login` command. Test fixtures are selected explicitly
 with `--mock-codex PATH`; normal operation never silently falls back to a mock.
 
+## Package ownership
+
+`cmd/promptline` parses canonical command forms and owns process signals.
+`internal/application` composes the instance, app-server process, toolbox,
+governance journal, runtime, and ordered cleanup. `internal/runtime` owns
+session and turn orchestration, semantic events, dynamic-tool routing, and the
+terminal adapter at the edge. `internal/appserver` owns bounded JSON-RPC
+transport and child lifecycle; `internal/mcp` owns the standalone server and
+dynamic definitions.
+
+`internal/instance`, `internal/paths`, and `internal/governance` enforce
+durable state, filesystem confinement, approvals, and audit records.
+`internal/tools` owns the authoritative tool catalog, policy classification,
+schemas, and capability implementations. The test layers and targets are in
+[TESTING.md](TESTING.md).
+
 ## Deliberate non-goals
 
 Promptline has no daemon, control socket, internal session multiplexing, second
