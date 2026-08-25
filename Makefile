@@ -2,7 +2,9 @@
 
 .PHONY: build install clean test test-unit test-protocol test-integration test-race test-race-integration test-stress test-fuzz-smoke coverage check-coverage help release fmt vet benchmarks build-linux build-darwin build-windows test-all
 
-GO ?= /usr/local/go/bin/go
+# Use the Go executable supplied by the environment (including GitHub Actions).
+# Local contributors may override this, for example GO=/usr/local/go/bin/go.
+GO ?= go
 GOCACHE ?= $(CURDIR)/.gocache
 GOOS ?= $(shell $(GO) env GOOS)
 GOARCH ?= $(shell $(GO) env GOARCH)
