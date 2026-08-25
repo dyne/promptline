@@ -1,7 +1,6 @@
 package governance
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -178,37 +177,61 @@ func sanitizeMetadata(metadata map[string]any) map[string]any {
 			out[key] = "[REDACTED]"
 			continue
 		}
-		if text, ok := value.(string); ok {
-			out[key] = strings.Map(func(r rune) rune {
-				if r < 0x20 && r != '\t' {
-					return -1
-				}
-				return r
-			}, text)
-		} else {
-			out[key] = value
-		}
+		out[key] = sanitizeMetadataValue(value)
 	}
 	return out
+}
+
+func sanitizeMetadataValue(value any) any {
+	switch typed := value.(type) {
+	case string:
+		return strings.Map(func(r rune) rune {
+			if r < 0x20 && r != '\t' {
+				return -1
+			}
+			return r
+		}, typed)
+	case map[string]any:
+		return sanitizeMetadata(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for n, item := range typed {
+			out[n] = sanitizeMetadataValue(item)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 // RecoverJournal ignores one incomplete final line left by a crash. It rejects
 // malformed complete records so corruption remains diagnosable.
 func RecoverJournal(path string) error {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	s := bufio.NewScanner(f)
-	for s.Scan() {
+	complete := bytes.HasSuffix(data, []byte{'\n'})
+	lines := bytes.Split(data, []byte{'\n'})
+	last := len(lines) - 1
+	if complete {
+		last-- // Split leaves one empty item after a trailing newline.
+	}
+	for index := 0; index <= last; index++ {
+		line := bytes.TrimSpace(lines[index])
+		if len(line) == 0 {
+			continue
+		}
 		var event Event
-		if err := json.Unmarshal(bytes.TrimSpace(s.Bytes()), &event); err != nil {
+		if err := json.Unmarshal(line, &event); err != nil {
+			if index == last && !complete {
+				return nil // A crash may leave only the final record incomplete.
+			}
 			return fmt.Errorf("invalid audit record: %w", err)
 		}
 	}
-	return s.Err()
+	return nil
 }

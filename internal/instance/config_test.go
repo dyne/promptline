@@ -42,6 +42,32 @@ func TestResolveStateRootByPrivilege(t *testing.T) {
 	}
 }
 
+func TestResolveStateRootRejectsUnsafeInputs(t *testing.T) {
+	home := t.TempDir()
+	for _, tc := range []struct {
+		name     string
+		euid     int
+		supplied string
+		home     string
+		wantErr  bool
+	}{
+		{name: "clean explicit root", euid: 1000, supplied: filepath.Join(home, "state"), home: home},
+		{name: "cleaned explicit root", euid: 1000, supplied: filepath.Join(home, "state", "..", "state"), home: home},
+		{name: "relative root", euid: 1000, supplied: "state", home: home, wantErr: true},
+		{name: "empty user home", euid: 1000, home: "", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveStateRoot(tc.euid, tc.supplied, tc.home)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("resolveStateRoot() error = %v, wantErr %t", err, tc.wantErr)
+			}
+			if err == nil && (!filepath.IsAbs(got) || filepath.Clean(got) != got) {
+				t.Fatalf("resolved root = %q, want clean absolute path", got)
+			}
+		})
+	}
+}
+
 func TestNewCreatesMissingStateRoot(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "nested", "instances")
 	in, err := New(Config{Name: "one", StateRoot: stateRoot, WorkingRoot: t.TempDir()})
@@ -105,5 +131,35 @@ func TestNewRejectsUnsafeRootsAndWorkingDirectories(t *testing.T) {
 		if _, err := New(cfg); err == nil {
 			t.Fatalf("New(%+v) unexpectedly succeeded", cfg)
 		}
+	}
+}
+
+func TestNewRejectsFilesystemShapesThatCouldEscapeStateRoot(t *testing.T) {
+	work := t.TempDir()
+	rootParent := t.TempDir()
+	fileRoot := filepath.Join(rootParent, "state-file")
+	if err := os.WriteFile(fileRoot, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stateRoot := filepath.Join(rootParent, "state")
+	if err := os.Mkdir(stateRoot, privateDirectoryMode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(stateRoot, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+	}{
+		{name: "file root", cfg: Config{Name: "one", StateRoot: fileRoot, WorkingRoot: work}},
+		{name: "symlink instance directory", cfg: Config{Name: "linked", StateRoot: stateRoot, WorkingRoot: work}},
+		{name: "working root is file", cfg: Config{Name: "one", StateRoot: stateRoot, WorkingRoot: fileRoot}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := New(tc.cfg); err == nil {
+				t.Fatal("New unexpectedly accepted unsafe filesystem shape")
+			}
+		})
 	}
 }
