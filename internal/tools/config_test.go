@@ -52,16 +52,15 @@ func TestRegistryExecuteContext_CancellationAndClose(t *testing.T) {
 	t.Parallel()
 	registry := NewRegistry()
 	t.Cleanup(func() { _ = registry.Close() })
-	if err := registry.RegisterTool(&ToolDefinition{NameValue: "context", VersionValue: "1", ExecuteFunc: func(ctx context.Context, _ map[string]interface{}) (string, error) {
+	if err := registry.RegisterTool(&ToolDefinition{NameValue: "context", ExecuteFunc: func(ctx context.Context, _ map[string]interface{}) (string, error) {
 		<-ctx.Done()
 		return "", ctx.Err()
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	registry.AllowTool("context", false)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	result := registry.ExecuteContext(ctx, "context", nil)
+	result := registry.ExecuteContextWithOptions(ctx, "context", nil, ExecuteOptions{Force: true})
 	if !errors.Is(result.Error, context.Canceled) || !errors.Is(result.Error, ErrToolCancelled) {
 		t.Fatalf("error = %v, want cancellation", result.Error)
 	}
@@ -110,16 +109,31 @@ func TestRegistryExecuteContext_Timeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = registry.Close() })
-	if err := registry.RegisterTool(&ToolDefinition{NameValue: "timeout", VersionValue: "1", ExecuteFunc: func(ctx context.Context, _ map[string]interface{}) (string, error) {
+	if err := registry.RegisterTool(&ToolDefinition{NameValue: "timeout", ExecuteFunc: func(ctx context.Context, _ map[string]interface{}) (string, error) {
 		<-ctx.Done()
 		return "", ctx.Err()
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	registry.AllowTool("timeout", false)
-	result := registry.ExecuteContext(t.Context(), "timeout", nil)
+	result := registry.ExecuteContextWithOptions(t.Context(), "timeout", nil, ExecuteOptions{Force: true})
 	if !errors.Is(result.Error, context.DeadlineExceeded) || !errors.Is(result.Error, ErrToolTimeout) {
 		t.Fatalf("error = %v, want timeout", result.Error)
+	}
+}
+
+func TestRegistryRegisterToolRejectsEmptyAndDuplicateNames(t *testing.T) {
+	registry := NewRegistry()
+	t.Cleanup(func() { _ = registry.Close() })
+
+	if err := registry.RegisterTool(&ToolDefinition{}); err == nil {
+		t.Fatal("empty tool name accepted")
+	}
+	tool := &ToolDefinition{NameValue: "unique"}
+	if err := registry.RegisterTool(tool); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.RegisterTool(tool); err == nil {
+		t.Fatal("duplicate tool name accepted")
 	}
 }
 

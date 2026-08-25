@@ -50,8 +50,6 @@ import (
 	coretouch "github.com/u-root/u-root/pkg/core/touch"
 )
 
-const urootToolVersion = "1.0.0"
-
 type urootCommand func(ctx context.Context, args []string) (string, error)
 
 func registerURootTools(r *Registry) {
@@ -66,7 +64,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "List directory contents",
 		ParametersValue:  mustSchemaParametersFor[lsArgs](),
 		ExecuteFunc:      executeLs,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -75,7 +72,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[catArgs](),
 		ExecuteFunc:      wrapURootCommand(buildCatArgs, runCat),
 		ValidateFunc:     validatePathsArg("paths", "path"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -84,7 +80,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[copyArgs](),
 		ExecuteFunc:      wrapURootCommand(buildCopyArgs, runCopy),
 		ValidateFunc:     validateRequiredStrings([]string{"destination"}, []string{"sources"}),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -93,7 +88,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[moveArgs](),
 		ExecuteFunc:      wrapURootCommand(buildMoveArgs, runMove),
 		ValidateFunc:     validateRequiredStrings([]string{"destination"}, []string{"sources"}),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -102,7 +96,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[removeArgs](),
 		ExecuteFunc:      wrapURootCommand(buildRemoveArgs, runRemove),
 		ValidateFunc:     validatePathsArg("paths", "path"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -111,7 +104,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[linkArgs](),
 		ExecuteFunc:      linkPath,
 		ValidateFunc:     validateRequiredStrings([]string{"target", "link_path"}, nil),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -120,7 +112,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[touchArgs](),
 		ExecuteFunc:      wrapURootCommand(buildTouchArgs, runTouch),
 		ValidateFunc:     validatePathsArg("paths", "path"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -129,7 +120,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[truncateArgs](),
 		ExecuteFunc:      truncateFile,
 		ValidateFunc:     validateTruncateArgs,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -138,7 +128,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[readlinkArgs](),
 		ExecuteFunc:      readLinkPath,
 		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -147,7 +136,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[realpathArgs](),
 		ExecuteFunc:      realpathPath,
 		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -156,7 +144,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[grepArgs](),
 		ExecuteFunc:      grepText,
 		ValidateFunc:     validateGrepArgs,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -165,7 +152,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[headArgs](),
 		ExecuteFunc:      headText,
 		ValidateFunc:     validatePathsArg("paths", "path"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -174,7 +160,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[tailArgs](),
 		ExecuteFunc:      tailText,
 		ValidateFunc:     validatePathsArg("paths", "path"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -183,7 +168,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[sortArgs](),
 		ExecuteFunc:      sortText,
 		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -192,7 +176,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[uniqArgs](),
 		ExecuteFunc:      uniqText,
 		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -201,7 +184,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[wcArgs](),
 		ExecuteFunc:      wordCount,
 		ValidateFunc:     validatePathsArg("paths", "path"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -210,7 +192,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[translateArgs](),
 		ExecuteFunc:      translateText,
 		ValidateFunc:     validateTranslateArgs,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -219,7 +200,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[teeArgs](),
 		ExecuteFunc:      teeText,
 		ValidateFunc:     validateTeeArgs,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -228,7 +208,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[commArgs](),
 		ExecuteFunc:      compareFiles,
 		ValidateFunc:     validateCommArgs,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -237,7 +216,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[stringsArgs](),
 		ExecuteFunc:      stringsText,
 		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -246,7 +224,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[moreArgs](),
 		ExecuteFunc:      moreText,
 		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -255,7 +232,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[hexdumpArgs](),
 		ExecuteFunc:      hexDump,
 		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -264,7 +240,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[cmpArgs](),
 		ExecuteFunc:      compareBytes,
 		ValidateFunc:     validateCommArgs,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -273,7 +248,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[md5sumArgs](),
 		ExecuteFunc:      md5Sum,
 		ValidateFunc:     validatePathsArg("paths", "path"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -282,7 +256,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[shasumArgs](),
 		ExecuteFunc:      shaSum,
 		ValidateFunc:     validatePathsArg("paths", "path"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -291,7 +264,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[base64Args](),
 		ExecuteFunc:      base64Tool,
 		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -300,7 +272,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[mkdirArgs](),
 		ExecuteFunc:      wrapURootCommand(buildMkdirArgs, runMkdir),
 		ValidateFunc:     validatePathsArg("paths", "path"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -308,7 +279,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Print the working directory",
 		ParametersValue:  mustSchemaParametersFor[noArgs](),
 		ExecuteFunc:      printWorkingDirectory,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -317,7 +287,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[pathArg](),
 		ExecuteFunc:      dirNamePath,
 		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -326,7 +295,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[pathArg](),
 		ExecuteFunc:      baseNamePath,
 		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -334,7 +302,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Print system information",
 		ParametersValue:  mustSchemaParametersFor[noArgs](),
 		ExecuteFunc:      unameTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -342,7 +309,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Print system hostname",
 		ParametersValue:  mustSchemaParametersFor[noArgs](),
 		ExecuteFunc:      hostnameTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -350,7 +316,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Show how long the system has been running",
 		ParametersValue:  mustSchemaParametersFor[noArgs](),
 		ExecuteFunc:      uptimeTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -358,7 +323,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Display memory usage",
 		ParametersValue:  mustSchemaParametersFor[noArgs](),
 		ExecuteFunc:      freeTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -366,7 +330,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Report filesystem disk space usage",
 		ParametersValue:  mustSchemaParametersFor[dfArgs](),
 		ExecuteFunc:      dfTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -374,7 +337,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Estimate file space usage",
 		ParametersValue:  mustSchemaParametersFor[duArgs](),
 		ExecuteFunc:      duTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -382,7 +344,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Report process status",
 		ParametersValue:  mustSchemaParametersFor[psArgs](),
 		ExecuteFunc:      psTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -391,7 +352,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[pidofArgs](),
 		ExecuteFunc:      pidofTool,
 		ValidateFunc:     RequireNonEmptyArg("name", "missing or invalid 'name' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -399,7 +359,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Print user identity",
 		ParametersValue:  mustSchemaParametersFor[idArgs](),
 		ExecuteFunc:      idTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -407,7 +366,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Display text",
 		ParametersValue:  mustSchemaParametersFor[echoArgs](),
 		ExecuteFunc:      echoTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -416,7 +374,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[seqArgs](),
 		ExecuteFunc:      seqTool,
 		ValidateFunc:     validateSeqArgs,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -424,7 +381,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Print environment variables",
 		ParametersValue:  mustSchemaParametersFor[printenvArgs](),
 		ExecuteFunc:      printenvTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -432,7 +388,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Print terminal name",
 		ParametersValue:  mustSchemaParametersFor[noArgs](),
 		ExecuteFunc:      ttyTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -441,7 +396,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[whichArgs](),
 		ExecuteFunc:      whichTool,
 		ValidateFunc:     RequireNonEmptyArg("name", "missing or invalid 'name' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -450,7 +404,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[mkfifoArgs](),
 		ExecuteFunc:      mkfifoTool,
 		ValidateFunc:     RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -458,7 +411,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Create a temporary file or directory",
 		ParametersValue:  mustSchemaParametersFor[mktempArgs](),
 		ExecuteFunc:      mktempTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -466,7 +418,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Search for files",
 		ParametersValue:  mustSchemaParametersFor[findArgs](),
 		ExecuteFunc:      findTool,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -475,7 +426,6 @@ func registerURootTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[chmodArgs](),
 		ExecuteFunc:      chmodTool,
 		ValidateFunc:     validateChmodArgs,
-		VersionValue:     urootToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -483,7 +433,6 @@ func registerURootTools(r *Registry) {
 		DescriptionValue: "Display date and time",
 		ParametersValue:  mustSchemaParametersFor[dateArgs](),
 		ExecuteFunc:      dateTool,
-		VersionValue:     urootToolVersion,
 	})
 }
 

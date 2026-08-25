@@ -54,12 +54,6 @@ func Parse(args []string, stderr io.Writer) (Command, error) {
 	approvalMode := string(instance.ApprovalDeny)
 	fs.StringVar(&approvalMode, "approval", approvalMode, "approval mode: deny or ask")
 	fs.StringVar(&approvalMode, "a", approvalMode, "approval mode (alias for --approval)")
-	newFlag := false
-	resumeFlag := ""
-	mcpServerFlag := false
-	fs.BoolVar(&newFlag, "new", false, "start a new primary thread (default)")
-	fs.StringVar(&resumeFlag, "resume", "", "resume this primary thread ID")
-	fs.BoolVar(&mcpServerFlag, "mcp-server", false, "run only the u-root toolbox MCP server on stdio")
 	fs.BoolVar(&c.Debug, "debug", false, "enable terminal diagnostics")
 	fs.BoolVar(&c.Version, "version", false, "print version")
 	fs.BoolVar(&c.Version, "V", false, "print version (alias for --version)")
@@ -74,24 +68,8 @@ func Parse(args []string, stderr io.Writer) (Command, error) {
 	if command == "resume" {
 		c.ResumeID = commandArgument
 	}
-	if newFlag {
-		if command == "resume" || resumeFlag != "" {
-			return Command{}, errors.New("new and resume modes are mutually exclusive")
-		}
-		c.New = true
-	}
-	if resumeFlag != "" {
-		if command == "new" {
-			return Command{}, errors.New("new and resume modes are mutually exclusive")
-		}
-		if c.ResumeID != "" && c.ResumeID != resumeFlag {
-			return Command{}, errors.New("resume thread ID was specified twice")
-		}
-		c.New = false
-		c.ResumeID = resumeFlag
-	}
-	c.ToolboxServe = command == "mcp-server" || command == "toolbox-serve" || mcpServerFlag
-	if c.ToolboxServe && (command == "resume" || command == "new" || newFlag || resumeFlag != "") {
+	c.ToolboxServe = command == "mcp-server"
+	if c.ToolboxServe && (command == "resume" || command == "new") {
 		return Command{}, errors.New("mcp-server cannot be combined with a thread command")
 	}
 	if mockCodexExecutable != "" {
@@ -140,11 +118,6 @@ func splitCommand(args []string) (command, argument string, remaining []string, 
 			remaining = remaining[1:]
 		}
 		return "resume", argument, remaining, nil
-	case "toolbox":
-		if len(args) > 1 && args[1] == "serve" {
-			return "toolbox-serve", "", args[2:], nil
-		}
-		return "", "", nil, errors.New("expected legacy command 'toolbox serve'")
 	default:
 		return "", "", nil, fmt.Errorf("unknown command %q", args[0])
 	}

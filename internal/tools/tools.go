@@ -73,8 +73,8 @@ type ExecuteOptions struct {
 // Thread-safety: Registry is safe for concurrent use from multiple goroutines.
 // All access to tools and permissions maps is protected by a RWMutex.
 // Read operations (getTool, getPermission, GetToolNames, GetTools)
-// use RLock for concurrent reads. Write operations (RegisterTool, applyPolicy,
-// AllowTool, SetAllowed, SetRequireConfirmation) use Lock for exclusive access.
+// use RLock for concurrent reads. Write operations (RegisterTool and
+// applyPolicy) use Lock for exclusive access.
 type Registry struct {
 	mu           sync.RWMutex
 	tools        map[string]Tool
@@ -138,39 +138,15 @@ func (r *Registry) RegisterTool(tool Tool) error {
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("tool name is required")
 	}
-	if strings.TrimSpace(tool.Version()) == "" {
-		return fmt.Errorf("tool %q must declare a version", name)
-	}
-	if !tool.CompatibleWith(HostAPIVersion) {
-		return fmt.Errorf("tool %q is incompatible with host API %s", name, HostAPIVersion)
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, exists := r.tools[name]; exists {
+		return fmt.Errorf("tool %q is already registered", name)
+	}
 	r.tools[name] = tool
 	if _, ok := r.permissions[name]; !ok {
 		// Default to ask unless configured otherwise.
 		r.permissions[name] = Permission{Level: PermissionAsk}
-	}
-	return nil
-}
-
-// RegisterPlugin registers all tools from a plugin.
-func (r *Registry) RegisterPlugin(plugin ToolPlugin) error {
-	if plugin == nil {
-		return fmt.Errorf("plugin is nil")
-	}
-	if strings.TrimSpace(plugin.Name()) == "" {
-		return fmt.Errorf("plugin name is required")
-	}
-	if strings.TrimSpace(plugin.Version()) == "" {
-		return fmt.Errorf("plugin %q must declare a version", plugin.Name())
-	}
-
-	for _, tool := range plugin.Tools() {
-		if err := r.RegisterTool(tool); err != nil {
-			return fmt.Errorf("plugin %q failed to register tool: %w", plugin.Name(), err)
-		}
 	}
 	return nil
 }
@@ -325,69 +301,6 @@ func (r *Registry) ExecuteContextWithOptions(ctx context.Context, function strin
 	return result
 }
 
-// AllowTool marks a tool as allowed and optionally keeps confirmation requirements.
-func (r *Registry) AllowTool(name string, requireConfirmation bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	perm := r.permissions[name]
-	perm.Level = PermissionAllow
-	if requireConfirmation {
-		perm.Level = PermissionAsk
-	}
-	r.permissions[name] = perm
-}
-
-// SetAllowed toggles whether a tool is allowed.
-func (r *Registry) SetAllowed(name string, allowed bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	perm := r.permissions[name]
-	if allowed {
-		perm.Level = PermissionAllow
-	} else {
-		perm.Level = PermissionDeny
-	}
-	r.permissions[name] = perm
-}
-
-// SetRequireConfirmation toggles per-tool confirmation.
-func (r *Registry) SetRequireConfirmation(name string, require bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	perm := r.permissions[name]
-	if require {
-		perm.Level = PermissionAsk
-	} else {
-		perm.Level = PermissionAllow
-	}
-	r.permissions[name] = perm
-}
-
-// GetPermission returns the current permission entry for a tool.
-func (r *Registry) GetPermission(name string) Permission {
-	return r.getPermission(name)
-}
-
-// ConfigureRateLimits updates rate limiting configuration for the registry.
-func (r *Registry) ConfigureRateLimits(config RateLimitConfig) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, limiter := range r.rateLimiters {
-		if limiter != nil {
-			limiter.Stop()
-		}
-	}
-	r.rateLimits = cloneRateLimits(config)
-	r.rateLimiters = make(map[string]*toolRateLimiter)
-}
-
-// ConfigureTimeouts updates tool execution timeouts.
-func (r *Registry) ConfigureTimeouts(config TimeoutConfig) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.timeouts = cloneTimeouts(config)
-}
-
 // Close releases instance-owned rate limiter goroutines. It is idempotent.
 func (r *Registry) Close() error {
 	r.closeOnce.Do(func() {
@@ -480,47 +393,6 @@ func applyPolicyLevel(current PermissionLevel, name string, policy Policy) Permi
 		level = PermissionAllow
 	}
 	return level
-}
-
-// FormatToolCallResult creates a provider-neutral user-friendly tool display.
-func FormatToolCallResult(function, arguments string, result *ToolResult, truncate bool) string {
-	var argsStr string
-	if arguments != "" {
-		var args map[string]interface{}
-		if err := json.Unmarshal([]byte(arguments), &args); err == nil && len(args) > 0 {
-			parts := make([]string, 0, len(args))
-			for key, value := range args {
-				parts = append(parts, fmt.Sprintf("%s=%v", key, value))
-			}
-			argsStr = strings.Join(parts, ", ")
-		} else {
-			argsStr = arguments
-		}
-	}
-
-	sb := getBuilder()
-	defer putBuilder(sb)
-	if argsStr != "" {
-		sb.WriteString(fmt.Sprintf("🔧 Executed: %s(%s)\n", function, argsStr))
-	} else {
-		sb.WriteString(fmt.Sprintf("🔧 Executed: %s()\n", function))
-	}
-
-	if result.Error != nil {
-		sb.WriteString(fmt.Sprintf("❌ Error: %v\n", result.Error))
-	} else {
-		displayResult, truncated := sanitizeToolOutputWithConfig(result.Result, result.outputFilters)
-		if truncate {
-			var shortTruncated bool
-			displayResult, shortTruncated = truncateString(displayResult, 200)
-			truncated = truncated || shortTruncated
-		}
-		if truncated {
-			displayResult += "..."
-		}
-		sb.WriteString(fmt.Sprintf("✓ Result:\n%s\n", displayResult))
-	}
-	return sb.String()
 }
 
 func formatDryRunResult(function string, args map[string]interface{}) string {

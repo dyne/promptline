@@ -19,8 +19,6 @@ package tools
 import (
 	"errors"
 	"fmt"
-
-	apperrors "promptline/internal/errors"
 )
 
 // Common tool errors
@@ -53,15 +51,15 @@ var (
 	ErrToolTimeout = errors.New("tool execution timed out")
 )
 
-// NewToolExecutionError wraps a tool execution error with a shared error code.
-func NewToolExecutionError(toolName, operation string, err error) *apperrors.Error {
+// NewToolExecutionError adds tool context while retaining the cause.
+func NewToolExecutionError(toolName, operation string, err error) error {
 	if operation != "" {
-		return apperrors.Wrap(apperrors.CodeToolExecution, fmt.Sprintf("tool %s failed during %s", toolName, operation), err)
+		return fmt.Errorf("tool %s failed during %s: %w", toolName, operation, err)
 	}
-	return apperrors.Wrap(apperrors.CodeToolExecution, fmt.Sprintf("tool %s failed", toolName), err)
+	return fmt.Errorf("tool %s failed: %w", toolName, err)
 }
 
-// NewPermissionError wraps a permission error with a shared error code.
-func NewPermissionError(toolName, reason string) *apperrors.Error {
-	return apperrors.New(apperrors.CodePermission, fmt.Sprintf("permission denied for tool %s: %s", toolName, reason))
+// NewPermissionError adds permission context without a coded wrapper.
+func NewPermissionError(toolName, reason string) error {
+	return fmt.Errorf("permission denied for tool %s: %s", toolName, reason)
 }

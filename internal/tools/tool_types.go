@@ -18,9 +18,6 @@ package tools
 
 import "context"
 
-// HostAPIVersion identifies the tool API version supported by this host.
-const HostAPIVersion = "v1"
-
 // Tool represents a callable tool/function with validation and execution hooks.
 type Tool interface {
 	Name() string
@@ -28,27 +25,18 @@ type Tool interface {
 	Parameters() map[string]interface{}
 	Execute(ctx context.Context, args map[string]interface{}) (string, error)
 	Validate(args map[string]interface{}) error
-	Version() string
-	CompatibleWith(hostVersion string) bool
-}
-
-// ToolPlugin describes a bundle of tools that can be registered together.
-type ToolPlugin interface {
-	Name() string
-	Version() string
-	Tools() []Tool
 }
 
 // ToolDefinition provides a default implementation of Tool.
 type ToolDefinition struct {
-	NameValue          string
-	DescriptionValue   string
-	ParametersValue    map[string]interface{}
-	ExecuteFunc        ExecutorFunc
-	ValidateFunc       func(args map[string]interface{}) error
-	VersionValue       string
-	CompatibleWithFunc func(hostVersion string) bool
+	NameValue        string
+	DescriptionValue string
+	ParametersValue  map[string]interface{}
+	ExecuteFunc      ExecutorFunc
+	ValidateFunc     func(args map[string]interface{}) error
 }
+
+var _ Tool = (*ToolDefinition)(nil)
 
 func (t *ToolDefinition) Name() string {
 	return t.NameValue
@@ -74,15 +62,4 @@ func (t *ToolDefinition) Validate(args map[string]interface{}) error {
 		return nil
 	}
 	return t.ValidateFunc(args)
-}
-
-func (t *ToolDefinition) Version() string {
-	return t.VersionValue
-}
-
-func (t *ToolDefinition) CompatibleWith(hostVersion string) bool {
-	if t.CompatibleWithFunc != nil {
-		return t.CompatibleWithFunc(hostVersion)
-	}
-	return hostVersion == HostAPIVersion
 }

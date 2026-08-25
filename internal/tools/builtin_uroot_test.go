@@ -34,11 +34,6 @@ import (
 )
 
 func TestURootFileOperations(t *testing.T) {
-	ConfigureLimits(DefaultLimits())
-	t.Cleanup(func() {
-		ConfigureLimits(DefaultLimits())
-	})
-
 	t.Run("cat", func(t *testing.T) {
 		registry := NewRegistry()
 		dir := makeTempDir(t)
@@ -223,13 +218,18 @@ func TestURootFileOperationsSizeLimit(t *testing.T) {
 }
 
 func TestURootFileOperationsRateLimit(t *testing.T) {
-	registry := NewRegistry()
-	registry.ConfigureRateLimits(RateLimitConfig{
+	config := DefaultConfig()
+	config.RateLimits = RateLimitConfig{
 		DefaultPerMinute: 0,
 		PerTool: map[string]int{
 			"cat": 1,
 		},
-	})
+	}
+	registry, err := NewRegistryWithConfig(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
 
 	dir := makeTempDir(t)
 	path := writeTestFile(t, dir, "rate.txt", "rate")
@@ -250,12 +250,17 @@ func TestURootFileOperationsRateLimit(t *testing.T) {
 }
 
 func TestURootFileOperationsTimeout(t *testing.T) {
-	registry := NewRegistry()
-	registry.ConfigureTimeouts(TimeoutConfig{
+	config := DefaultConfig()
+	config.Timeouts = TimeoutConfig{
 		PerTool: map[string]time.Duration{
 			"cat": time.Nanosecond,
 		},
-	})
+	}
+	registry, err := NewRegistryWithConfig(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
 
 	dir := makeTempDir(t)
 	path := writeTestFile(t, dir, "timeout.txt", "timeout")
@@ -853,9 +858,14 @@ func TestURootMiscellaneousSafe(t *testing.T) {
 		if mktempResult.Error != nil {
 			t.Fatalf("expected mktemp success, got %v", mktempResult.Error)
 		}
-		if _, err := os.Stat(strings.TrimSpace(mktempResult.Result)); err != nil {
+		tempPath := strings.TrimSpace(mktempResult.Result)
+		if _, err := os.Stat(tempPath); err != nil {
 			t.Fatalf("expected mktemp file, got %v", err)
 		}
+		t.Cleanup(func() {
+			_ = os.Remove(tempPath)
+			_ = os.Remove(filepath.Dir(tempPath))
+		})
 	})
 
 	t.Run("find and chmod", func(t *testing.T) {

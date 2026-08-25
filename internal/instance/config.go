@@ -1,9 +1,7 @@
-// Package instance defines private, provider-neutral Promptline v2 instances.
+// Package instance defines private, provider-neutral Promptline instances.
 package instance
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -42,38 +40,35 @@ type OutputCaps struct {
 }
 
 // Config is input to New. StateRoot defaults according to the effective user.
-// PluginPassthrough is copied during construction and cannot later mutate an Instance.
 type Config struct {
-	Name              string
-	StateRoot         string
-	WorkingRoot       string
-	WorkingDirectory  string
-	CodexExecutable   string
-	Model             string
-	ReasoningEffort   string
-	ApprovalMode      ApprovalMode
-	ToolboxEnabled    bool
-	PluginPassthrough []string
-	Timeouts          Timeouts
-	OutputCaps        OutputCaps
+	Name             string
+	StateRoot        string
+	WorkingRoot      string
+	WorkingDirectory string
+	CodexExecutable  string
+	Model            string
+	ReasoningEffort  string
+	ApprovalMode     ApprovalMode
+	ToolboxEnabled   bool
+	Timeouts         Timeouts
+	OutputCaps       OutputCaps
 }
 
 // Instance is immutable configuration and its private filesystem layout.
 type Instance struct {
-	name              string
-	stateRoot         string
-	stateDir          string
-	workingRoot       string
-	workingDirectory  string
-	codexExecutable   string
-	codexHome         string
-	model             string
-	reasoningEffort   string
-	approvalMode      ApprovalMode
-	toolboxEnabled    bool
-	pluginPassthrough []string
-	timeouts          Timeouts
-	outputCaps        OutputCaps
+	name             string
+	stateRoot        string
+	stateDir         string
+	workingRoot      string
+	workingDirectory string
+	codexExecutable  string
+	codexHome        string
+	model            string
+	reasoningEffort  string
+	approvalMode     ApprovalMode
+	toolboxEnabled   bool
+	timeouts         Timeouts
+	outputCaps       OutputCaps
 }
 
 func (i *Instance) Name() string               { return i.name }
@@ -89,10 +84,6 @@ func (i *Instance) ApprovalMode() ApprovalMode { return i.approvalMode }
 func (i *Instance) ToolboxEnabled() bool       { return i.toolboxEnabled }
 func (i *Instance) Timeouts() Timeouts         { return i.timeouts }
 func (i *Instance) OutputCaps() OutputCaps     { return i.outputCaps }
-
-func (i *Instance) PluginPassthrough() []string {
-	return append([]string(nil), i.pluginPassthrough...)
-}
 
 // New validates cfg and prepares an isolated private instance directory.
 func New(cfg Config) (*Instance, error) {
@@ -178,8 +169,8 @@ func New(cfg Config) (*Instance, error) {
 	return &Instance{name: cfg.Name, stateRoot: root, stateDir: stateDir, workingRoot: workingRoot,
 		workingDirectory: workingDirectory, codexExecutable: executable, codexHome: codexHome,
 		model: model, reasoningEffort: cfg.ReasoningEffort, approvalMode: mode,
-		toolboxEnabled: cfg.ToolboxEnabled, pluginPassthrough: append([]string(nil), cfg.PluginPassthrough...),
-		timeouts: timeouts, outputCaps: caps}, nil
+		toolboxEnabled: cfg.ToolboxEnabled,
+		timeouts:       timeouts, outputCaps: caps}, nil
 }
 
 func resolveStateRoot(euid int, supplied, homeDirectory string) (string, error) {
@@ -215,18 +206,4 @@ func absoluteDirectory(path string) (string, error) {
 		return "", errors.New("is not a directory")
 	}
 	return filepath.Clean(abs), nil
-}
-
-// DecodeConfig rejects unknown fields so future configuration changes fail closed.
-func DecodeConfig(data []byte) (Config, error) {
-	var cfg Config
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cfg); err != nil {
-		return Config{}, err
-	}
-	if decoder.More() {
-		return Config{}, errors.New("multiple JSON values")
-	}
-	return cfg, nil
 }

@@ -21,7 +21,7 @@ func TestServerLifecycleAndDeniedCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = registry.Close() })
-	if err := registry.RegisterTool(&tools.ToolDefinition{NameValue: "test_echo", DescriptionValue: "echo", ParametersValue: map[string]interface{}{"type": "object"}, VersionValue: tools.HostAPIVersion, ExecuteFunc: func(context.Context, map[string]interface{}) (string, error) { return "ok", nil }}); err != nil {
+	if err := registry.RegisterTool(&tools.ToolDefinition{NameValue: "test_echo", DescriptionValue: "echo", ParametersValue: map[string]interface{}{"type": "object"}, ExecuteFunc: func(context.Context, map[string]interface{}) (string, error) { return "ok", nil }}); err != nil {
 		t.Fatal(err)
 	}
 	input := strings.NewReader("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}\n{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"test_echo\",\"arguments\":{}}}\n")

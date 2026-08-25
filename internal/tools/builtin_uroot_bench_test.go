@@ -80,10 +80,21 @@ func populateDeepDir(b *testing.B, dir string, depth int, filesPerLevel int) str
 	return current
 }
 
+func newBenchRegistry(b *testing.B, tool string) *Registry {
+	b.Helper()
+	config := DefaultConfig()
+	config.Policy = PolicyFromLists([]string{tool}, nil, nil)
+	config.RateLimits = RateLimitConfig{DefaultPerMinute: 0}
+	registry, err := NewRegistryWithConfig(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = registry.Close() })
+	return registry
+}
+
 func BenchmarkURootLsFlat(b *testing.B) {
-	registry := NewRegistry()
-	registry.SetAllowed("ls", true)
-	registry.ConfigureRateLimits(RateLimitConfig{DefaultPerMinute: 0})
+	registry := newBenchRegistry(b, "ls")
 
 	dir, cleanup := setupURootBenchDir(b)
 	defer cleanup()
@@ -100,9 +111,7 @@ func BenchmarkURootLsFlat(b *testing.B) {
 }
 
 func BenchmarkURootLsRecursiveDeep(b *testing.B) {
-	registry := NewRegistry()
-	registry.SetAllowed("ls", true)
-	registry.ConfigureRateLimits(RateLimitConfig{DefaultPerMinute: 0})
+	registry := newBenchRegistry(b, "ls")
 
 	dir, cleanup := setupURootBenchDir(b)
 	defer cleanup()
@@ -122,9 +131,7 @@ func BenchmarkURootLsRecursiveDeep(b *testing.B) {
 }
 
 func BenchmarkURootCatLargeFile(b *testing.B) {
-	registry := NewRegistry()
-	registry.SetAllowed("cat", true)
-	registry.ConfigureRateLimits(RateLimitConfig{DefaultPerMinute: 0})
+	registry := newBenchRegistry(b, "cat")
 
 	dir, cleanup := setupURootBenchDir(b)
 	defer cleanup()
@@ -143,9 +150,7 @@ func BenchmarkURootCatLargeFile(b *testing.B) {
 }
 
 func BenchmarkURootGrep(b *testing.B) {
-	registry := NewRegistry()
-	registry.SetAllowed("grep", true)
-	registry.ConfigureRateLimits(RateLimitConfig{DefaultPerMinute: 0})
+	registry := newBenchRegistry(b, "grep")
 
 	dir, cleanup := setupURootBenchDir(b)
 	defer cleanup()
