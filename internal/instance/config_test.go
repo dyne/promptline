@@ -62,8 +62,7 @@ func TestNewCreatesMissingStateRoot(t *testing.T) {
 func TestNewIsolatesImmutableInstances(t *testing.T) {
 	root := t.TempDir()
 	work := t.TempDir()
-	plugins := []string{"plugin-a"}
-	one, err := New(Config{Name: "one", StateRoot: root, WorkingRoot: work, PluginPassthrough: plugins})
+	one, err := New(Config{Name: "one", StateRoot: root, WorkingRoot: work})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,12 +72,6 @@ func TestNewIsolatesImmutableInstances(t *testing.T) {
 	}
 	if one.StateDir() == two.StateDir() || filepath.Dir(one.StateDir()) != root {
 		t.Fatal("instances are not isolated")
-	}
-	plugins[0] = "changed"
-	got := one.PluginPassthrough()
-	got[0] = "changed-again"
-	if one.PluginPassthrough()[0] != "plugin-a" {
-		t.Fatal("instance retained mutable configuration")
 	}
 	if one.ApprovalMode() != ApprovalDeny || one.Timeouts().Startup <= 0 || one.OutputCaps().StdoutBytes <= 0 {
 		t.Fatal("defaults are not conservative")
@@ -112,14 +105,5 @@ func TestNewRejectsUnsafeRootsAndWorkingDirectories(t *testing.T) {
 		if _, err := New(cfg); err == nil {
 			t.Fatalf("New(%+v) unexpectedly succeeded", cfg)
 		}
-	}
-}
-
-func TestDecodeConfigRejectsUnknownFields(t *testing.T) {
-	if _, err := DecodeConfig([]byte(`{"Name":"one","bogus":true}`)); err == nil {
-		t.Fatal("unknown configuration field accepted")
-	}
-	if _, err := DecodeConfig([]byte(`{"Name":"one"} {}`)); err == nil {
-		t.Fatal("multiple JSON values accepted")
 	}
 }

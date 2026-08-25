@@ -1,8 +1,7 @@
 ## Validation
 
-Promptline v2 validates arguments received through its bounded Codex
-app-server and toolbox MCP boundaries. It does not accept requests from a
-configurable set of chat-completions providers.
+Promptline validates arguments received through its bounded Codex app-server
+and toolbox MCP boundaries.
 
 ### Defense-in-depth flow
 

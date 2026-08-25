@@ -13,8 +13,7 @@ func TestParse(t *testing.T) {
 		args    []string
 		wantErr bool
 	}{
-		{"valid", []string{"--instance", "ops", "--cwd", ".", "--new"}, false},
-		{"conflicting thread choices", []string{"--cwd", ".", "--new", "--resume", "x"}, true},
+		{"valid", []string{"--instance", "ops", "--cwd", "."}, false},
 		{"unknown flag", []string{"--nope"}, true},
 		{"missing cwd", []string{"--instance", "ops"}, true},
 		{"version has no side effects", []string{"--version"}, false},
@@ -23,8 +22,10 @@ func TestParse(t *testing.T) {
 		{"resume last command", []string{"resume", "--cwd", "."}, false},
 		{"resume ID command", []string{"resume", "thread-1", "--cwd", "."}, false},
 		{"MCP server command", []string{"mcp-server"}, false},
-		{"MCP server flag", []string{"--mcp-server"}, false},
-		{"toolbox serve", []string{"toolbox", "serve", "--cwd", "."}, false},
+		{"removed new flag", []string{"--cwd", ".", "--new"}, true},
+		{"removed resume flag", []string{"--cwd", ".", "--resume", "x"}, true},
+		{"removed MCP server flag", []string{"--mcp-server"}, true},
+		{"removed toolbox serve command", []string{"toolbox", "serve", "--cwd", "."}, true},
 		{"unknown command", []string{"chat", "--cwd", "."}, true},
 		{"mock codex", []string{"--cwd", ".", "--mock-codex", "/tmp/mock-codex"}, false},
 		{"conflicting codex executables", []string{"--cwd", ".", "--codex", "/tmp/codex", "--mock-codex", "/tmp/mock"}, true},
@@ -64,14 +65,12 @@ func TestParseThreadCommands(t *testing.T) {
 }
 
 func TestParseStandaloneMCPServer(t *testing.T) {
-	for _, args := range [][]string{{"mcp-server"}, {"--mcp-server"}, {"toolbox", "serve"}} {
-		command, err := Parse(args, io.Discard)
-		if err != nil {
-			t.Fatalf("Parse(%v): %v", args, err)
-		}
-		if !command.ToolboxServe || command.Instance.WorkingDirectory == "" {
-			t.Fatalf("Parse(%v) = %+v", args, command)
-		}
+	command, err := Parse([]string{"mcp-server"}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !command.ToolboxServe || command.Instance.WorkingDirectory == "" {
+		t.Fatalf("Parse(mcp-server) = %+v", command)
 	}
 }
 

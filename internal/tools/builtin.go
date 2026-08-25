@@ -43,8 +43,7 @@ func registerBuiltInTools(r *Registry) {
 			"type":       "object",
 			"properties": map[string]interface{}{},
 		},
-		ExecuteFunc:  getCurrentDatetime,
-		VersionValue: builtinToolVersion,
+		ExecuteFunc: getCurrentDatetime,
 	})
 
 	register(&ToolDefinition{
@@ -62,7 +61,6 @@ func registerBuiltInTools(r *Registry) {
 		},
 		ExecuteFunc:  readFile,
 		ValidateFunc: RequireNonEmptyArg("path", "missing or invalid 'path' parameter"),
-		VersionValue: builtinToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -71,7 +69,6 @@ func registerBuiltInTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[createFileArgs](),
 		ExecuteFunc:      createFile,
 		ValidateFunc:     validateCreateFileArgs,
-		VersionValue:     builtinToolVersion,
 	})
 
 	register(&ToolDefinition{
@@ -80,12 +77,9 @@ func registerBuiltInTools(r *Registry) {
 		ParametersValue:  mustSchemaParametersFor[editFileArgs](),
 		ExecuteFunc:      editFile,
 		ValidateFunc:     validateEditFileArgs,
-		VersionValue:     builtinToolVersion,
 	})
 
 }
-
-const builtinToolVersion = "1.0.0"
 
 // Security constants for validation
 const (

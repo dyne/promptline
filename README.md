@@ -1,4 +1,4 @@
-# Promptline v2
+# Promptline
 
 Promptline is a foreground host for one `codex app-server --stdio` child and
 one primary Codex thread. It is for Unix administration: run it only with a
@@ -78,9 +78,8 @@ When `--state-root` is omitted, Promptline creates and uses
 `/var/lib/promptline/instances` for root. An explicit `--state-root` must be an
 absolute path; Promptline creates it when its parent is writable.
 
-Each launch starts a new primary thread by default. Use the Codex-style
-`resume` command with a thread ID, or omit the ID to resume the last saved
-thread. The older `--new` and `--resume THREAD_ID` flags remain aliases:
+Each launch starts a new primary thread by default. Use the `resume` command
+with a thread ID, or omit the ID to resume the last saved thread:
 
 ```bash
 ./promptline --instance ops --cwd ~/devel/ops
@@ -97,7 +96,6 @@ the app-server transport closes.
 `promptline mcp-server` is a standalone stdio MCP server exposing the embedded
 Go/u-root toolbox to Codex or another MCP harness. It does not start Codex,
 create an instance, acquire a lock, or open a network listener. The
-`--mcp-server` flag is equivalent; `toolbox serve` remains a legacy alias.
 Before showing the first prompt, Promptline requires Codex to report this server
 with its core tools and prints `[ toolbox ready: N tools ]`. New and resumed
 threads receive the same tool schemas in a model-facing `toolbox` namespace and
@@ -113,8 +111,6 @@ runtime guidance.
 
 ```bash
 ./promptline mcp-server --cwd ~/devel/ops
-# Equivalent:
-./promptline --mcp-server --cwd ~/devel/ops
 ```
 
 Mutating effects and privilege expansion are asked or denied by default.
@@ -122,27 +118,6 @@ Prompts are read from the controlling terminal; unavailable or malformed input
 declines the request. The journal is append-only JSONL under
 `<state-root>/<instance>/audit` and records bounded, redacted operational
 metadata. It is not an authorization source.
-
-## Migration from v1
-
-## Breaking change
-
-Promptline v2 removes the OpenAI chat-completions client, its `config.json`
-schema, batch/TUI/readline interaction path, and local conversation history.
-Upgrading requires a compatible Codex CLI and an explicit named instance; there
-is no compatibility mode for the former API-key configuration.
-
-| v1 setting or behavior | v2 replacement |
-| --- | --- |
-| `api_key`, `api_url`, `OPENAI_API_KEY` | Authenticate and configure the Codex CLI; Promptline has no API client configuration. |
-| `model` in `config.json` | `--model`, defaulting to `gpt-5.6-terra`; the selected model is sent for every turn. |
-| Local chat and command history | Codex thread history; Promptline persists only a primary-thread ID. |
-| Batch/TUI/readline command path | Foreground line-oriented terminal input. |
-| Tool policy in `config.json` | Promptline approval policy and per-instance toolbox configuration. |
-
-An optional external Context-mode Codex plugin may be installed and passed
-through as Codex configuration. Promptline does not bundle, index, search, or
-reimplement it.
 
 ## Troubleshooting and non-goals
 
@@ -159,7 +134,7 @@ Thread.thread.status of type string` means the Promptline binary expects an
 older shape for the Codex app-server's `thread.status` field. It does not refer
 to the working directory or Promptline's saved thread state. Upgrade or rebuild
 Promptline with support for the installed Codex CLI; deleting instance state or
-using `--new` does not correct this protocol-decoding mismatch.
+starting a new thread does not correct this protocol-decoding mismatch.
 
 If startup reports `codex authentication required`, run the `CODEX_HOME=... codex
 login` command included in that error. Promptline checks `account/read` before
@@ -168,7 +143,7 @@ rather than producing repeated reconnect messages and a later HTTP 401.
 
 Promptline has no daemon, control socket, WebSocket transport, automatic
 restart, automatic tmux integration, second model runtime, internal database,
-or search/index service. See [the v2 architecture](docs/ARCHITECTURE_V2.md)
+or search/index service. See [the architecture](docs/ARCHITECTURE.md)
 and [toolbox documentation](docs/TOOLS.md) for boundaries and portability.
 
 ## License

@@ -18,6 +18,7 @@ package tools
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -51,6 +52,13 @@ func TestToolExecutionError(t *testing.T) {
 				t.Error("errors.Is should unwrap to base error")
 			}
 		})
+	}
+}
+
+func TestRetainedSentinelsSupportErrorsIs(t *testing.T) {
+	wrapped := fmt.Errorf("execution: %w", ErrToolNotAllowed)
+	if !errors.Is(wrapped, ErrToolNotAllowed) {
+		t.Fatal("wrapped policy sentinel did not match")
 	}
 }
 

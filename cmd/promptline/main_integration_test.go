@@ -205,14 +205,7 @@ func TestPromptlineDefaultsToNewThreadAcrossEOFRestarts(t *testing.T) {
 }
 
 func TestToolboxServesBasicURootTools(t *testing.T) {
-	for name, arguments := range map[string][]string{
-		"command": {"mcp-server"},
-		"flag":    {"--mcp-server"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			testStandaloneToolbox(t, arguments)
-		})
-	}
+	testStandaloneToolbox(t, []string{"mcp-server"})
 }
 
 func testStandaloneToolbox(t *testing.T, commandArguments []string) {

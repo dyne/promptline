@@ -1,8 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Promptline v1 configuration (removed)",
-  "description": "Promptline v2 does not load config.json. Configure Codex separately and use named-instance CLI flags.",
-  "deprecated": true,
-  "type": "object",
-  "additionalProperties": false
-}
