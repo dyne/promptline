@@ -122,7 +122,11 @@ func (c *Client) write(e envelope) error {
 }
 func (c *Client) read(r io.Reader) {
 	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 4096), c.limits.MaxFrameBytes)
+	initial := 4096
+	if c.limits.MaxFrameBytes < initial {
+		initial = c.limits.MaxFrameBytes
+	}
+	s.Buffer(make([]byte, initial), c.limits.MaxFrameBytes)
 	for s.Scan() {
 		var e envelope
 		if err := json.Unmarshal(s.Bytes(), &e); err != nil {

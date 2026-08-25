@@ -94,6 +94,9 @@ func TestAPI_Lifecycle(t *testing.T) {
 	if err := a.Interrupt(ctx, thread.ID, turn.ID); err != nil {
 		t.Fatal(err)
 	}
+	if err := a.Unsubscribe(ctx, thread.ID); err != nil {
+		t.Fatal(err)
+	}
 	servers, err := a.ListMCPServers(ctx, thread.ID)
 	if err != nil || len(servers) != 1 || servers[0].Name != "promptline-toolbox" {
 		t.Fatalf("MCP servers = %+v, err = %v", servers, err)
@@ -215,6 +218,66 @@ func TestDecodeStreamingEvents(t *testing.T) {
 	if err != nil || message != "quota exceeded" {
 		t.Fatalf("message=%q err=%v", message, err)
 	}
+}
+
+func TestDecoders_RejectMalformedAndRetainAdditiveData(t *testing.T) {
+	tests := []struct {
+		name string
+		fn   func(json.RawMessage) error
+		data json.RawMessage
+	}{
+		{name: "item missing identity", fn: func(b json.RawMessage) error { _, err := DecodeItem(b); return err }, data: json.RawMessage(`{"item":{"type":"message"}}`)},
+		{name: "item invalid JSON", fn: func(b json.RawMessage) error { _, err := DecodeItem(b); return err }, data: json.RawMessage(`{`)},
+		{name: "delta missing ID", fn: func(b json.RawMessage) error { _, err := DecodeAgentMessageDelta(b); return err }, data: json.RawMessage(`{"delta":"x"}`)},
+		{name: "error missing message", fn: func(b json.RawMessage) error { _, err := DecodeErrorMessage(b); return err }, data: json.RawMessage(`{"error":{"code":5}}`)},
+		{name: "completion invalid JSON", fn: func(b json.RawMessage) error { _, err := DecodeTurnCompletion(b); return err }, data: json.RawMessage(`[`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.fn(tt.data); err == nil {
+				t.Fatal("decoder accepted malformed data")
+			}
+		})
+	}
+	item, err := DecodeItem(json.RawMessage(`{"item":{"id":"i","type":"agentMessage","new":{"nested":true}}}`))
+	if err != nil || !strings.Contains(string(item.Raw), `"nested":true`) {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+}
+
+func TestAPI_ReplyRequestWriteFailureIsNotRetried(t *testing.T) {
+	out, _ := io.Pipe()
+	c := New(pipeWriteCloser{errWriter{}}, out, Config{})
+	defer c.Close()
+	a := NewAPI(c)
+	if err := a.ReplyRequest(context.Background(), 42, map[string]bool{"allow": true}); err == nil {
+		t.Fatal("first reply succeeded")
+	}
+	if err := a.ReplyRequest(context.Background(), 42, map[string]bool{"allow": true}); err == nil {
+		t.Fatal("failed reply was retried")
+	}
+}
+
+func FuzzAppServerDecoders(f *testing.F) {
+	for _, seed := range []string{
+		`{"item":{"id":"item","type":"agentMessage","text":"hi"}}`,
+		`{"requiresOpenaiAuth":true,"account":null}`,
+		`{"turn":{"status":{"type":"completed"},"error":{"message":"nested"}}}`,
+		`{"error":{"message":"bad"}}`, `null`, `{`,
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, payload string) {
+		if len(payload) > 16<<10 {
+			t.Skip()
+		}
+		b := json.RawMessage(payload)
+		_, _ = DecodeItem(b)
+		_, _ = DecodeAccount(b)
+		_, _ = DecodeAgentMessageDelta(b)
+		_, _ = DecodeTurnCompletion(b)
+		_, _ = DecodeErrorMessage(b)
+	})
 }
 
 type emptyReader struct{}
