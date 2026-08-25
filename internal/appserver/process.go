@@ -21,6 +21,7 @@ type Process struct {
 	codexVersion string
 	stderr       bytes.Buffer
 	stderrLimit  int
+	captured     chan struct{}
 	wait         chan error
 	once         sync.Once
 }
@@ -68,10 +69,11 @@ func StartWith(ctx context.Context, in *instance.Instance, launch func(*exec.Cmd
 		cmd:          cmd,
 		codexVersion: codexVersion,
 		stderrLimit:  in.OutputCaps().StderrBytes,
+		captured:     make(chan struct{}),
 		wait:         make(chan error, 1),
 	}
 	p.Client = New(stdin, stdout, Config{Limits: Limits{MaxFrameBytes: in.OutputCaps().StdoutBytes}})
-	go p.capture(stderr)
+	go func() { p.capture(stderr); close(p.captured) }()
 	go func() { p.wait <- cmd.Wait(); close(p.wait) }()
 	return p, nil
 }
