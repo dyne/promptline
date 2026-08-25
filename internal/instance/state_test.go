@@ -99,6 +99,67 @@ func TestStateAtomicReplacementAndValidation(t *testing.T) {
 	}
 }
 
+func TestStateSaveFailurePreservesPreviousStateAndCleansTemporaryFile(t *testing.T) {
+	i := testInstance(t)
+	if err := i.SaveState(State{LastPrimaryThreadID: "previous"}); err != nil {
+		t.Fatal(err)
+	}
+	fault := errors.New("rename fault")
+	i.stateRename = func(string, string) error { return fault }
+	if err := i.SaveState(State{LastPrimaryThreadID: "replacement"}); !errors.Is(err, fault) {
+		t.Fatalf("SaveState error = %v, want rename fault", err)
+	}
+	state, err := i.LoadState()
+	if err != nil || state.LastPrimaryThreadID != "previous" {
+		t.Fatalf("state after failed save = %+v, %v", state, err)
+	}
+	matches, err := filepath.Glob(filepath.Join(i.StateDir(), ".state-*.tmp"))
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("temporary artifacts = %v, %v", matches, err)
+	}
+}
+
+func TestLoadStateRejectsCorruptionAndOversizedRecords(t *testing.T) {
+	i := testInstance(t)
+	for _, tc := range []struct {
+		name string
+		data []byte
+	}{
+		{name: "zero schema", data: []byte(`{"schemaVersion":0}`)},
+		{name: "unknown schema", data: []byte(`{"schemaVersion":99}`)},
+		{name: "truncated json", data: []byte(`{"schemaVersion":`)},
+		{name: "oversized", data: append([]byte(`{"schemaVersion":1,"lastPrimaryThreadId":"`), append(make([]byte, 1<<20), []byte(`"}`)...)...)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(i.statePath(), tc.data, privateFileMode); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := i.LoadState(); err == nil {
+				t.Fatal("LoadState unexpectedly accepted corrupt state")
+			}
+		})
+	}
+}
+
+func TestLockCloseIsIdempotentAndReleasesForReacquisition(t *testing.T) {
+	i := testInstance(t)
+	lock, err := i.AcquireLock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatalf("second Close() = %v", err)
+	}
+	reacquired, err := i.AcquireLock()
+	if err != nil {
+		t.Fatalf("AcquireLock after Close = %v", err)
+	}
+	defer reacquired.Close()
+}
+
 func TestConcurrentLockRace(t *testing.T) {
 	i := testInstance(t)
 	var wg sync.WaitGroup
