@@ -1,0 +1,4 @@
+interface:
+  display_name: "Debian System Administrator"
+  short_description: "Safely diagnose and administer Debian hosts"
+  default_prompt: "Use $debian-sysadmin to diagnose this Debian host and propose the smallest safe, verifiable intervention."

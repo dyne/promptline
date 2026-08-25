@@ -78,6 +78,39 @@ jobs:
           go-version-file: go.mod
       - run: make test-fuzz-smoke
 
+  debian-sysadmin-skill:
+    name: Debian sysadmin skill
+    runs-on: ubuntu-latest
+    env:
+      GOCACHE: ${{ github.workspace }}/.gocache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install validation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends python3-yaml shellcheck
+      - name: Run skill validator
+        shell: bash
+        run: |
+          bash -n plugins/debian-sysadmin/scripts/validate-skill.sh
+          plugins/debian-sysadmin/scripts/validate-skill.sh
+      - name: Run Skill Creator validation
+        run: python3 plugins/debian-sysadmin/scripts/skill_creator_validate.py plugins/debian-sysadmin
+      - name: Run ShellCheck
+        run: shellcheck plugins/debian-sysadmin/scripts/validate-skill.sh
+      - name: Compare toolbox catalog with live MCP schema
+        shell: bash
+        run: |
+          python3 -B plugins/debian-sysadmin/tests/test_toolbox_catalog.py
+          go build -trimpath -o "${RUNNER_TEMP}/promptline-catalog-check" ./cmd/promptline
+          python3 plugins/debian-sysadmin/scripts/check_toolbox_catalog.py \
+            --promptline "${RUNNER_TEMP}/promptline-catalog-check"
+
   compile:
     runs-on: ubuntu-latest
     strategy:
@@ -92,7 +125,7 @@ jobs:
 
   semantic-versioning:
     name: 🤖 Semantic versioning
-    needs: [build-and-test, integration, race-integration, fuzz-smoke, compile]
+    needs: [build-and-test, integration, race-integration, fuzz-smoke, debian-sysadmin-skill, compile]
     runs-on: ubuntu-latest
     outputs:
       new_release_published: ${{ steps.semantic-release.outputs.new_release_published }}
