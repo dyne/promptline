@@ -36,11 +36,15 @@ The embedded Unix toolbox is an instance-owned capability.  Promptline decides
 approval policy and renders approval requests; the app-server client only
 transports typed requests and replies. Promptline requires Codex's thread-scoped
 MCP inventory to contain the toolbox and its core tools before entering the
-foreground prompt, then directs both new and resumed threads to prefer that
-toolbox for supported Unix operations. Those developer instructions are
-embedded from `internal/runtime/init-prompt.md`. The same toolbox is exposed to
-other harnesses by the standalone `mcp-server` command without creating an
-instance. Promptline appends its own audit events
+foreground prompt. It also registers those schemas as the model-facing
+`toolbox` dynamic namespace and routes `item/tool/call` requests through
+app-server's `mcpServer/tool/call` method. This makes inventory discovery and
+model visibility separately testable and avoids relying on Codex's automatic
+MCP-tool deferral behavior. Both new and resumed threads receive the namespace
+and instructions to prefer it for supported Unix operations. Those developer
+instructions are embedded from `internal/runtime/init-prompt.md`. The same
+toolbox is exposed to other harnesses by the standalone `mcp-server` command
+without creating an instance. Promptline appends its own audit events
 to an instance-local journal. Future indexing may consume that journal, but
 v2 provides no index, search, embeddings, or retrieval service.  Context-mode,
 when desired, remains an optional external Codex plugin rather than a

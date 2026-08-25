@@ -100,8 +100,12 @@ create an instance, acquire a lock, or open a network listener. The
 `--mcp-server` flag is equivalent; `toolbox serve` remains a legacy alias.
 Before showing the first prompt, Promptline requires Codex to report this server
 with its core tools and prints `[ toolbox ready: N tools ]`. New and resumed
-threads instruct Codex to prefer these MCP tools over its built-in shell for
-supported Unix operations.
+threads receive the same tool schemas in a model-facing `toolbox` namespace and
+instruct Codex to prefer it over the built-in shell for supported Unix
+operations. Calls to that namespace are routed through app-server's
+`mcpServer/tool/call` method to the real MCP server. This explicit bridge avoids
+Codex configurations that discover MCP tools but defer them without exposing a
+tool-search facility.
 
 The embedded developer instructions are maintained as Markdown in
 `internal/runtime/init-prompt.md`; edit that file to extend Promptline's initial

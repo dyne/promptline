@@ -19,6 +19,7 @@ func TestAPI_Lifecycle(t *testing.T) {
 		Method       string
 		Model        string
 		Instructions string
+		DynamicTools []DynamicToolNamespace
 	}
 	models := make(chan modelParams, 3)
 	go func() {
@@ -37,12 +38,13 @@ func TestAPI_Lifecycle(t *testing.T) {
 			case "thread/start", "thread/resume", "thread/read":
 				if e.Method == "thread/start" || e.Method == "thread/resume" {
 					var params struct {
-						Model        string `json:"model"`
-						Instructions string `json:"developerInstructions"`
+						Model        string                 `json:"model"`
+						Instructions string                 `json:"developerInstructions"`
+						DynamicTools []DynamicToolNamespace `json:"dynamicTools"`
 					}
 					_ = json.Unmarshal(e.Params, &params)
 					models <- modelParams{
-						Method: e.Method, Model: params.Model, Instructions: params.Instructions,
+						Method: e.Method, Model: params.Model, Instructions: params.Instructions, DynamicTools: params.DynamicTools,
 					}
 				}
 				result = `{"thread":{"id":"thr_1","status":{"type":"idle"}}}`
@@ -55,6 +57,8 @@ func TestAPI_Lifecycle(t *testing.T) {
 				result = `{"turn":{"id":"turn_1","status":"inProgress"}}`
 			case "mcpServerStatus/list":
 				result = `{"data":[{"name":"promptline-toolbox","tools":{"ls":{},"pwd":{},"cat":{}}}],"nextCursor":null}`
+			case "mcpServer/tool/call":
+				result = `{"content":[{"type":"text","text":"ok"}]}`
 			default:
 				result = `{}`
 			}
@@ -64,7 +68,7 @@ func TestAPI_Lifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	a := NewAPI(c)
-	if err := a.Initialize(ctx, Initialize{ClientName: "promptline", ClientVersion: "v2"}); err != nil {
+	if err := a.Initialize(ctx, Initialize{ClientName: "promptline", ClientVersion: "v2", Experimental: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.Initialize(ctx, Initialize{}); err == nil {
@@ -74,11 +78,12 @@ func TestAPI_Lifecycle(t *testing.T) {
 	if err != nil || !account.Authenticated() || account.Type != "chatgpt" {
 		t.Fatalf("account=%+v err=%v", account, err)
 	}
-	thread, err := a.StartThread(ctx, "/tmp", "gpt-5.6-terra", "prefer toolbox")
+	dynamicTools := []DynamicToolNamespace{{Type: "namespace", Name: "toolbox", Description: "tools", Tools: []DynamicTool{{Type: "function", Name: "pwd", Description: "pwd", InputSchema: map[string]any{"type": "object"}}}}}
+	thread, err := a.StartThread(ctx, "/tmp", "gpt-5.6-terra", "prefer toolbox", dynamicTools)
 	if err != nil || thread.ID != "thr_1" {
 		t.Fatalf("thread=%+v err=%v", thread, err)
 	}
-	resumed, err := a.ResumeThread(ctx, thread.ID, "gpt-5.6-terra", "prefer toolbox")
+	resumed, err := a.ResumeThread(ctx, thread.ID, "gpt-5.6-terra", "prefer toolbox", dynamicTools)
 	if err != nil || resumed.ID != "thr_1" {
 		t.Fatalf("resumed thread=%+v err=%v", resumed, err)
 	}
@@ -96,6 +101,10 @@ func TestAPI_Lifecycle(t *testing.T) {
 	if _, ok := servers[0].Tools["ls"]; !ok {
 		t.Fatalf("MCP toolbox tools = %v", servers[0].Tools)
 	}
+	toolResult, err := a.CallMCPTool(ctx, thread.ID, "promptline-toolbox", "pwd", json.RawMessage(`{}`))
+	if err != nil || len(toolResult.Content) != 1 {
+		t.Fatalf("MCP tool result = %+v, err = %v", toolResult, err)
+	}
 	for _, method := range []string{"thread/start", "thread/resume", "turn/start"} {
 		select {
 		case got := <-models:
@@ -104,6 +113,9 @@ func TestAPI_Lifecycle(t *testing.T) {
 			}
 			if method != "turn/start" && got.Instructions != "prefer toolbox" {
 				t.Fatalf("developer instructions for %s = %q", method, got.Instructions)
+			}
+			if method != "turn/start" && len(got.DynamicTools) != 1 {
+				t.Fatalf("dynamic tools for %s = %+v", method, got.DynamicTools)
 			}
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for %s parameters", method)
@@ -146,16 +158,13 @@ func TestDecodeAccountAuthenticationState(t *testing.T) {
 	}
 }
 
-func TestAPI_RejectsExperimentalAndUninitialized(t *testing.T) {
+func TestAPI_RejectsUninitialized(t *testing.T) {
 	c := New(pipeWriteCloser{io.Discard}, &emptyReader{}, Config{})
 	defer c.Close()
 	a := NewAPI(c)
 	ctx := context.Background()
 	if _, err := a.ReadThread(ctx, "thr"); err != ErrNotInitialized {
 		t.Fatalf("got %v", err)
-	}
-	if err := a.Initialize(ctx, Initialize{Experimental: true}); err == nil {
-		t.Fatal("experimental accepted")
 	}
 }
 

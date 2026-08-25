@@ -89,7 +89,7 @@ func TestPromptlineRunsTurnWithMockCodex(t *testing.T) {
 		t.Fatalf("working indicator was not rendered: %q", output.String())
 	}
 	if !strings.Contains(output.String(), "[ toolbox ready:") ||
-		!strings.Contains(output.String(), "[ mcpToolCall ]") {
+		!strings.Contains(output.String(), "[ dynamicToolCall ]") {
 		t.Fatalf("toolbox readiness and call progress were not rendered: %q", output.String())
 	}
 	if got := strings.Count(output.String(), "mock reply"); got != 1 {
@@ -318,6 +318,7 @@ func writeMockCodexExecutable(t *testing.T, authenticated bool) string {
 }
 
 func serveMockCodex() {
+	const dynamicCallID uint64 = 9000
 	scanner := bufio.NewScanner(os.Stdin)
 	encoder := json.NewEncoder(os.Stdout)
 	var toolbox *mockToolboxClient
@@ -328,14 +329,42 @@ func serveMockCodex() {
 	}()
 	for scanner.Scan() {
 		var request struct {
-			ID     *uint64 `json:"id"`
-			Method string  `json:"method"`
+			ID     *uint64         `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+			Result json.RawMessage `json:"result"`
 		}
 		if json.Unmarshal(scanner.Bytes(), &request) != nil || request.ID == nil {
 			continue
 		}
+		if request.Method == "" {
+			if *request.ID == dynamicCallID {
+				var reply struct {
+					ContentItems []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"contentItems"`
+					Success bool `json:"success"`
+				}
+				if json.Unmarshal(request.Result, &reply) != nil || !reply.Success || len(reply.ContentItems) != 1 || reply.ContentItems[0].Type != "inputText" {
+					return
+				}
+				emitMockTurn(encoder, reply.ContentItems[0].Text, "dynamicToolCall")
+			}
+			continue
+		}
 		result := any(map[string]any{})
 		switch request.Method {
+		case "initialize":
+			var params struct {
+				Capabilities struct {
+					Experimental bool `json:"experimentalApi"`
+				} `json:"capabilities"`
+			}
+			if json.Unmarshal(request.Params, &params) != nil || !params.Capabilities.Experimental {
+				_ = encoder.Encode(map[string]any{"id": *request.ID, "error": map[string]any{"code": -32602, "message": "dynamic tools require experimentalApi"}})
+				continue
+			}
 		case "account/read":
 			if os.Getenv(mockAuthEnvironment) == "1" {
 				result = map[string]any{
@@ -346,6 +375,18 @@ func serveMockCodex() {
 				result = map[string]any{"account": nil, "requiresOpenaiAuth": true}
 			}
 		case "thread/start":
+			var params struct {
+				DynamicTools []struct {
+					Name  string `json:"name"`
+					Tools []struct {
+						Name string `json:"name"`
+					} `json:"tools"`
+				} `json:"dynamicTools"`
+			}
+			if json.Unmarshal(request.Params, &params) != nil || !hasDynamicTool(params.DynamicTools, "toolbox", "echo") {
+				_ = encoder.Encode(map[string]any{"id": *request.ID, "error": map[string]any{"code": -32602, "message": "toolbox dynamic tools missing"}})
+				continue
+			}
 			result = map[string]any{"thread": map[string]any{
 				"id":     "thread-integration",
 				"status": map[string]any{"type": "idle"},
@@ -372,91 +413,85 @@ func serveMockCodex() {
 				}},
 				"nextCursor": nil,
 			}
+		case "mcpServer/tool/call":
+			var params struct {
+				Server    string         `json:"server"`
+				Tool      string         `json:"tool"`
+				Arguments map[string]any `json:"arguments"`
+			}
+			if json.Unmarshal(request.Params, &params) != nil || params.Server != "promptline-toolbox" || toolbox == nil {
+				_ = encoder.Encode(map[string]any{"id": *request.ID, "error": map[string]any{"code": -32602, "message": "invalid MCP tool call"}})
+				continue
+			}
+			text, err := toolbox.CallText(params.Tool, params.Arguments)
+			if err != nil {
+				_ = encoder.Encode(map[string]any{"id": *request.ID, "error": map[string]any{"code": -32000, "message": err.Error()}})
+				continue
+			}
+			result = map[string]any{"content": []map[string]string{{"type": "text", "text": text}}}
 		}
 		_ = encoder.Encode(map[string]any{"id": *request.ID, "result": result})
 		if request.Method == "turn/start" {
-			reply := "mock reply"
-			if toolbox != nil {
-				var err error
-				reply, err = toolbox.CallText("echo", map[string]any{"text": reply})
-				if err != nil {
-					_ = encoder.Encode(map[string]any{
-						"method": "error",
-						"params": map[string]any{"error": map[string]string{"message": err.Error()}},
-					})
-					continue
-				}
-			}
 			_ = encoder.Encode(map[string]any{
-				"method": "item/started",
+				"id":     dynamicCallID,
+				"method": "item/tool/call",
 				"params": map[string]any{
-					"threadId": "thread-integration", "turnId": "turn-integration",
-					"item": map[string]any{"id": "tool-integration", "type": "mcpToolCall"},
+					"threadId": "thread-integration", "turnId": "turn-integration", "callId": "call-integration",
+					"namespace": "toolbox", "tool": "echo", "arguments": map[string]any{"text": "mock reply"},
 				},
-			})
-			_ = encoder.Encode(map[string]any{
-				"method": "item/completed",
-				"params": map[string]any{
-					"threadId": "thread-integration", "turnId": "turn-integration",
-					"item": map[string]any{"id": "tool-integration", "type": "mcpToolCall"},
-				},
-			})
-			_ = encoder.Encode(map[string]any{
-				"method": "item/started",
-				"params": map[string]any{
-					"threadId": "thread-integration",
-					"turnId":   "turn-integration",
-					"item": map[string]any{
-						"id":   "item-integration",
-						"type": "agentMessage",
-						"text": "",
-					},
-				},
-			})
-			_ = encoder.Encode(map[string]any{
-				"method": "item/agentMessage/delta",
-				"params": map[string]any{
-					"threadId": "thread-integration",
-					"turnId":   "turn-integration",
-					"itemId":   "item-integration",
-					"delta":    strings.TrimSuffix(reply, "reply"),
-				},
-			})
-			_ = encoder.Encode(map[string]any{
-				"method": "item/agentMessage/delta",
-				"params": map[string]any{
-					"threadId": "thread-integration",
-					"turnId":   "turn-integration",
-					"itemId":   "item-integration",
-					"delta":    strings.TrimPrefix(reply, "mock "),
-				},
-			})
-			_ = encoder.Encode(map[string]any{
-				"method": "item/completed",
-				"params": map[string]any{
-					"threadId": "thread-integration",
-					"turnId":   "turn-integration",
-					"item": map[string]any{
-						"id":   "item-integration",
-						"type": "agentMessage",
-						"text": reply,
-					},
-				},
-			})
-			_ = encoder.Encode(map[string]any{
-				"method": "turn/completed",
-				"params": map[string]any{"turn": map[string]any{
-					"id":     "turn-integration",
-					"status": "completed",
-					"items": []map[string]any{{
-						"id":   "item-integration",
-						"type": "agentMessage",
-						"text": reply,
-					}},
-				}},
 			})
 		}
 	}
+}
+
+func hasDynamicTool(namespaces []struct {
+	Name  string `json:"name"`
+	Tools []struct {
+		Name string `json:"name"`
+	} `json:"tools"`
+}, namespaceName, toolName string) bool {
+	for _, namespace := range namespaces {
+		if namespace.Name != namespaceName {
+			continue
+		}
+		for _, tool := range namespace.Tools {
+			if tool.Name == toolName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func emitMockTurn(encoder *json.Encoder, reply, toolType string) {
+	_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{
+		"threadId": "thread-integration", "turnId": "turn-integration",
+		"item": map[string]any{"id": "tool-integration", "type": toolType},
+	}})
+	_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{
+		"threadId": "thread-integration", "turnId": "turn-integration",
+		"item": map[string]any{"id": "tool-integration", "type": toolType},
+	}})
+	_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{
+		"threadId": "thread-integration", "turnId": "turn-integration",
+		"item": map[string]any{"id": "item-integration", "type": "agentMessage", "text": ""},
+	}})
+	_ = encoder.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{
+		"threadId": "thread-integration", "turnId": "turn-integration", "itemId": "item-integration",
+		"delta": strings.TrimSuffix(reply, "reply"),
+	}})
+	_ = encoder.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{
+		"threadId": "thread-integration", "turnId": "turn-integration", "itemId": "item-integration",
+		"delta": strings.TrimPrefix(reply, "mock "),
+	}})
+	_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{
+		"threadId": "thread-integration", "turnId": "turn-integration",
+		"item": map[string]any{"id": "item-integration", "type": "agentMessage", "text": reply},
+	}})
+	_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"turn": map[string]any{
+		"id": "turn-integration", "status": "completed",
+		"items": []map[string]any{{"id": "item-integration", "type": "agentMessage", "text": reply}},
+	}}})
 }
 
 type mockToolboxClient struct {

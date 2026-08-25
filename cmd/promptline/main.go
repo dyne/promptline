@@ -91,7 +91,19 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	var dynamicTools []appserver.DynamicToolNamespace
 	if in.ToolboxEnabled() {
+		toolConfig := tools.DefaultConfig()
+		toolConfig.WorkingDirectory = in.WorkingDirectory()
+		toolConfig.Roots = []string{in.WorkingRoot()}
+		toolConfig.Policy = mcp.ReadOnlyToolPolicy()
+		registry, registryErr := tools.NewRegistryWithConfig(toolConfig)
+		if registryErr != nil {
+			_ = lock.Close()
+			return fmt.Errorf("describe toolbox tools: %w", registryErr)
+		}
+		dynamicTools = []appserver.DynamicToolNamespace{mcp.DynamicToolbox(registry)}
+		_ = registry.Close()
 		executable, err := os.Executable()
 		if err != nil {
 			_ = lock.Close()
@@ -137,7 +149,7 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 		return decisionErr
 	})
 	if err := r.Start(ctx, pruntime.Options{
-		Resume: !cmd.New, ResumeID: cmd.ResumeID,
+		Resume: !cmd.New, ResumeID: cmd.ResumeID, DynamicTools: dynamicTools,
 	}, Version); err != nil {
 		_ = r.Close(context.Background())
 		return err

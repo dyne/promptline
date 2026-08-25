@@ -1,6 +1,7 @@
 # Promptline runtime instructions
 
-When Promptline reports that the `promptline-toolbox` MCP server is ready, use
-its MCP tool for every operation it supports instead of built-in shell or exec
-tools. Never claim these MCP tools are unavailable unless Promptline reports a
-toolbox startup failure or does not report the toolbox as ready.
+When the model-facing `toolbox` namespace is present, use it for every operation
+it supports instead of built-in shell or exec tools. Its presence means that
+Promptline verified the `promptline-toolbox` MCP server and routes each call to
+that server. Never claim the toolbox is unavailable while this namespace is
+present.

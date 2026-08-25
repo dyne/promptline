@@ -26,6 +26,11 @@ type fakeClient struct {
 	threadInstructions, resumeInstructions                          string
 	mcpServers                                                      []appserver.MCPServer
 	mcpLists                                                        int
+	dynamicTools                                                    []appserver.DynamicToolNamespace
+	experimental                                                    bool
+	mcpCalls                                                        int
+	mcpResult                                                       appserver.MCPToolResult
+	lastReply                                                       any
 }
 
 func newFakeClient() *fakeClient {
@@ -42,7 +47,8 @@ func newFakeClient() *fakeClient {
 		}},
 	}
 }
-func (f *fakeClient) Initialize(ctx context.Context, _ appserver.Initialize) error {
+func (f *fakeClient) Initialize(ctx context.Context, in appserver.Initialize) error {
+	f.experimental = in.Experimental
 	if f.initializeWait {
 		<-ctx.Done()
 		return ctx.Err()
@@ -50,15 +56,17 @@ func (f *fakeClient) Initialize(ctx context.Context, _ appserver.Initialize) err
 	return nil
 }
 func (f *fakeClient) Account(context.Context) (appserver.Account, error) { return f.account, nil }
-func (f *fakeClient) StartThread(_ context.Context, _, model, instructions string) (appserver.Thread, error) {
+func (f *fakeClient) StartThread(_ context.Context, _, model, instructions string, dynamicTools []appserver.DynamicToolNamespace) (appserver.Thread, error) {
 	f.startThreads++
 	f.threadModel = model
 	f.threadInstructions = instructions
+	f.dynamicTools = dynamicTools
 	return appserver.Thread{ID: "new-thread"}, nil
 }
-func (f *fakeClient) ResumeThread(_ context.Context, _, _, instructions string) (appserver.Thread, error) {
+func (f *fakeClient) ResumeThread(_ context.Context, _, _, instructions string, dynamicTools []appserver.DynamicToolNamespace) (appserver.Thread, error) {
 	f.resumes++
 	f.resumeInstructions = instructions
+	f.dynamicTools = dynamicTools
 	if f.resumeErr != nil {
 		return appserver.Thread{}, f.resumeErr
 	}
@@ -67,6 +75,10 @@ func (f *fakeClient) ResumeThread(_ context.Context, _, _, instructions string) 
 func (f *fakeClient) ListMCPServers(context.Context, string) ([]appserver.MCPServer, error) {
 	f.mcpLists++
 	return f.mcpServers, nil
+}
+func (f *fakeClient) CallMCPTool(context.Context, string, string, string, json.RawMessage) (appserver.MCPToolResult, error) {
+	f.mcpCalls++
+	return f.mcpResult, nil
 }
 func (f *fakeClient) StartTurn(_ context.Context, _, _, _, model string) (appserver.Turn, error) {
 	f.turns++
@@ -77,9 +89,13 @@ func (f *fakeClient) Interrupt(context.Context, string, string) error { f.interr
 func (f *fakeClient) Unsubscribe(context.Context, string) error       { f.unsubscribes++; return nil }
 func (f *fakeClient) Events() <-chan appserver.Event                  { return f.events }
 func (f *fakeClient) Requests() <-chan appserver.ServerRequest        { return f.requests }
-func (f *fakeClient) ReplyRequest(context.Context, uint64, any) error { f.replies++; return nil }
-func (f *fakeClient) Done() <-chan struct{}                           { return f.done }
-func (f *fakeClient) Err() error                                      { return nil }
+func (f *fakeClient) ReplyRequest(_ context.Context, _ uint64, reply any) error {
+	f.replies++
+	f.lastReply = reply
+	return nil
+}
+func (f *fakeClient) Done() <-chan struct{} { return f.done }
+func (f *fakeClient) Err() error            { return nil }
 
 type fakeProcess struct {
 	closed       int
@@ -128,7 +144,8 @@ func testRuntime(t *testing.T) (*Runtime, *fakeClient, *fakeProcess) {
 func TestRuntime_StartSelectsOneThread(t *testing.T) {
 	r, f, _ := testRuntime(t)
 	defer r.Close(context.Background())
-	if err := r.Start(context.Background(), Options{}, "test"); err != nil {
+	dynamicTools := []appserver.DynamicToolNamespace{{Type: "namespace", Name: "toolbox"}}
+	if err := r.Start(context.Background(), Options{DynamicTools: dynamicTools}, "test"); err != nil {
 		t.Fatal(err)
 	}
 	if f.startThreads != 1 || r.ThreadID() != "new-thread" {
@@ -139,6 +156,9 @@ func TestRuntime_StartSelectsOneThread(t *testing.T) {
 	}
 	if !strings.Contains(f.threadInstructions, "promptline-toolbox") || f.mcpLists != 1 {
 		t.Fatalf("toolbox instructions = %q, MCP lists = %d", f.threadInstructions, f.mcpLists)
+	}
+	if !f.experimental || len(f.dynamicTools) != 1 || f.dynamicTools[0].Name != "toolbox" {
+		t.Fatalf("experimental=%v dynamic tools=%+v", f.experimental, f.dynamicTools)
 	}
 	state, err := r.instance.LoadState()
 	if err != nil {
@@ -392,18 +412,52 @@ func TestRuntimeDeclinesUnhandledServerRequest(t *testing.T) {
 	}
 }
 
+func TestRuntimeRoutesDynamicToolCallThroughMCP(t *testing.T) {
+	r, f, _ := testRuntime(t)
+	defer r.Close(context.Background())
+	if err := r.Start(context.Background(), Options{
+		DynamicTools: []appserver.DynamicToolNamespace{{Type: "namespace", Name: "toolbox"}},
+	}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	f.mcpResult = appserver.MCPToolResult{Content: []json.RawMessage{
+		json.RawMessage(`{"type":"text","text":"/workspace"}`),
+	}}
+	request := appserver.ServerRequest{
+		ID:     11,
+		Method: "item/tool/call",
+		Params: json.RawMessage(`{"threadId":"new-thread","turnId":"turn-1","callId":"call-1","namespace":"toolbox","tool":"pwd","arguments":{}}`),
+	}
+	if err := r.handleRequest(context.Background(), request, strings.NewReader("")); err != nil {
+		t.Fatal(err)
+	}
+	if f.mcpCalls != 1 || f.replies != 1 {
+		t.Fatalf("MCP calls=%d replies=%d", f.mcpCalls, f.replies)
+	}
+	reply, ok := f.lastReply.(map[string]any)
+	if !ok || reply["success"] != true {
+		t.Fatalf("dynamic tool reply = %#v", f.lastReply)
+	}
+	content, ok := reply["contentItems"].([]map[string]string)
+	if !ok || len(content) != 1 || content[0]["type"] != "inputText" || content[0]["text"] != "/workspace" {
+		t.Fatalf("dynamic tool content = %#v", reply["contentItems"])
+	}
+}
+
 func TestRuntimeRequestHandlerConsumesTerminalInputThroughRun(t *testing.T) {
 	r, f, _ := testRuntime(t)
 	if err := r.Start(context.Background(), Options{}, "test"); err != nil {
 		t.Fatal(err)
 	}
 	var got string
+	handled := make(chan struct{})
 	r.SetRequestHandler(func(_ context.Context, request appserver.ServerRequest, input io.Reader) error {
 		line, err := bufio.NewReader(input).ReadString('\n')
 		if err != nil {
 			return err
 		}
 		got = line
+		close(handled)
 		return f.ReplyRequest(context.Background(), request.ID, map[string]string{"decision": "accept"})
 	})
 	inputReader, inputWriter := io.Pipe()
@@ -412,6 +466,11 @@ func TestRuntimeRequestHandlerConsumesTerminalInputThroughRun(t *testing.T) {
 	go func() { done <- r.Run(context.Background(), inputReader, &fakeRenderer{}) }()
 	if _, err := io.WriteString(inputWriter, "yes\n"); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case <-handled:
+	case <-time.After(time.Second):
+		t.Fatal("approval handler did not consume terminal input")
 	}
 	if err := inputWriter.Close(); err != nil {
 		t.Fatal(err)

@@ -14,7 +14,9 @@ import (
 )
 
 func TestServerLifecycleAndDeniedCall(t *testing.T) {
-	registry, err := tools.NewRegistryWithConfig(tools.DefaultConfig())
+	config := tools.DefaultConfig()
+	config.WorkingDirectory = t.TempDir()
+	registry, err := tools.NewRegistryWithConfig(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +102,35 @@ func TestCodexConfigIsInstanceScoped(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("config mode = %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestDynamicToolboxExposesRegisteredToolsDeterministically(t *testing.T) {
+	config := tools.DefaultConfig()
+	config.WorkingDirectory = t.TempDir()
+	registry, err := tools.NewRegistryWithConfig(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = registry.Close() })
+	namespace := DynamicToolbox(registry)
+	if namespace.Type != "namespace" || namespace.Name != "toolbox" {
+		t.Fatalf("namespace = %+v", namespace)
+	}
+	if len(namespace.Tools) != len(registry.GetTools()) {
+		t.Fatalf("dynamic tools = %d, registered = %d", len(namespace.Tools), len(registry.GetTools()))
+	}
+	foundPWD := false
+	for index, tool := range namespace.Tools {
+		if index > 0 && namespace.Tools[index-1].Name > tool.Name {
+			t.Fatalf("tools are not sorted at %q", tool.Name)
+		}
+		if tool.Name == "pwd" {
+			foundPWD = tool.Type == "function" && tool.InputSchema["type"] == "object"
+		}
+	}
+	if !foundPWD {
+		t.Fatal("model-facing toolbox is missing a valid pwd definition")
 	}
 }
 

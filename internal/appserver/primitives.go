@@ -46,6 +46,22 @@ type MCPServer struct {
 	Name  string
 	Tools map[string]json.RawMessage
 }
+type DynamicTool struct {
+	Type        string         `json:"type"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"inputSchema"`
+}
+type DynamicToolNamespace struct {
+	Type        string        `json:"type"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Tools       []DynamicTool `json:"tools"`
+}
+type MCPToolResult struct {
+	Content []json.RawMessage `json:"content"`
+	IsError bool              `json:"isError,omitempty"`
+}
 type API struct {
 	c           *Client
 	mu          sync.Mutex
@@ -60,11 +76,8 @@ func (a *API) Initialize(ctx context.Context, in Initialize) error {
 	if a.initialized {
 		return errors.New("app-server already initialized")
 	}
-	if in.Experimental {
-		return errors.New("experimental api is disabled")
-	}
 	var r struct{}
-	if err := a.call(ctx, "initialize", map[string]any{"clientInfo": map[string]string{"name": in.ClientName, "version": in.ClientVersion}, "capabilities": map[string]any{"experimentalApi": false}}, &r, true); err != nil {
+	if err := a.call(ctx, "initialize", map[string]any{"clientInfo": map[string]string{"name": in.ClientName, "version": in.ClientVersion}, "capabilities": map[string]any{"experimentalApi": in.Experimental}}, &r, true); err != nil {
 		return err
 	}
 	if err := a.c.Notify("initialized", map[string]any{}); err != nil {
@@ -104,30 +117,36 @@ func (a *API) Account(ctx context.Context) (Account, error) {
 	}
 	return DecodeAccount(b)
 }
-func (a *API) StartThread(ctx context.Context, cwd, model, developerInstructions string) (Thread, error) {
+func (a *API) StartThread(ctx context.Context, cwd, model, developerInstructions string, dynamicTools []DynamicToolNamespace) (Thread, error) {
 	if err := a.require(); err != nil {
 		return Thread{}, err
 	}
 	var r struct {
 		Thread Thread `json:"thread"`
 	}
-	params := map[string]string{"cwd": cwd, "model": model}
+	params := map[string]any{"cwd": cwd, "model": model}
 	if developerInstructions != "" {
 		params["developerInstructions"] = developerInstructions
+	}
+	if len(dynamicTools) > 0 {
+		params["dynamicTools"] = dynamicTools
 	}
 	err := a.call(ctx, "thread/start", params, &r, false)
 	return r.Thread, err
 }
-func (a *API) ResumeThread(ctx context.Context, id, model, developerInstructions string) (Thread, error) {
+func (a *API) ResumeThread(ctx context.Context, id, model, developerInstructions string, dynamicTools []DynamicToolNamespace) (Thread, error) {
 	if err := a.require(); err != nil {
 		return Thread{}, err
 	}
 	var r struct {
 		Thread Thread `json:"thread"`
 	}
-	params := map[string]string{"threadId": id, "model": model}
+	params := map[string]any{"threadId": id, "model": model}
 	if developerInstructions != "" {
 		params["developerInstructions"] = developerInstructions
+	}
+	if len(dynamicTools) > 0 {
+		params["dynamicTools"] = dynamicTools
 	}
 	err := a.call(ctx, "thread/resume", params, &r, false)
 	return r.Thread, err
@@ -181,6 +200,22 @@ func (a *API) ListMCPServers(ctx context.Context, threadID string) ([]MCPServer,
 		servers = append(servers, MCPServer{Name: server.Name, Tools: server.Tools})
 	}
 	return servers, nil
+}
+func (a *API) CallMCPTool(ctx context.Context, threadID, server, tool string, arguments json.RawMessage) (MCPToolResult, error) {
+	if err := a.require(); err != nil {
+		return MCPToolResult{}, err
+	}
+	if len(arguments) == 0 {
+		arguments = json.RawMessage(`{}`)
+	}
+	var result MCPToolResult
+	err := a.call(ctx, "mcpServer/tool/call", map[string]any{
+		"threadId":  threadID,
+		"server":    server,
+		"tool":      tool,
+		"arguments": arguments,
+	}, &result, false)
+	return result, err
 }
 func (a *API) Interrupt(ctx context.Context, threadID, turnID string) error {
 	if err := a.require(); err != nil {

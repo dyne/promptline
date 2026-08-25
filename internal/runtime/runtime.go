@@ -4,6 +4,7 @@ package runtime
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -27,10 +28,15 @@ var (
 type API interface {
 	Initialize(context.Context, appserver.Initialize) error
 	Account(context.Context) (appserver.Account, error)
-	StartThread(context.Context, string, string, string) (appserver.Thread, error)
-	ResumeThread(context.Context, string, string, string) (appserver.Thread, error)
+	StartThread(
+		context.Context, string, string, string, []appserver.DynamicToolNamespace,
+	) (appserver.Thread, error)
+	ResumeThread(
+		context.Context, string, string, string, []appserver.DynamicToolNamespace,
+	) (appserver.Thread, error)
 	StartTurn(context.Context, string, string, string, string) (appserver.Turn, error)
 	ListMCPServers(context.Context, string) ([]appserver.MCPServer, error)
+	CallMCPTool(context.Context, string, string, string, json.RawMessage) (appserver.MCPToolResult, error)
 	Interrupt(context.Context, string, string) error
 	Unsubscribe(context.Context, string) error
 }
@@ -66,8 +72,9 @@ type Renderer interface {
 }
 
 type Options struct {
-	Resume   bool
-	ResumeID string
+	Resume       bool
+	ResumeID     string
+	DynamicTools []appserver.DynamicToolNamespace
 }
 
 // Runtime has one selected thread and serializes turns for one instance.
@@ -115,7 +122,12 @@ func (r *Runtime) SetRequestHandler(handler RequestHandler) { r.handler = handle
 func (r *Runtime) Start(ctx context.Context, opts Options, version string) error {
 	ctx, cancel := context.WithTimeout(ctx, r.instance.Timeouts().Startup)
 	defer cancel()
-	if err := r.api.Initialize(ctx, appserver.Initialize{ClientName: "promptline", ClientVersion: version}); err != nil {
+	initialize := appserver.Initialize{
+		ClientName:    "promptline",
+		ClientVersion: version,
+		Experimental:  len(opts.DynamicTools) > 0,
+	}
+	if err := r.api.Initialize(ctx, initialize); err != nil {
 		return fmt.Errorf("initialize app-server: %w", err)
 	}
 	account, err := r.api.Account(ctx)
@@ -145,7 +157,7 @@ func (r *Runtime) Start(ctx context.Context, opts Options, version string) error
 	var thread appserver.Thread
 	developerInstructions := initPrompt()
 	if id != "" {
-		thread, err = r.api.ResumeThread(ctx, id, r.instance.Model(), developerInstructions)
+		thread, err = r.api.ResumeThread(ctx, id, r.instance.Model(), developerInstructions, opts.DynamicTools)
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrResumeFailed, err)
 		}
@@ -155,6 +167,7 @@ func (r *Runtime) Start(ctx context.Context, opts Options, version string) error
 			r.instance.WorkingDirectory(),
 			r.instance.Model(),
 			developerInstructions,
+			opts.DynamicTools,
 		)
 		if err != nil {
 			return fmt.Errorf("start primary thread: %w", err)
@@ -276,6 +289,17 @@ func (r *Runtime) Run(ctx context.Context, input io.Reader, render Renderer) err
 		return err
 	}
 	for {
+		// A server request already waiting in the queue owns the next terminal
+		// line. Handle it before ordinary prompt input so an approval answer
+		// cannot be consumed as a new user turn.
+		select {
+		case request := <-r.requestStream():
+			if err := r.handleRequest(ctx, request, &lineReader{lines: lines}); err != nil {
+				return err
+			}
+			continue
+		default:
+		}
 		select {
 		case <-ctx.Done():
 			_ = r.Interrupt(context.Background())
@@ -329,6 +353,9 @@ func (r *Runtime) handleRequest(ctx context.Context, request appserver.ServerReq
 	if r.requests == nil {
 		return nil
 	}
+	if request.Method == "item/tool/call" {
+		return r.handleDynamicToolCall(ctx, request)
+	}
 	if r.handler != nil {
 		if err := r.handler(ctx, request, input); err != nil {
 			return err
@@ -336,6 +363,51 @@ func (r *Runtime) handleRequest(ctx context.Context, request appserver.ServerReq
 		return nil
 	}
 	return r.requests.ReplyRequest(ctx, request.ID, map[string]string{"decision": "decline"})
+}
+
+func (r *Runtime) handleDynamicToolCall(ctx context.Context, request appserver.ServerRequest) error {
+	var call struct {
+		ThreadID  string          `json:"threadId"`
+		Namespace string          `json:"namespace"`
+		Tool      string          `json:"tool"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(request.Params, &call); err != nil {
+		return r.replyDynamicToolError(ctx, request.ID, "invalid toolbox call: "+err.Error())
+	}
+	r.mu.Lock()
+	threadID := r.threadID
+	r.mu.Unlock()
+	if call.Namespace != "toolbox" || call.Tool == "" || call.ThreadID != threadID {
+		return r.replyDynamicToolError(ctx, request.ID, "invalid toolbox namespace, tool, or thread")
+	}
+	result, err := r.api.CallMCPTool(ctx, threadID, "promptline-toolbox", call.Tool, call.Arguments)
+	if err != nil {
+		return r.replyDynamicToolError(ctx, request.ID, err.Error())
+	}
+	contentItems := make([]map[string]string, 0, len(result.Content))
+	for _, raw := range result.Content {
+		var content struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(raw, &content); err == nil && content.Type == "text" {
+			contentItems = append(contentItems, map[string]string{"type": "inputText", "text": content.Text})
+			continue
+		}
+		contentItems = append(contentItems, map[string]string{"type": "inputText", "text": string(raw)})
+	}
+	return r.requests.ReplyRequest(ctx, request.ID, map[string]any{
+		"contentItems": contentItems,
+		"success":      !result.IsError,
+	})
+}
+
+func (r *Runtime) replyDynamicToolError(ctx context.Context, id uint64, message string) error {
+	return r.requests.ReplyRequest(ctx, id, map[string]any{
+		"contentItems": []map[string]string{{"type": "inputText", "text": message}},
+		"success":      false,
+	})
 }
 
 // lineReader is the sole consumer of terminal input while an approval is
@@ -409,7 +481,7 @@ func (r *Runtime) renderEvent(event appserver.Event, render Renderer) error {
 		return render.Text(item.Text)
 	}
 	isProgressItem := item.Type == "commandExecution" || item.Type == "fileChange" ||
-		item.Type == "mcpToolCall" || item.Type == "webSearch"
+		item.Type == "mcpToolCall" || item.Type == "dynamicToolCall" || item.Type == "webSearch"
 	if event.Method == "item/started" && isProgressItem {
 		return render.Progress(item.Type)
 	}
