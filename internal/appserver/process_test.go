@@ -110,7 +110,7 @@ exit 23
 		if ok {
 			t.Fatal("process wait channel remains open")
 		}
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("process was not reaped")
 	}
 }
