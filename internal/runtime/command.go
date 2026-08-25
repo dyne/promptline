@@ -29,7 +29,12 @@ func Parse(args []string, stderr io.Writer) (Command, error) {
 	var c Command
 	fs.StringVar(&c.Instance.Name, "instance", "default", "named instance")
 	fs.StringVar(&c.Instance.WorkingDirectory, "cwd", "", "working directory")
-	fs.StringVar(&c.Instance.StateRoot, "state-root", "", "private state root")
+	fs.StringVar(
+		&c.Instance.StateRoot,
+		"state-root",
+		"",
+		"private state root (default: ~/.promptline/instances; root: /var/lib/promptline/instances)",
+	)
 	fs.StringVar(&c.Instance.CodexExecutable, "codex", "codex", "Codex executable")
 	fs.StringVar(&c.Instance.Model, "model", "", "Codex model")
 	fs.BoolVar(&c.Instance.ToolboxEnabled, "toolbox", true, "enable the instance toolbox MCP server")

@@ -1,6 +1,6 @@
 # Makefile for promptline
 
-.PHONY: build install clean test coverage help release test-race fmt vet benchmarks
+.PHONY: build install clean test test-integration coverage help release test-race fmt vet benchmarks
 
 GO ?= go
 GOOS ?= $(shell $(GO) env GOOS)
@@ -18,6 +18,7 @@ help:
 	@echo "  make install   - Install the application globally"
 	@echo "  make clean     - Clean build artifacts"
 	@echo "  make test      - Run tests"
+	@echo "  make test-integration - Run mock app-server and toolbox integration tests"
 	@echo "  make test-race - Run tests with race detector"
 	@echo "  make coverage  - Run tests with coverage and display report"
 	@echo "  make help      - Show this help message"
@@ -42,6 +43,9 @@ clean:
 # Run tests
 test:
 	$(GO) test ./...
+
+test-integration:
+	$(GO) test -tags=integration ./...
 
 # Run tests with race detector
 test-race:

@@ -25,11 +25,12 @@ Promptline nor its child creates, controls, or multiplexes tmux.
 
 ## Instance state and policy boundaries
 
-An instance has a private state directory.  The root default is
-`/var/lib/promptline/instances/<name>`; non-root installations must provide an
-explicit safe state root.  State directories are private (`0700`), regular
-state files are private (`0600`), and a process-lifetime advisory lock prevents
-two foreground processes from owning the same instance.
+An instance has a private state directory. The default is
+`~/.promptline/instances/<name>` for a regular user and
+`/var/lib/promptline/instances/<name>` for root. An explicit state root must be
+absolute. State directories are private (`0700`), regular state files are
+private (`0600`), and a process-lifetime advisory lock prevents two foreground
+processes from owning the same instance.
 
 The embedded Unix toolbox is an instance-owned capability.  Promptline decides
 approval policy and renders approval requests; the app-server client only

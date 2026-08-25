@@ -18,6 +18,17 @@ GOCACHE="$PWD/.gocache" /usr/local/go/bin/go build -o promptline ./cmd/promptlin
 ./promptline --help
 ```
 
+Run the unit suite and the isolated end-to-end suite with:
+
+```bash
+GOCACHE="$PWD/.gocache" /usr/local/go/bin/go test ./...
+GOCACHE="$PWD/.gocache" /usr/local/go/bin/go test -tags=integration ./...
+```
+
+The integration suite runs against a local mock Codex app-server and exercises
+the real Promptline toolbox MCP server with basic embedded u-root tools. It does
+not require network access, Codex credentials, or a live account.
+
 Install and authenticate a compatible Codex CLI before starting Promptline.
 Promptline verifies the configured binary before it creates or resumes a
 thread.
@@ -29,10 +40,10 @@ create, manage, or multiplex tmux sessions.
 
 ```bash
 tmux new-session -s promptline-ops
-./promptline --instance ops --cwd /srv/ops --state-root /var/lib/promptline/instances
+./promptline --instance ops --cwd ~/devel/ops
 
 # In a separate pane or session:
-./promptline --instance docs --cwd /srv/docs --state-root /var/lib/promptline/instances
+./promptline --instance docs --cwd ~/devel/docs
 ```
 
 Each instance has private `0700` state under
@@ -40,12 +51,17 @@ Each instance has private `0700` state under
 record, lock, and audit journal. Stop with `/quit`, EOF, or `SIGTERM`. `Ctrl-C`
 interrupts an active turn; it does not create another thread.
 
+When `--state-root` is omitted, Promptline creates and uses
+`~/.promptline/instances` for a regular user and
+`/var/lib/promptline/instances` for root. An explicit `--state-root` must be an
+absolute path; Promptline creates it when its parent is writable.
+
 By default, a later launch resumes the stored primary thread. Use `--new` to
 explicitly replace it, or `--resume THREAD_ID` to request a specific thread:
 
 ```bash
-./promptline --instance ops --cwd /srv/ops --state-root /var/lib/promptline/instances
-./promptline --instance ops --cwd /srv/ops --state-root /var/lib/promptline/instances --new
+./promptline --instance ops --cwd ~/devel/ops
+./promptline --instance ops --cwd ~/devel/ops --new
 ```
 
 If the app-server reports that a stored thread cannot be resumed, Promptline
@@ -59,7 +75,7 @@ perform the stored resume.
 embedded Go/u-root toolbox to Codex. It is not a network daemon.
 
 ```bash
-./promptline toolbox serve --instance ops --cwd /srv/ops --state-root /var/lib/promptline/instances
+./promptline toolbox serve --instance ops --cwd ~/devel/ops
 ```
 
 Mutating effects and privilege expansion are asked or denied by default.
@@ -94,6 +110,13 @@ reimplement it.
 Use `--codex /absolute/path/to/codex` when the desired binary is not on
 `PATH`. An unsupported version, malformed version output, or missing stable
 app-server capability is an actionable startup error, not a best-effort mode.
+
+An error containing `cannot unmarshal object into Go struct field
+Thread.thread.status of type string` means the Promptline binary expects an
+older shape for the Codex app-server's `thread.status` field. It does not refer
+to the working directory or Promptline's saved thread state. Upgrade or rebuild
+Promptline with support for the installed Codex CLI; deleting instance state or
+using `--new` does not correct this protocol-decoding mismatch.
 
 Promptline has no daemon, control socket, WebSocket transport, automatic
 restart, automatic tmux integration, second model runtime, internal database,

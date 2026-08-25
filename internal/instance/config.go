@@ -13,7 +13,10 @@ import (
 	"time"
 )
 
-const defaultRootStateDirectory = "/var/lib/promptline/instances"
+const (
+	defaultRootStateDirectory = "/var/lib/promptline/instances"
+	defaultUserStateDirectory = ".promptline/instances"
+)
 
 var instanceNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
@@ -37,7 +40,7 @@ type OutputCaps struct {
 	StderrBytes int
 }
 
-// Config is input to New. StateRoot is required for non-root users.
+// Config is input to New. StateRoot defaults according to the effective user.
 // PluginPassthrough is copied during construction and cannot later mutate an Instance.
 type Config struct {
 	Name              string
@@ -98,7 +101,15 @@ func New(cfg Config) (*Instance, error) {
 	if strings.ContainsRune(cfg.Name, '\x00') {
 		return nil, errors.New("instance name contains NUL")
 	}
-	root, err := resolveStateRoot(os.Geteuid(), cfg.StateRoot)
+	homeDirectory := ""
+	if cfg.StateRoot == "" && os.Geteuid() != 0 {
+		resolvedHome, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve home directory for state root: %w", err)
+		}
+		homeDirectory = resolvedHome
+	}
+	root, err := resolveStateRoot(os.Geteuid(), cfg.StateRoot, homeDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -166,12 +177,16 @@ func New(cfg Config) (*Instance, error) {
 		timeouts: timeouts, outputCaps: caps}, nil
 }
 
-func resolveStateRoot(euid int, supplied string) (string, error) {
+func resolveStateRoot(euid int, supplied, homeDirectory string) (string, error) {
 	if supplied == "" {
-		if euid != 0 {
-			return "", errors.New("state root is required when not running as root")
+		if euid == 0 {
+			supplied = defaultRootStateDirectory
+		} else {
+			if homeDirectory == "" {
+				return "", errors.New("home directory is required for the default state root")
+			}
+			supplied = filepath.Join(homeDirectory, defaultUserStateDirectory)
 		}
-		supplied = defaultRootStateDirectory
 	}
 	if !filepath.IsAbs(supplied) {
 		return "", errors.New("state root must be absolute")

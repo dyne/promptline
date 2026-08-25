@@ -23,17 +23,39 @@ func TestInstanceNameValidation(t *testing.T) {
 }
 
 func TestResolveStateRootByPrivilege(t *testing.T) {
-	if got, err := resolveStateRoot(0, ""); err != nil || got != defaultRootStateDirectory {
+	home := t.TempDir()
+	if got, err := resolveStateRoot(0, "", ""); err != nil || got != defaultRootStateDirectory {
 		t.Fatalf("root default = %q, %v", got, err)
 	}
-	if _, err := resolveStateRoot(1000, ""); err == nil {
-		t.Fatal("non-root default should fail")
+	wantUserRoot := filepath.Join(home, defaultUserStateDirectory)
+	if got, err := resolveStateRoot(1000, "", home); err != nil || got != wantUserRoot {
+		t.Fatalf("user default = %q, %v; want %q", got, err, wantUserRoot)
 	}
-	if got, err := resolveStateRoot(1000, "/tmp/promptline-state"); err != nil || got != "/tmp/promptline-state" {
+	if _, err := resolveStateRoot(1000, "", ""); err == nil {
+		t.Fatal("missing home directory accepted for user default")
+	}
+	if got, err := resolveStateRoot(1000, "/tmp/promptline-state", ""); err != nil || got != "/tmp/promptline-state" {
 		t.Fatalf("explicit root = %q, %v", got, err)
 	}
-	if _, err := resolveStateRoot(1000, "relative"); err == nil {
+	if _, err := resolveStateRoot(1000, "relative", ""); err == nil {
 		t.Fatal("relative root should fail")
+	}
+}
+
+func TestNewCreatesMissingStateRoot(t *testing.T) {
+	stateRoot := filepath.Join(t.TempDir(), "nested", "instances")
+	in, err := New(Config{Name: "one", StateRoot: stateRoot, WorkingRoot: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{stateRoot, in.StateDir(), in.CodexHome()} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != privateDirectoryMode {
+			t.Fatalf("%s mode = %o", path, info.Mode().Perm())
+		}
 	}
 }
 

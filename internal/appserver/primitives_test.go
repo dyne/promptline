@@ -27,7 +27,7 @@ func TestAPI_Lifecycle(t *testing.T) {
 			case "initialize":
 				result = `{}`
 			case "thread/start", "thread/resume", "thread/read":
-				result = `{"thread":{"id":"thr_1","status":"idle"}}`
+				result = `{"thread":{"id":"thr_1","status":{"type":"idle"}}}`
 			case "turn/start":
 				result = `{"turn":{"id":"turn_1","status":"inProgress"}}`
 			default:
