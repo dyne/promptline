@@ -15,19 +15,24 @@ import (
 )
 
 var (
-	ErrActiveTurn   = errors.New("a turn is already active")
-	ErrShuttingDown = errors.New("runtime is shutting down")
-	ErrResumeFailed = errors.New("stored primary thread cannot be resumed; rerun with --new to create a replacement")
+	ErrActiveTurn             = errors.New("a turn is already active")
+	ErrShuttingDown           = errors.New("runtime is shutting down")
+	ErrResumeFailed           = errors.New("primary thread cannot be resumed; start Promptline without 'resume' to create a replacement")
+	ErrNoStoredThread         = errors.New("no saved primary thread is available to resume")
+	ErrAuthenticationRequired = errors.New("codex authentication required")
+	ErrToolboxUnavailable     = errors.New("promptline toolbox MCP server is unavailable")
 )
 
 // API is the deliberately small app-server surface used by the terminal.
 type API interface {
 	Initialize(context.Context, appserver.Initialize) error
-	Account(context.Context) ([]byte, error)
-	StartThread(context.Context, string, string) (appserver.Thread, error)
-	ResumeThread(context.Context, string) (appserver.Thread, error)
-	StartTurn(context.Context, string, string, string) (appserver.Turn, error)
+	Account(context.Context) (appserver.Account, error)
+	StartThread(context.Context, string, string, string) (appserver.Thread, error)
+	ResumeThread(context.Context, string, string, string) (appserver.Thread, error)
+	StartTurn(context.Context, string, string, string, string) (appserver.Turn, error)
+	ListMCPServers(context.Context, string) ([]appserver.MCPServer, error)
 	Interrupt(context.Context, string, string) error
+	Unsubscribe(context.Context, string) error
 }
 
 // Client exposes streams which remain owned by exactly one app-server child.
@@ -39,6 +44,7 @@ type Client interface {
 }
 
 type Process interface {
+	CodexVersion() string
 	Close(context.Context) error
 }
 
@@ -53,37 +59,49 @@ type requestClient interface {
 
 type Renderer interface {
 	Prompt() error
+	Delta(string) error
 	Text(string) error
 	Progress(string) error
 	Error(error) error
 }
 
 type Options struct {
-	New      bool
+	Resume   bool
 	ResumeID string
 }
 
 // Runtime has one selected thread and serializes turns for one instance.
 type Runtime struct {
-	instance  *instance.Instance
-	api       Client
-	process   Process
-	lock      *instance.Lock
-	threadID  string
-	mu        sync.Mutex
-	turnID    string
-	closing   bool
-	closeOnce sync.Once
-	closeErr  error
-	requests  requestClient
-	handler   RequestHandler
+	instance           *instance.Instance
+	api                Client
+	process            Process
+	lock               *instance.Lock
+	threadID           string
+	mu                 sync.Mutex
+	turnID             string
+	closing            bool
+	closeOnce          sync.Once
+	closeErr           error
+	requests           requestClient
+	handler            RequestHandler
+	streamedAgentItems map[string]struct{}
+	turnHasOutput      bool
+	streamOpen         bool
+	turnErrorRendered  bool
+	toolboxTools       int
 }
 
 func New(in *instance.Instance, api Client, process Process, lock *instance.Lock) (*Runtime, error) {
 	if in == nil || api == nil || process == nil || lock == nil {
 		return nil, errors.New("runtime requires instance, client, process, and lock")
 	}
-	r := &Runtime{instance: in, api: api, process: process, lock: lock}
+	r := &Runtime{
+		instance:           in,
+		api:                api,
+		process:            process,
+		lock:               lock,
+		streamedAgentItems: map[string]struct{}{},
+	}
 	if requests, ok := api.(requestClient); ok {
 		r.requests = requests
 	}
@@ -100,25 +118,44 @@ func (r *Runtime) Start(ctx context.Context, opts Options, version string) error
 	if err := r.api.Initialize(ctx, appserver.Initialize{ClientName: "promptline", ClientVersion: version}); err != nil {
 		return fmt.Errorf("initialize app-server: %w", err)
 	}
-	if _, err := r.api.Account(ctx); err != nil {
+	account, err := r.api.Account(ctx)
+	if err != nil {
 		return fmt.Errorf("read Codex authentication state: %w", err)
+	}
+	if !account.Authenticated() {
+		return fmt.Errorf(
+			"%w for instance %q; run CODEX_HOME=%q %q login, then restart Promptline",
+			ErrAuthenticationRequired,
+			r.instance.Name(),
+			r.instance.CodexHome(),
+			r.instance.CodexExecutable(),
+		)
 	}
 	state, err := r.instance.LoadState()
 	if err != nil {
 		return fmt.Errorf("load instance state: %w", err)
 	}
 	id := opts.ResumeID
-	if id == "" && !opts.New {
+	if id == "" && opts.Resume {
 		id = state.LastPrimaryThreadID
+		if id == "" {
+			return ErrNoStoredThread
+		}
 	}
 	var thread appserver.Thread
+	developerInstructions := initPrompt()
 	if id != "" {
-		thread, err = r.api.ResumeThread(ctx, id)
+		thread, err = r.api.ResumeThread(ctx, id, r.instance.Model(), developerInstructions)
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrResumeFailed, err)
 		}
 	} else {
-		thread, err = r.api.StartThread(ctx, r.instance.WorkingDirectory(), r.instance.Model())
+		thread, err = r.api.StartThread(
+			ctx,
+			r.instance.WorkingDirectory(),
+			r.instance.Model(),
+			developerInstructions,
+		)
 		if err != nil {
 			return fmt.Errorf("start primary thread: %w", err)
 		}
@@ -126,14 +163,41 @@ func (r *Runtime) Start(ctx context.Context, opts Options, version string) error
 	if thread.ID == "" {
 		return errors.New("app-server returned a thread without an ID")
 	}
-	state.LastPrimaryThreadID = thread.ID
-	if err := r.instance.SaveState(state); err != nil {
-		return fmt.Errorf("persist primary thread: %w", err)
-	}
 	r.mu.Lock()
 	r.threadID = thread.ID
 	r.mu.Unlock()
+	if r.instance.ToolboxEnabled() {
+		toolCount, err := r.requireToolbox(ctx, thread.ID)
+		if err != nil {
+			return err
+		}
+		r.toolboxTools = toolCount
+	}
+	state.LastPrimaryThreadID = thread.ID
+	state.CodexVersion = r.process.CodexVersion()
+	if err := r.instance.SaveState(state); err != nil {
+		return fmt.Errorf("persist primary thread: %w", err)
+	}
 	return nil
+}
+
+func (r *Runtime) requireToolbox(ctx context.Context, threadID string) (int, error) {
+	servers, err := r.api.ListMCPServers(ctx, threadID)
+	if err != nil {
+		return 0, fmt.Errorf("%w: inspect MCP servers: %v", ErrToolboxUnavailable, err)
+	}
+	for _, server := range servers {
+		if server.Name != "promptline-toolbox" {
+			continue
+		}
+		for _, required := range []string{"ls", "pwd", "cat"} {
+			if _, ok := server.Tools[required]; !ok {
+				return 0, fmt.Errorf("%w: server is missing required tool %q", ErrToolboxUnavailable, required)
+			}
+		}
+		return len(server.Tools), nil
+	}
+	return 0, fmt.Errorf("%w: Codex did not load promptline-toolbox from its instance config", ErrToolboxUnavailable)
 }
 
 func (r *Runtime) ThreadID() string { r.mu.Lock(); defer r.mu.Unlock(); return r.threadID }
@@ -155,7 +219,7 @@ func (r *Runtime) StartTurn(ctx context.Context, text string) (appserver.Turn, e
 	if threadID == "" {
 		return appserver.Turn{}, errors.New("no primary thread selected")
 	}
-	turn, err := r.api.StartTurn(ctx, threadID, text, "")
+	turn, err := r.api.StartTurn(ctx, threadID, text, "", r.instance.Model())
 	if err != nil {
 		return appserver.Turn{}, fmt.Errorf("start turn: %w", err)
 	}
@@ -164,6 +228,10 @@ func (r *Runtime) StartTurn(ctx context.Context, text string) (appserver.Turn, e
 	}
 	r.mu.Lock()
 	r.turnID = turn.ID
+	r.streamedAgentItems = map[string]struct{}{}
+	r.turnHasOutput = false
+	r.streamOpen = false
+	r.turnErrorRendered = false
 	r.mu.Unlock()
 	return turn, nil
 }
@@ -199,6 +267,11 @@ func (r *Runtime) Run(ctx context.Context, input io.Reader, render Renderer) err
 		errs <- s.Err()
 		close(lines)
 	}()
+	if r.toolboxTools > 0 {
+		if err := render.Progress(fmt.Sprintf("toolbox ready: %d tools", r.toolboxTools)); err != nil {
+			return err
+		}
+	}
 	if err := render.Prompt(); err != nil {
 		return err
 	}
@@ -230,6 +303,8 @@ func (r *Runtime) Run(ctx context.Context, input io.Reader, render Renderer) err
 				if e := render.Error(err); e != nil {
 					return e
 				}
+			} else if err := render.Progress("working"); err != nil {
+				return err
 			}
 		case event := <-r.api.Events():
 			if err := r.renderEvent(event, render); err != nil {
@@ -296,7 +371,10 @@ func (r *Runtime) command(ctx context.Context, line string, render Renderer) (bo
 	case "/interrupt":
 		return false, r.Interrupt(ctx)
 	case "/info":
-		return false, render.Progress("instance=" + r.instance.Name() + " thread=" + r.ThreadID())
+		return false, render.Progress(fmt.Sprintf(
+			"instance=%s thread=%s model=%s toolbox-tools=%d",
+			r.instance.Name(), r.ThreadID(), r.instance.Model(), r.toolboxTools,
+		))
 	default:
 		if strings.HasPrefix(line, "/") {
 			return false, render.Error(fmt.Errorf("unknown command %q", line))
@@ -306,24 +384,95 @@ func (r *Runtime) command(ctx context.Context, line string, render Renderer) (bo
 }
 
 func (r *Runtime) renderEvent(event appserver.Event, render Renderer) error {
-	if event.Method == "turn/completed" {
-		r.mu.Lock()
-		id := r.turnID
-		r.mu.Unlock()
-		r.completeTurn(id)
-		return render.Prompt()
+	switch event.Method {
+	case "item/agentMessage/delta":
+		return r.renderAgentMessageDelta(event.Params, render)
+	case "turn/completed":
+		return r.renderTurnCompletion(event.Params, render)
+	case "error":
+		return r.renderErrorEvent(event.Params, render)
 	}
 	item, err := appserver.DecodeItem(event.Params)
 	if err != nil {
 		return nil
 	} // additive notifications are not terminal UI errors
 	if item.Type == "agentMessage" || item.Type == "text" {
+		r.mu.Lock()
+		_, streamed := r.streamedAgentItems[item.ID]
+		if !streamed && item.Text != "" {
+			r.turnHasOutput = true
+		}
+		r.mu.Unlock()
+		if streamed || item.Text == "" {
+			return nil
+		}
 		return render.Text(item.Text)
 	}
-	if item.Type == "commandExecution" || item.Type == "fileChange" {
+	isProgressItem := item.Type == "commandExecution" || item.Type == "fileChange" ||
+		item.Type == "mcpToolCall" || item.Type == "webSearch"
+	if event.Method == "item/started" && isProgressItem {
 		return render.Progress(item.Type)
 	}
 	return nil
+}
+
+func (r *Runtime) renderAgentMessageDelta(params []byte, render Renderer) error {
+	delta, err := appserver.DecodeAgentMessageDelta(params)
+	if err != nil || delta.Delta == "" {
+		return nil
+	}
+	r.mu.Lock()
+	r.streamedAgentItems[delta.ItemID] = struct{}{}
+	r.turnHasOutput = true
+	r.streamOpen = true
+	r.mu.Unlock()
+	return render.Delta(delta.Delta)
+}
+
+func (r *Runtime) renderTurnCompletion(params []byte, render Renderer) error {
+	completion, _ := appserver.DecodeTurnCompletion(params)
+	r.mu.Lock()
+	turnID := r.turnID
+	streamOpen := r.streamOpen
+	hasOutput := r.turnHasOutput
+	errorRendered := r.turnErrorRendered
+	r.streamOpen = false
+	r.mu.Unlock()
+	if streamOpen {
+		if err := render.Text(""); err != nil {
+			return err
+		}
+	}
+	if !hasOutput && completion.FinalMessage.Text != "" {
+		if err := render.Text(completion.FinalMessage.Text); err != nil {
+			return err
+		}
+	}
+	if completion.Status == "failed" && completion.ErrorMessage != "" && !errorRendered {
+		if err := render.Error(errors.New(completion.ErrorMessage)); err != nil {
+			return err
+		}
+	}
+	r.completeTurn(turnID)
+	return render.Prompt()
+}
+
+func (r *Runtime) renderErrorEvent(params []byte, render Renderer) error {
+	message, err := appserver.DecodeErrorMessage(params)
+	if err != nil {
+		return nil
+	}
+	r.mu.Lock()
+	streamOpen := r.streamOpen
+	r.streamOpen = false
+	r.turnErrorRendered = true
+	r.mu.Unlock()
+	if streamOpen {
+		if err := render.Text(""); err != nil {
+			return err
+		}
+	}
+	return render.Error(errors.New(message))
 }
 
 func (r *Runtime) Close(ctx context.Context) error {
@@ -332,8 +481,14 @@ func (r *Runtime) Close(ctx context.Context) error {
 		defer cancel()
 		r.mu.Lock()
 		r.closing = true
+		threadID := r.threadID
 		r.mu.Unlock()
 		var errs []error
+		if threadID != "" {
+			if err := r.api.Unsubscribe(closeCtx, threadID); err != nil {
+				errs = append(errs, fmt.Errorf("unsubscribe primary thread: %w", err))
+			}
+		}
 		if err := r.process.Close(closeCtx); err != nil {
 			errs = append(errs, err)
 		}

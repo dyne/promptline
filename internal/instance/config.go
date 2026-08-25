@@ -16,6 +16,7 @@ import (
 const (
 	defaultRootStateDirectory = "/var/lib/promptline/instances"
 	defaultUserStateDirectory = ".promptline/instances"
+	DefaultModel              = "gpt-5.6-terra"
 )
 
 var instanceNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
@@ -156,6 +157,10 @@ func New(cfg Config) (*Instance, error) {
 	if executable == "" {
 		executable = "codex"
 	}
+	model := cfg.Model
+	if model == "" {
+		model = DefaultModel
+	}
 	timeouts := cfg.Timeouts
 	if timeouts.Startup <= 0 {
 		timeouts.Startup = 15 * time.Second
@@ -172,7 +177,7 @@ func New(cfg Config) (*Instance, error) {
 	}
 	return &Instance{name: cfg.Name, stateRoot: root, stateDir: stateDir, workingRoot: workingRoot,
 		workingDirectory: workingDirectory, codexExecutable: executable, codexHome: codexHome,
-		model: cfg.Model, reasoningEffort: cfg.ReasoningEffort, approvalMode: mode,
+		model: model, reasoningEffort: cfg.ReasoningEffort, approvalMode: mode,
 		toolboxEnabled: cfg.ToolboxEnabled, pluginPassthrough: append([]string(nil), cfg.PluginPassthrough...),
 		timeouts: timeouts, outputCaps: caps}, nil
 }

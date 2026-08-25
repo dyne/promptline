@@ -21,3 +21,10 @@ func TestBoundedWriterAndRedaction(t *testing.T) {
 		t.Fatalf("stderr redaction = %q", got)
 	}
 }
+
+func TestProcessReportsCodexVersion(t *testing.T) {
+	p := Process{codexVersion: "0.149.0"}
+	if got := p.CodexVersion(); got != "0.149.0" {
+		t.Fatalf("CodexVersion() = %q, want 0.149.0", got)
+	}
+}

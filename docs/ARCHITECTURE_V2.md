@@ -34,8 +34,14 @@ processes from owning the same instance.
 
 The embedded Unix toolbox is an instance-owned capability.  Promptline decides
 approval policy and renders approval requests; the app-server client only
-transports typed requests and replies.  Promptline appends its own audit events
-to an instance-local journal.  Future indexing may consume that journal, but
+transports typed requests and replies. Promptline requires Codex's thread-scoped
+MCP inventory to contain the toolbox and its core tools before entering the
+foreground prompt, then directs both new and resumed threads to prefer that
+toolbox for supported Unix operations. Those developer instructions are
+embedded from `internal/runtime/init-prompt.md`. The same toolbox is exposed to
+other harnesses by the standalone `mcp-server` command without creating an
+instance. Promptline appends its own audit events
+to an instance-local journal. Future indexing may consume that journal, but
 v2 provides no index, search, embeddings, or retrieval service.  Context-mode,
 when desired, remains an optional external Codex plugin rather than a
 Promptline subsystem.
@@ -48,14 +54,21 @@ unrecognized future state schemas stop startup.
 
 ## Codex compatibility
 
-App-server schemas are version-specific.  The compatibility evidence for a
+App-server schemas are version-specific. The compatibility evidence for a
 Promptline release consists of the user-owned `CODEX_APP_SERVER.md`, a schema
 fixture generated with the supported installed Codex CLI, and a startup probe
-of the configured executable.  The probe must resolve the executable without a
-shell, read its version, and check the required stable app-server surface before
-any thread or turn mutation.  Stable fields are used by default; experimental
-features are disabled unless an explicit future configuration enables a tested
-feature.  Unknown or incompatible binaries are rejected rather than guessed.
+of the configured executable. The probe must resolve the executable without a
+shell and record its well-formed reported version before any thread or turn
+mutation. A version differing from the reference fixture is tolerated; actual
+process and protocol errors remain startup failures. Stable fields are used by
+default, and experimental features are disabled unless an explicit future
+configuration enables a tested feature.
+
+After initialization, Promptline reads the app-server account state before any
+thread mutation. When the selected provider requires OpenAI authentication and
+the instance-private `CODEX_HOME` has no account, startup fails with the exact
+instance-scoped `codex login` command. Test fixtures are selected explicitly
+with `--mock-codex PATH`; normal operation never silently falls back to a mock.
 
 ## Deliberate non-goals
 
@@ -68,5 +81,6 @@ cross-instance search, embeddings, or generalized repository/SQLite layer.
 ## Release compatibility
 
 This architecture is the v2 public compatibility boundary. Releases validate
-the checked-in stable protocol fixture and reject unsupported Codex binaries at
-startup rather than attempting to preserve v1 chat-completions behavior.
+the checked-in stable protocol fixture as reference evidence while runtime
+compatibility is determined by the actual app-server exchange, not an exact
+Codex CLI version match.

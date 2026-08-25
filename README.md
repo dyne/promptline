@@ -18,6 +18,11 @@ GOCACHE="$PWD/.gocache" /usr/local/go/bin/go build -o promptline ./cmd/promptlin
 ./promptline --help
 ```
 
+`--version` reports the Promptline build, installed Codex CLI, vendored u-root,
+and Go runtime versions. Use `--codex /path/to/codex --version` to inspect a
+non-default Codex executable. If Codex is unavailable, the report says so while
+still printing the vendored and runtime component versions.
+
 Run the unit suite and the isolated end-to-end suite with:
 
 ```bash
@@ -27,11 +32,24 @@ GOCACHE="$PWD/.gocache" /usr/local/go/bin/go test -tags=integration ./...
 
 The integration suite runs against a local mock Codex app-server and exercises
 the real Promptline toolbox MCP server with basic embedded u-root tools. It does
-not require network access, Codex credentials, or a live account.
+not require network access, Codex credentials, or a live account. Tests select
+their generated fixture explicitly with `--mock-codex PATH`; this flag is not
+for normal operation.
 
 Install and authenticate a compatible Codex CLI before starting Promptline.
 Promptline verifies the configured binary before it creates or resumes a
 thread.
+
+Each Promptline instance has a private `CODEX_HOME`, so authentication in the
+default Codex home is not automatically shared. On an unauthenticated startup,
+Promptline exits before creating a thread or showing `>` and prints the exact
+instance-specific command to run, for example:
+
+```bash
+CODEX_HOME="$HOME/.promptline/instances/default/codex-home" codex login
+```
+
+Restart Promptline after that login succeeds.
 
 ## Operation
 
@@ -51,31 +69,48 @@ Each instance has private `0700` state under
 record, lock, and audit journal. Stop with `/quit`, EOF, or `SIGTERM`. `Ctrl-C`
 interrupts an active turn; it does not create another thread.
 
+After a prompt is accepted, Promptline prints `[ working ]`, streams agent text
+as it arrives, reports tool lifecycle progress, and surfaces app-server turn
+errors before returning to the `>` prompt.
+
 When `--state-root` is omitted, Promptline creates and uses
 `~/.promptline/instances` for a regular user and
 `/var/lib/promptline/instances` for root. An explicit `--state-root` must be an
 absolute path; Promptline creates it when its parent is writable.
 
-By default, a later launch resumes the stored primary thread. Use `--new` to
-explicitly replace it, or `--resume THREAD_ID` to request a specific thread:
+Each launch starts a new primary thread by default. Use the Codex-style
+`resume` command with a thread ID, or omit the ID to resume the last saved
+thread. The older `--new` and `--resume THREAD_ID` flags remain aliases:
 
 ```bash
 ./promptline --instance ops --cwd ~/devel/ops
-./promptline --instance ops --cwd ~/devel/ops --new
+./promptline resume --instance ops --cwd ~/devel/ops
+./promptline resume THREAD_ID --instance ops --cwd ~/devel/ops
 ```
 
-If the app-server reports that a stored thread cannot be resumed, Promptline
-fails closed and tells the operator to use `--new`; it never silently creates
-replacement history. After an app-server crash, restart the same command to
-perform the stored resume.
+If an explicit resume fails, Promptline never silently creates replacement
+history. Quit and EOF shutdown explicitly unsubscribe the selected thread before
+the app-server transport closes.
 
 ## Toolbox and approvals
 
-`promptline toolbox serve` is an internal stdio MCP server used to expose the
-embedded Go/u-root toolbox to Codex. It is not a network daemon.
+`promptline mcp-server` is a standalone stdio MCP server exposing the embedded
+Go/u-root toolbox to Codex or another MCP harness. It does not start Codex,
+create an instance, acquire a lock, or open a network listener. The
+`--mcp-server` flag is equivalent; `toolbox serve` remains a legacy alias.
+Before showing the first prompt, Promptline requires Codex to report this server
+with its core tools and prints `[ toolbox ready: N tools ]`. New and resumed
+threads instruct Codex to prefer these MCP tools over its built-in shell for
+supported Unix operations.
+
+The embedded developer instructions are maintained as Markdown in
+`internal/runtime/init-prompt.md`; edit that file to extend Promptline's initial
+runtime guidance.
 
 ```bash
-./promptline toolbox serve --instance ops --cwd ~/devel/ops
+./promptline mcp-server --cwd ~/devel/ops
+# Equivalent:
+./promptline --mcp-server --cwd ~/devel/ops
 ```
 
 Mutating effects and privilege expansion are asked or denied by default.
@@ -96,7 +131,7 @@ is no compatibility mode for the former API-key configuration.
 | v1 setting or behavior | v2 replacement |
 | --- | --- |
 | `api_key`, `api_url`, `OPENAI_API_KEY` | Authenticate and configure the Codex CLI; Promptline has no API client configuration. |
-| `model` in `config.json` | Optional `--model` when supported by the configured Codex CLI. |
+| `model` in `config.json` | `--model`, defaulting to `gpt-5.6-terra`; the selected model is sent for every turn. |
 | Local chat and command history | Codex thread history; Promptline persists only a primary-thread ID. |
 | Batch/TUI/readline command path | Foreground line-oriented terminal input. |
 | Tool policy in `config.json` | Promptline approval policy and per-instance toolbox configuration. |
@@ -108,8 +143,12 @@ reimplement it.
 ## Troubleshooting and non-goals
 
 Use `--codex /absolute/path/to/codex` when the desired binary is not on
-`PATH`. An unsupported version, malformed version output, or missing stable
-app-server capability is an actionable startup error, not a best-effort mode.
+`PATH`. Promptline records the reported Codex CLI version in instance state but
+does not reject a well-formed version solely because it differs from the
+reference test fixture. Promptline uses `gpt-5.6-terra` unless `--model` selects a
+different Codex model; it sends the selection on every turn so resumed threads
+also receive the configured model. An unlaunchable executable, malformed
+version output, or actual app-server protocol error still stops startup.
 
 An error containing `cannot unmarshal object into Go struct field
 Thread.thread.status of type string` means the Promptline binary expects an
@@ -117,6 +156,11 @@ older shape for the Codex app-server's `thread.status` field. It does not refer
 to the working directory or Promptline's saved thread state. Upgrade or rebuild
 Promptline with support for the installed Codex CLI; deleting instance state or
 using `--new` does not correct this protocol-decoding mismatch.
+
+If startup reports `codex authentication required`, run the `CODEX_HOME=... codex
+login` command included in that error. Promptline checks `account/read` before
+starting or resuming a thread, so missing required credentials fail immediately
+rather than producing repeated reconnect messages and a later HTTP 401.
 
 Promptline has no daemon, control socket, WebSocket transport, automatic
 restart, automatic tmux integration, second model runtime, internal database,

@@ -25,6 +25,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"syscall"
 
 	"promptline/internal/appserver"
@@ -37,6 +39,8 @@ import (
 
 // Version is set at build time via ldflags. Defaults to "dev".
 var Version = "dev"
+
+const uRootModulePath = "github.com/u-root/u-root"
 
 func main() {
 	os.Exit(exitCode(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
@@ -59,28 +63,27 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 		return err
 	}
 	if cmd.Version {
-		_, err := fmt.Fprintf(output, "promptline version %s\n", Version)
-		return err
-	}
-	in, err := instance.New(cmd.Instance)
-	if err != nil {
-		return err
+		return printVersionReport(output, cmd.Instance.CodexExecutable)
 	}
 	if cmd.ToolboxServe {
 		toolConfig := tools.DefaultConfig()
-		toolConfig.WorkingDirectory = in.WorkingDirectory()
-		toolConfig.Roots = []string{in.WorkingRoot()}
+		toolConfig.WorkingDirectory = cmd.Instance.WorkingDirectory
+		toolConfig.Roots = []string{cmd.Instance.WorkingRoot}
 		toolConfig.Policy = mcp.ReadOnlyToolPolicy()
 		registry, err := tools.NewRegistryWithConfig(toolConfig)
 		if err != nil {
 			return err
 		}
 		defer registry.Close()
-		server, err := mcp.NewServer(registry, input, output, in.OutputCaps().StdoutBytes)
+		server, err := mcp.NewServer(registry, input, output, 4<<20)
 		if err != nil {
 			return err
 		}
 		return server.Serve(context.Background())
+	}
+	in, err := instance.New(cmd.Instance)
+	if err != nil {
+		return err
 	}
 	lock, err := in.AcquireLock()
 	if err != nil {
@@ -133,7 +136,9 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 		}
 		return decisionErr
 	})
-	if err := r.Start(ctx, pruntime.Options{New: cmd.New, ResumeID: cmd.ResumeID}, Version); err != nil {
+	if err := r.Start(ctx, pruntime.Options{
+		Resume: !cmd.New, ResumeID: cmd.ResumeID,
+	}, Version); err != nil {
 		_ = r.Close(context.Background())
 		return err
 	}
@@ -151,6 +156,44 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 		}
 	}()
 	return r.Run(ctx, input, pruntime.Terminal{Out: output})
+}
+
+func printVersionReport(output io.Writer, codexExecutable string) error {
+	codexVersion := "unavailable"
+	if detected, err := appserver.Probe(context.Background(), codexExecutable); err == nil {
+		codexVersion = detected
+	} else {
+		codexVersion = fmt.Sprintf("unavailable (%v)", err)
+	}
+	_, err := fmt.Fprintf(
+		output,
+		"promptline: %s\ncodex-cli: %s\nu-root: %s\ngo: %s\n",
+		Version,
+		codexVersion,
+		dependencyVersion(uRootModulePath),
+		runtime.Version(),
+	)
+	return err
+}
+
+func dependencyVersion(modulePath string) string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, dependency := range info.Deps {
+		if dependency.Path != modulePath {
+			continue
+		}
+		if dependency.Replace != nil && dependency.Replace.Version != "" {
+			return dependency.Replace.Version
+		}
+		if dependency.Version != "" {
+			return dependency.Version
+		}
+		return "unknown"
+	}
+	return "unknown"
 }
 
 func approvalPrompt(mode instance.ApprovalMode, input io.Reader, output io.Writer) governance.Prompt {

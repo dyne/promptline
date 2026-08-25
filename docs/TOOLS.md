@@ -1,9 +1,20 @@
 # Promptline v2 toolbox
 
 The toolbox is an instance-owned MCP capability. Promptline starts it as
-`promptline toolbox serve`; it uses stdio JSONL and never opens a network
+`promptline mcp-server`; it uses stdio JSONL and never opens a network
 listener. Codex discovers tools through stable MCP `initialize`, `tools/list`,
 and `tools/call` requests.
+
+The same command can be run directly by any MCP harness. It scopes filesystem
+operations to `--cwd` (the current directory when omitted) and does not create a
+Promptline instance or start Codex. `--mcp-server` is an equivalent flag and
+`toolbox serve` is retained as a compatibility alias.
+
+Promptline checks the thread-scoped `mcpServerStatus/list` inventory before it
+shows the terminal prompt. Startup fails if `promptline-toolbox` or its core
+`ls`, `pwd`, and `cat` tools are absent. A successful launch prints the number
+of discovered tools, and thread developer instructions direct Codex to prefer
+the toolbox over built-in shell execution for operations it supports.
 
 Tools are implemented in Go and u-root. Promptline does not execute `sh -c`,
 `bash -c`, or installed host utilities. Filesystem authority comes from the

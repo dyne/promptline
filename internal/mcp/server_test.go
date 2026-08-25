@@ -74,7 +74,7 @@ func TestCodexConfigIsInstanceScoped(t *testing.T) {
 	config := string(data)
 	if !strings.Contains(config, "[mcp_servers.promptline-toolbox]") ||
 		!strings.Contains(config, `command = "/usr/local/bin/promptline"`) ||
-		!strings.Contains(config, `"--instance", "mcp-test"`) {
+		!strings.Contains(config, `"mcp-server", "--cwd"`) {
 		t.Fatalf("unexpected config: %s", data)
 	}
 	if strings.HasPrefix(strings.TrimSpace(config), "{") {

@@ -19,6 +19,7 @@ package main
 import (
 	"bytes"
 	"io"
+	"strings"
 	"testing"
 
 	"promptline/internal/governance"
@@ -52,8 +53,10 @@ func TestExitCodeReturnsSuccessForVersion(t *testing.T) {
 	if code := exitCode([]string{"--version"}, nil, &output, io.Discard); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if !bytes.Contains(output.Bytes(), []byte("promptline version")) {
-		t.Fatalf("missing version output: %q", output.String())
+	for _, component := range []string{"promptline:", "codex-cli:", "u-root:", "go:"} {
+		if !strings.Contains(output.String(), component) {
+			t.Fatalf("missing %s version output: %q", component, output.String())
+		}
 	}
 }
 
@@ -62,7 +65,8 @@ func TestExitCodeReturnsSuccessForHelp(t *testing.T) {
 	if code := exitCode([]string{"--help"}, nil, io.Discard, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if !bytes.Contains(stderr.Bytes(), []byte("Usage of promptline:")) {
+	if !bytes.Contains(stderr.Bytes(), []byte("Usage: promptline [OPTIONS]")) ||
+		!bytes.Contains(stderr.Bytes(), []byte("mcp-server")) {
 		t.Fatalf("missing help output: %q", stderr.String())
 	}
 	if bytes.Contains(stderr.Bytes(), []byte("promptline: flag: help requested")) {

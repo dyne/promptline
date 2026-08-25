@@ -16,12 +16,13 @@ import (
 
 // Process owns one non-daemon app-server child and its protocol client.
 type Process struct {
-	cmd         *exec.Cmd
-	Client      *Client
-	stderr      bytes.Buffer
-	stderrLimit int
-	wait        chan error
-	once        sync.Once
+	cmd          *exec.Cmd
+	Client       *Client
+	codexVersion string
+	stderr       bytes.Buffer
+	stderrLimit  int
+	wait         chan error
+	once         sync.Once
 }
 
 var sensitiveDiagnostic = regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password|authorization|cookie)\s*[:=]\s*[^\s]+`)
@@ -29,7 +30,8 @@ var sensitiveDiagnostic = regexp.MustCompile(`(?i)(api[_-]?key|token|secret|pass
 func Start(ctx context.Context, in *instance.Instance) (*Process, error) {
 	startupCtx, cancel := context.WithTimeout(ctx, in.Timeouts().Startup)
 	defer cancel()
-	if err := Probe(startupCtx, in.CodexExecutable()); err != nil {
+	codexVersion, err := Probe(startupCtx, in.CodexExecutable())
+	if err != nil {
 		return nil, err
 	}
 	if err := startupCtx.Err(); err != nil {
@@ -53,12 +55,18 @@ func Start(ctx context.Context, in *instance.Instance) (*Process, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start app-server: %w", err)
 	}
-	p := &Process{cmd: cmd, stderrLimit: in.OutputCaps().StderrBytes, wait: make(chan error, 1)}
+	p := &Process{
+		cmd:          cmd,
+		codexVersion: codexVersion,
+		stderrLimit:  in.OutputCaps().StderrBytes,
+		wait:         make(chan error, 1),
+	}
 	p.Client = New(stdin, stdout, Config{Limits: Limits{MaxFrameBytes: in.OutputCaps().StdoutBytes}})
 	go p.capture(stderr)
 	go func() { p.wait <- cmd.Wait(); close(p.wait) }()
 	return p, nil
 }
+func (p *Process) CodexVersion() string { return p.codexVersion }
 func (p *Process) capture(r io.Reader) {
 	_, _ = io.Copy(&boundedWriter{b: &p.stderr, n: p.stderrLimit}, r)
 }

@@ -83,6 +83,9 @@ func TestNewIsolatesImmutableInstances(t *testing.T) {
 	if one.ApprovalMode() != ApprovalDeny || one.Timeouts().Startup <= 0 || one.OutputCaps().StdoutBytes <= 0 {
 		t.Fatal("defaults are not conservative")
 	}
+	if one.Model() != DefaultModel {
+		t.Fatalf("default model = %q, want %q", one.Model(), DefaultModel)
+	}
 	for _, path := range []string{root, one.StateDir(), one.CodexHome()} {
 		info, err := os.Stat(path)
 		if err != nil {

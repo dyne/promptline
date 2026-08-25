@@ -14,29 +14,33 @@ import (
 
 var versionPattern = regexp.MustCompile(`^codex-cli ([0-9]+\.[0-9]+\.[0-9]+)$`)
 
-// Probe verifies an executable before a child is started. It never invokes a shell.
-func Probe(ctx context.Context, executable string) error {
+// Probe verifies an executable and returns its reported version before a child
+// is started. It never invokes a shell or rejects a well-formed version merely
+// because it differs from the reference fixture.
+func Probe(ctx context.Context, executable string) (string, error) {
 	if executable == "" {
 		executable = "codex"
 	}
 	path, err := exec.LookPath(executable)
 	if err != nil {
-		return fmt.Errorf("find codex executable: %w", err)
+		return "", fmt.Errorf("find codex executable: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, "--version").Output()
 	if err != nil {
-		return fmt.Errorf("read codex version: %w", err)
+		return "", fmt.Errorf("read codex version: %w", err)
 	}
-	m := versionPattern.FindStringSubmatch(strings.TrimSpace(string(out)))
+	return parseCodexVersion(string(out))
+}
+
+func parseCodexVersion(output string) (string, error) {
+	trimmed := strings.TrimSpace(output)
+	m := versionPattern.FindStringSubmatch(trimmed)
 	if m == nil {
-		return fmt.Errorf("%w: malformed codex version %q", ErrProtocol, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("%w: malformed codex version %q", ErrProtocol, trimmed)
 	}
-	if m[1] != TestedCLIVersion {
-		return fmt.Errorf("%w: codex-cli %s is unsupported; expected %s", ErrProtocol, m[1], TestedCLIVersion)
-	}
-	return nil
+	return m[1], nil
 }
 
 // ValidateStableFixture protects the intentionally small stable protocol contract.

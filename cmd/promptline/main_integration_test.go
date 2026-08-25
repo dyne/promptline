@@ -6,17 +6,24 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-const mockCodexEnvironment = "PROMPTLINE_MOCK_CODEX"
+const (
+	mockCodexEnvironment   = "PROMPTLINE_MOCK_CODEX"
+	mockAuthEnvironment    = "PROMPTLINE_MOCK_AUTHENTICATED"
+	mockToolboxEnvironment = "PROMPTLINE_MOCK_TOOLBOX"
+)
 
 type lockedBuffer struct {
 	mu sync.Mutex
@@ -38,7 +45,7 @@ func (b *lockedBuffer) String() string {
 func TestPromptlineRunsTurnWithMockCodex(t *testing.T) {
 	work := t.TempDir()
 	stateRoot := filepath.Join(t.TempDir(), "instances")
-	mockCodex := writeMockCodexExecutable(t)
+	mockCodex := writeMockCodexExecutable(t, true)
 	inputReader, inputWriter := io.Pipe()
 	t.Cleanup(func() { _ = inputWriter.Close() })
 
@@ -51,7 +58,7 @@ func TestPromptlineRunsTurnWithMockCodex(t *testing.T) {
 				"--instance", "integration",
 				"--cwd", work,
 				"--state-root", stateRoot,
-				"--codex", mockCodex,
+				"--mock-codex", mockCodex,
 			},
 			inputReader,
 			&output,
@@ -78,6 +85,16 @@ func TestPromptlineRunsTurnWithMockCodex(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Promptline did not stop after /quit")
 	}
+	if !strings.Contains(output.String(), "[ working ]") {
+		t.Fatalf("working indicator was not rendered: %q", output.String())
+	}
+	if !strings.Contains(output.String(), "[ toolbox ready:") ||
+		!strings.Contains(output.String(), "[ mcpToolCall ]") {
+		t.Fatalf("toolbox readiness and call progress were not rendered: %q", output.String())
+	}
+	if got := strings.Count(output.String(), "mock reply"); got != 1 {
+		t.Fatalf("mock reply rendered %d times: %q", got, output.String())
+	}
 
 	state, err := os.ReadFile(filepath.Join(stateRoot, "integration", "state.json"))
 	if err != nil {
@@ -85,6 +102,9 @@ func TestPromptlineRunsTurnWithMockCodex(t *testing.T) {
 	}
 	if !bytes.Contains(state, []byte(`"lastPrimaryThreadId":"thread-integration"`)) {
 		t.Fatalf("primary thread was not persisted: %s", state)
+	}
+	if !bytes.Contains(state, []byte(`"codexVersion":"0.149.0"`)) {
+		t.Fatalf("Codex CLI version was not persisted: %s", state)
 	}
 	config, err := os.ReadFile(filepath.Join(stateRoot, "integration", "codex-home", "config.toml"))
 	if err != nil {
@@ -95,9 +115,110 @@ func TestPromptlineRunsTurnWithMockCodex(t *testing.T) {
 	}
 }
 
-func TestToolboxServesBasicURootTools(t *testing.T) {
+func TestVersionReportIncludesInstalledAndVendoredComponents(t *testing.T) {
+	mockCodex := writeMockCodexExecutable(t, true)
+	var output bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run(
+		[]string{"--version", "--mock-codex", mockCodex},
+		nil,
+		&output,
+		&stderr,
+	); err != nil {
+		t.Fatalf("version report failed: %v\nstderr: %s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"promptline: ",
+		"codex-cli: 0.149.0",
+		"u-root: v0.15.0",
+		"go: go",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("version output is missing %q: %s", expected, output.String())
+		}
+	}
+}
+
+func TestPromptlineRejectsUnauthenticatedCodexBeforePrompt(t *testing.T) {
 	work := t.TempDir()
 	stateRoot := filepath.Join(t.TempDir(), "instances")
+	mockCodex := writeMockCodexExecutable(t, false)
+	var output bytes.Buffer
+	var stderr bytes.Buffer
+	err := run(
+		[]string{
+			"--instance", "unauthenticated",
+			"--cwd", work,
+			"--state-root", stateRoot,
+			"--mock-codex", mockCodex,
+		},
+		strings.NewReader("ls\n"),
+		&output,
+		&stderr,
+	)
+	if err == nil {
+		t.Fatal("unauthenticated Promptline startup succeeded")
+	}
+	for _, expected := range []string{
+		"codex authentication required",
+		"CODEX_HOME=",
+		"login",
+		"restart Promptline",
+	} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Errorf("authentication error is missing %q: %v", expected, err)
+		}
+	}
+	if output.Len() != 0 {
+		t.Fatalf("unauthenticated startup reached terminal prompt: %q", output.String())
+	}
+	if _, statErr := os.Stat(filepath.Join(stateRoot, "unauthenticated", "state.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("unauthenticated startup persisted thread state: %v", statErr)
+	}
+}
+
+func TestPromptlineDefaultsToNewThreadAcrossEOFRestarts(t *testing.T) {
+	work := t.TempDir()
+	stateRoot := filepath.Join(t.TempDir(), "instances")
+	mockCodex := writeMockCodexExecutable(t, true)
+	for attempt := 1; attempt <= 2; attempt++ {
+		var output bytes.Buffer
+		var stderr bytes.Buffer
+		err := run(
+			[]string{
+				"--instance", "restart-integration",
+				"--cwd", work,
+				"--state-root", stateRoot,
+				"--mock-codex", mockCodex,
+			},
+			strings.NewReader(""),
+			&output,
+			&stderr,
+		)
+		if err != nil {
+			t.Fatalf("attempt %d failed after EOF restart: %v\nstderr: %s", attempt, err, stderr.String())
+		}
+		if !strings.Contains(output.String(), "[ toolbox ready:") {
+			t.Fatalf("attempt %d did not reach a ready prompt: %q", attempt, output.String())
+		}
+	}
+}
+
+func TestToolboxServesBasicURootTools(t *testing.T) {
+	for name, arguments := range map[string][]string{
+		"command": {"mcp-server"},
+		"flag":    {"--mcp-server"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			testStandaloneToolbox(t, arguments)
+		})
+	}
+}
+
+func testStandaloneToolbox(t *testing.T, commandArguments []string) {
+	t.Helper()
+	work := t.TempDir()
+	unusedStateRoot := filepath.Join(t.TempDir(), "must-not-be-created")
 	fixturePath := filepath.Join(work, "fixture.txt")
 	if err := os.WriteFile(fixturePath, []byte("fixture contents\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -114,12 +235,10 @@ func TestToolboxServesBasicURootTools(t *testing.T) {
 	var output bytes.Buffer
 	var stderr bytes.Buffer
 	err := run(
-		[]string{
-			"toolbox", "serve",
-			"--instance", "toolbox-integration",
-			"--cwd", work,
-			"--state-root", stateRoot,
-		},
+		append(
+			append([]string(nil), commandArguments...),
+			"--cwd", work, "--state-root", unusedStateRoot,
+		),
 		input,
 		&output,
 		&stderr,
@@ -133,6 +252,9 @@ func TestToolboxServesBasicURootTools(t *testing.T) {
 	assertToolResultContains(t, responses[3], work)
 	assertToolResultContains(t, responses[4], "hello toolbox")
 	assertToolResultContains(t, responses[5], "fixture contents")
+	if _, err := os.Stat(unusedStateRoot); !os.IsNotExist(err) {
+		t.Fatalf("standalone MCP server created instance state: %v", err)
+	}
 }
 
 func TestMockCodexProcess(t *testing.T) {
@@ -140,7 +262,7 @@ func TestMockCodexProcess(t *testing.T) {
 		return
 	}
 	if slicesContain(os.Args, "--version") {
-		fmt.Println("codex-cli 0.147.0")
+		fmt.Println("codex-cli 0.149.0")
 		os.Exit(0)
 	}
 	if !slicesContain(os.Args, "app-server") || !slicesContain(os.Args, "--stdio") {
@@ -150,16 +272,43 @@ func TestMockCodexProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-func writeMockCodexExecutable(t *testing.T) string {
+func TestMockToolboxProcess(t *testing.T) {
+	if os.Getenv(mockToolboxEnvironment) != "1" {
+		return
+	}
+	separator := -1
+	for index, argument := range os.Args {
+		if argument == "--" {
+			separator = index
+			break
+		}
+	}
+	if separator < 0 {
+		os.Exit(2)
+	}
+	if err := run(os.Args[separator+1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func writeMockCodexExecutable(t *testing.T, authenticated bool) string {
 	t.Helper()
 	testExecutable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "codex")
+	authenticatedValue := "0"
+	if authenticated {
+		authenticatedValue = "1"
+	}
 	script := fmt.Sprintf(
-		"#!/bin/sh\n%s=1 exec %q -test.run '^TestMockCodexProcess$' -- \"$@\"\n",
+		"#!/bin/sh\n%s=1 %s=%s exec %q -test.run '^TestMockCodexProcess$' -- \"$@\"\n",
 		mockCodexEnvironment,
+		mockAuthEnvironment,
+		authenticatedValue,
 		testExecutable,
 	)
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
@@ -171,6 +320,12 @@ func writeMockCodexExecutable(t *testing.T) string {
 func serveMockCodex() {
 	scanner := bufio.NewScanner(os.Stdin)
 	encoder := json.NewEncoder(os.Stdout)
+	var toolbox *mockToolboxClient
+	defer func() {
+		if toolbox != nil {
+			_ = toolbox.Close()
+		}
+	}()
 	for scanner.Scan() {
 		var request struct {
 			ID     *uint64 `json:"id"`
@@ -182,7 +337,14 @@ func serveMockCodex() {
 		result := any(map[string]any{})
 		switch request.Method {
 		case "account/read":
-			result = map[string]any{"account": map[string]any{"type": "mock"}}
+			if os.Getenv(mockAuthEnvironment) == "1" {
+				result = map[string]any{
+					"account":            map[string]any{"type": "mock"},
+					"requiresOpenaiAuth": true,
+				}
+			} else {
+				result = map[string]any{"account": nil, "requiresOpenaiAuth": true}
+			}
 		case "thread/start":
 			result = map[string]any{"thread": map[string]any{
 				"id":     "thread-integration",
@@ -193,9 +355,82 @@ func serveMockCodex() {
 				"id":     "turn-integration",
 				"status": "inProgress",
 			}}
+		case "mcpServerStatus/list":
+			var err error
+			toolbox, err = startConfiguredToolbox()
+			if err != nil {
+				_ = encoder.Encode(map[string]any{
+					"id":    *request.ID,
+					"error": map[string]any{"code": -32000, "message": err.Error()},
+				})
+				continue
+			}
+			result = map[string]any{
+				"data": []map[string]any{{
+					"name": "promptline-toolbox", "tools": toolbox.tools,
+					"resources": []any{}, "resourceTemplates": []any{}, "authStatus": "unsupported",
+				}},
+				"nextCursor": nil,
+			}
 		}
 		_ = encoder.Encode(map[string]any{"id": *request.ID, "result": result})
 		if request.Method == "turn/start" {
+			reply := "mock reply"
+			if toolbox != nil {
+				var err error
+				reply, err = toolbox.CallText("echo", map[string]any{"text": reply})
+				if err != nil {
+					_ = encoder.Encode(map[string]any{
+						"method": "error",
+						"params": map[string]any{"error": map[string]string{"message": err.Error()}},
+					})
+					continue
+				}
+			}
+			_ = encoder.Encode(map[string]any{
+				"method": "item/started",
+				"params": map[string]any{
+					"threadId": "thread-integration", "turnId": "turn-integration",
+					"item": map[string]any{"id": "tool-integration", "type": "mcpToolCall"},
+				},
+			})
+			_ = encoder.Encode(map[string]any{
+				"method": "item/completed",
+				"params": map[string]any{
+					"threadId": "thread-integration", "turnId": "turn-integration",
+					"item": map[string]any{"id": "tool-integration", "type": "mcpToolCall"},
+				},
+			})
+			_ = encoder.Encode(map[string]any{
+				"method": "item/started",
+				"params": map[string]any{
+					"threadId": "thread-integration",
+					"turnId":   "turn-integration",
+					"item": map[string]any{
+						"id":   "item-integration",
+						"type": "agentMessage",
+						"text": "",
+					},
+				},
+			})
+			_ = encoder.Encode(map[string]any{
+				"method": "item/agentMessage/delta",
+				"params": map[string]any{
+					"threadId": "thread-integration",
+					"turnId":   "turn-integration",
+					"itemId":   "item-integration",
+					"delta":    strings.TrimSuffix(reply, "reply"),
+				},
+			})
+			_ = encoder.Encode(map[string]any{
+				"method": "item/agentMessage/delta",
+				"params": map[string]any{
+					"threadId": "thread-integration",
+					"turnId":   "turn-integration",
+					"itemId":   "item-integration",
+					"delta":    strings.TrimPrefix(reply, "mock "),
+				},
+			})
 			_ = encoder.Encode(map[string]any{
 				"method": "item/completed",
 				"params": map[string]any{
@@ -204,16 +439,178 @@ func serveMockCodex() {
 					"item": map[string]any{
 						"id":   "item-integration",
 						"type": "agentMessage",
-						"text": "mock reply",
+						"text": reply,
 					},
 				},
 			})
 			_ = encoder.Encode(map[string]any{
 				"method": "turn/completed",
-				"params": map[string]any{"turn": map[string]any{"id": "turn-integration"}},
+				"params": map[string]any{"turn": map[string]any{
+					"id":     "turn-integration",
+					"status": "completed",
+					"items": []map[string]any{{
+						"id":   "item-integration",
+						"type": "agentMessage",
+						"text": reply,
+					}},
+				}},
 			})
 		}
 	}
+}
+
+type mockToolboxClient struct {
+	command *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  *bufio.Scanner
+	nextID  int
+	tools   map[string]json.RawMessage
+	stderr  bytes.Buffer
+}
+
+func startConfiguredToolbox() (*mockToolboxClient, error) {
+	command, arguments, err := readConfiguredToolbox(filepath.Join(os.Getenv("CODEX_HOME"), "config.toml"))
+	if err != nil {
+		return nil, err
+	}
+	testExecutable, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	if command == testExecutable {
+		arguments = append([]string{"-test.run", "^TestMockToolboxProcess$", "--"}, arguments...)
+	}
+	process := exec.Command(command, arguments...)
+	process.Env = append(os.Environ(), mockToolboxEnvironment+"=1")
+	stdin, err := process.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, err := process.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	client := &mockToolboxClient{command: process, stdin: stdin, stdout: bufio.NewScanner(stdout)}
+	process.Stderr = &client.stderr
+	if err := process.Start(); err != nil {
+		return nil, err
+	}
+	if _, err := client.call("initialize", map[string]any{
+		"protocolVersion": "2024-11-05",
+		"clientInfo":      map[string]string{"name": "mock-codex", "version": "test"},
+		"capabilities":    map[string]any{},
+	}); err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	result, err := client.call("tools/list", map[string]any{})
+	if err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	var list struct {
+		Tools []json.RawMessage `json:"tools"`
+	}
+	if err := json.Unmarshal(result, &list); err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	client.tools = make(map[string]json.RawMessage, len(list.Tools))
+	for _, definition := range list.Tools {
+		var identity struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(definition, &identity) == nil && identity.Name != "" {
+			client.tools[identity.Name] = definition
+		}
+	}
+	for _, required := range []string{"ls", "pwd", "cat", "echo"} {
+		if _, ok := client.tools[required]; !ok {
+			_ = client.Close()
+			return nil, fmt.Errorf("configured toolbox is missing %q", required)
+		}
+	}
+	if result, err := client.CallText("pwd", map[string]any{}); err != nil || strings.TrimSpace(result) == "" {
+		_ = client.Close()
+		return nil, fmt.Errorf("call toolbox pwd: result=%q error=%w", result, err)
+	}
+	return client, nil
+}
+
+func readConfiguredToolbox(path string) (string, []string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", nil, err
+	}
+	var command string
+	var arguments []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "command = "):
+			command, err = strconv.Unquote(strings.TrimSpace(strings.TrimPrefix(line, "command = ")))
+		case strings.HasPrefix(line, "args = "):
+			err = json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "args = "))), &arguments)
+		}
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	if command == "" || len(arguments) == 0 {
+		return "", nil, errors.New("promptline-toolbox command is missing from Codex config")
+	}
+	return command, arguments, nil
+}
+
+func (c *mockToolboxClient) call(method string, params any) (json.RawMessage, error) {
+	c.nextID++
+	request := map[string]any{
+		"jsonrpc": "2.0", "id": c.nextID, "method": method, "params": params,
+	}
+	if err := json.NewEncoder(c.stdin).Encode(request); err != nil {
+		return nil, err
+	}
+	if !c.stdout.Scan() {
+		return nil, fmt.Errorf("toolbox exited before %s response: %s", method, c.stderr.String())
+	}
+	var response struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(c.stdout.Bytes(), &response); err != nil {
+		return nil, err
+	}
+	if response.Error != nil {
+		return nil, errors.New(response.Error.Message)
+	}
+	return response.Result, nil
+}
+
+func (c *mockToolboxClient) CallText(name string, arguments map[string]any) (string, error) {
+	result, err := c.call("tools/call", map[string]any{"name": name, "arguments": arguments})
+	if err != nil {
+		return "", err
+	}
+	var decoded struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		return "", err
+	}
+	if decoded.IsError || len(decoded.Content) == 0 {
+		return "", fmt.Errorf("tool %s failed: %s", name, result)
+	}
+	return decoded.Content[0].Text, nil
+}
+
+func (c *mockToolboxClient) Close() error {
+	_ = c.stdin.Close()
+	return c.command.Wait()
 }
 
 func waitForOutput(t *testing.T, output *lockedBuffer, text string) {

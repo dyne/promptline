@@ -3,6 +3,7 @@ package runtime
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -14,16 +15,32 @@ import (
 )
 
 type fakeClient struct {
-	events                                            chan appserver.Event
-	requests                                          chan appserver.ServerRequest
-	done                                              chan struct{}
-	startThreads, resumes, turns, interrupts, replies int
-	resumeErr                                         error
-	initializeWait                                    bool
+	events                                                          chan appserver.Event
+	requests                                                        chan appserver.ServerRequest
+	done                                                            chan struct{}
+	startThreads, resumes, turns, interrupts, unsubscribes, replies int
+	resumeErr                                                       error
+	initializeWait                                                  bool
+	account                                                         appserver.Account
+	threadModel, turnModel                                          string
+	threadInstructions, resumeInstructions                          string
+	mcpServers                                                      []appserver.MCPServer
+	mcpLists                                                        int
 }
 
 func newFakeClient() *fakeClient {
-	return &fakeClient{events: make(chan appserver.Event, 8), requests: make(chan appserver.ServerRequest, 8), done: make(chan struct{})}
+	return &fakeClient{
+		events:   make(chan appserver.Event, 8),
+		requests: make(chan appserver.ServerRequest, 8),
+		done:     make(chan struct{}),
+		account:  appserver.Account{Type: "chatgpt", RequiresOpenAIAuth: true},
+		mcpServers: []appserver.MCPServer{{
+			Name: "promptline-toolbox",
+			Tools: map[string]json.RawMessage{
+				"ls": {}, "pwd": {}, "cat": {},
+			},
+		}},
+	}
 }
 func (f *fakeClient) Initialize(ctx context.Context, _ appserver.Initialize) error {
 	if f.initializeWait {
@@ -32,35 +49,49 @@ func (f *fakeClient) Initialize(ctx context.Context, _ appserver.Initialize) err
 	}
 	return nil
 }
-func (f *fakeClient) Account(context.Context) ([]byte, error) { return []byte(`{}`), nil }
-func (f *fakeClient) StartThread(context.Context, string, string) (appserver.Thread, error) {
+func (f *fakeClient) Account(context.Context) (appserver.Account, error) { return f.account, nil }
+func (f *fakeClient) StartThread(_ context.Context, _, model, instructions string) (appserver.Thread, error) {
 	f.startThreads++
+	f.threadModel = model
+	f.threadInstructions = instructions
 	return appserver.Thread{ID: "new-thread"}, nil
 }
-func (f *fakeClient) ResumeThread(context.Context, string) (appserver.Thread, error) {
+func (f *fakeClient) ResumeThread(_ context.Context, _, _, instructions string) (appserver.Thread, error) {
 	f.resumes++
+	f.resumeInstructions = instructions
 	if f.resumeErr != nil {
 		return appserver.Thread{}, f.resumeErr
 	}
 	return appserver.Thread{ID: "stored-thread"}, nil
 }
-func (f *fakeClient) StartTurn(context.Context, string, string, string) (appserver.Turn, error) {
+func (f *fakeClient) ListMCPServers(context.Context, string) ([]appserver.MCPServer, error) {
+	f.mcpLists++
+	return f.mcpServers, nil
+}
+func (f *fakeClient) StartTurn(_ context.Context, _, _, _, model string) (appserver.Turn, error) {
 	f.turns++
+	f.turnModel = model
 	return appserver.Turn{ID: "turn-1"}, nil
 }
 func (f *fakeClient) Interrupt(context.Context, string, string) error { f.interrupts++; return nil }
+func (f *fakeClient) Unsubscribe(context.Context, string) error       { f.unsubscribes++; return nil }
 func (f *fakeClient) Events() <-chan appserver.Event                  { return f.events }
 func (f *fakeClient) Requests() <-chan appserver.ServerRequest        { return f.requests }
 func (f *fakeClient) ReplyRequest(context.Context, uint64, any) error { f.replies++; return nil }
 func (f *fakeClient) Done() <-chan struct{}                           { return f.done }
 func (f *fakeClient) Err() error                                      { return nil }
 
-type fakeProcess struct{ closed int }
+type fakeProcess struct {
+	closed       int
+	codexVersion string
+}
 
+func (p *fakeProcess) CodexVersion() string        { return p.codexVersion }
 func (p *fakeProcess) Close(context.Context) error { p.closed++; return nil }
 
 type blockingProcess struct{}
 
+func (*blockingProcess) CodexVersion() string { return "" }
 func (*blockingProcess) Close(ctx context.Context) error {
 	<-ctx.Done()
 	return ctx.Err()
@@ -69,13 +100,16 @@ func (*blockingProcess) Close(ctx context.Context) error {
 type fakeRenderer struct{ strings.Builder }
 
 func (r *fakeRenderer) Prompt() error           { _, e := r.WriteString("> "); return e }
+func (r *fakeRenderer) Delta(s string) error    { _, e := r.WriteString(s); return e }
 func (r *fakeRenderer) Text(s string) error     { _, e := r.WriteString(s); return e }
 func (r *fakeRenderer) Progress(s string) error { _, e := r.WriteString(s); return e }
 func (r *fakeRenderer) Error(e error) error     { _, e2 := r.WriteString(e.Error()); return e2 }
 
 func testRuntime(t *testing.T) (*Runtime, *fakeClient, *fakeProcess) {
 	t.Helper()
-	in, err := instance.New(instance.Config{Name: "test", StateRoot: t.TempDir(), WorkingRoot: t.TempDir()})
+	in, err := instance.New(instance.Config{
+		Name: "test", StateRoot: t.TempDir(), WorkingRoot: t.TempDir(), ToolboxEnabled: true,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +117,7 @@ func testRuntime(t *testing.T) (*Runtime, *fakeClient, *fakeProcess) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, p := newFakeClient(), &fakeProcess{}
+	f, p := newFakeClient(), &fakeProcess{codexVersion: "0.149.0"}
 	r, err := New(in, f, p, lock)
 	if err != nil {
 		t.Fatal(err)
@@ -100,8 +134,24 @@ func TestRuntime_StartSelectsOneThread(t *testing.T) {
 	if f.startThreads != 1 || r.ThreadID() != "new-thread" {
 		t.Fatalf("start=%d thread=%q", f.startThreads, r.ThreadID())
 	}
+	if f.threadModel != instance.DefaultModel {
+		t.Fatalf("thread model = %q, want %q", f.threadModel, instance.DefaultModel)
+	}
+	if !strings.Contains(f.threadInstructions, "promptline-toolbox") || f.mcpLists != 1 {
+		t.Fatalf("toolbox instructions = %q, MCP lists = %d", f.threadInstructions, f.mcpLists)
+	}
+	state, err := r.instance.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.CodexVersion != "0.149.0" {
+		t.Fatalf("recorded Codex version = %q, want 0.149.0", state.CodexVersion)
+	}
 	if _, err := r.StartTurn(context.Background(), "hello"); err != nil {
 		t.Fatal(err)
+	}
+	if f.turnModel != instance.DefaultModel {
+		t.Fatalf("turn model = %q, want %q", f.turnModel, instance.DefaultModel)
 	}
 	if _, err := r.StartTurn(context.Background(), "again"); !errors.Is(err, ErrActiveTurn) {
 		t.Fatalf("got %v", err)
@@ -114,6 +164,44 @@ func TestRuntime_StartSelectsOneThread(t *testing.T) {
 	}
 }
 
+func TestRuntimeRejectsMissingAuthenticationBeforeStartingThread(t *testing.T) {
+	r, client, _ := testRuntime(t)
+	defer r.Close(context.Background())
+	client.account = appserver.Account{RequiresOpenAIAuth: true}
+	err := r.Start(context.Background(), Options{Resume: true}, "test")
+	if !errors.Is(err, ErrAuthenticationRequired) {
+		t.Fatalf("Start() error = %v, want authentication required", err)
+	}
+	if client.startThreads != 0 || client.resumes != 0 {
+		t.Fatalf("unauthenticated startup created or resumed a thread: start=%d resume=%d", client.startThreads, client.resumes)
+	}
+	for _, expected := range []string{"CODEX_HOME=", "codex", "login", "restart Promptline"} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Errorf("authentication error is missing %q: %v", expected, err)
+		}
+	}
+}
+
+func TestRuntimeRejectsMissingToolboxBeforePersistingThread(t *testing.T) {
+	r, client, _ := testRuntime(t)
+	defer r.Close(context.Background())
+	client.mcpServers = nil
+	err := r.Start(context.Background(), Options{}, "test")
+	if !errors.Is(err, ErrToolboxUnavailable) {
+		t.Fatalf("Start() error = %v, want toolbox unavailable", err)
+	}
+	if client.startThreads != 1 || client.mcpLists != 1 {
+		t.Fatalf("start threads = %d, MCP lists = %d", client.startThreads, client.mcpLists)
+	}
+	state, loadErr := r.instance.LoadState()
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if state.LastPrimaryThreadID != "" {
+		t.Fatalf("unverified toolbox persisted thread %q", state.LastPrimaryThreadID)
+	}
+}
+
 func TestRuntime_StoredThreadResumeFailureDoesNotCreateThread(t *testing.T) {
 	r, f, _ := testRuntime(t)
 	defer r.Close(context.Background())
@@ -121,9 +209,21 @@ func TestRuntime_StoredThreadResumeFailureDoesNotCreateThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.resumeErr = errors.New("missing")
-	err := r.Start(context.Background(), Options{}, "test")
+	err := r.Start(context.Background(), Options{Resume: true}, "test")
 	if !errors.Is(err, ErrResumeFailed) || f.startThreads != 0 {
 		t.Fatalf("err=%v start=%d", err, f.startThreads)
+	}
+}
+
+func TestRuntimeResumeRequiresSavedOrExplicitThread(t *testing.T) {
+	r, client, _ := testRuntime(t)
+	defer r.Close(context.Background())
+	err := r.Start(context.Background(), Options{Resume: true}, "test")
+	if !errors.Is(err, ErrNoStoredThread) {
+		t.Fatalf("Start() error = %v, want no stored thread", err)
+	}
+	if client.startThreads != 0 || client.resumes != 0 {
+		t.Fatalf("resume without state started=%d resumed=%d", client.startThreads, client.resumes)
 	}
 }
 
@@ -137,8 +237,8 @@ func TestRuntime_RunRendersTurnAndClosesOnEOF(t *testing.T) {
 	if err := r.Run(context.Background(), strings.NewReader("hello\n"), render); err != nil {
 		t.Fatal(err)
 	}
-	if f.turns != 1 || p.closed != 1 {
-		t.Fatalf("turns=%d closed=%d", f.turns, p.closed)
+	if f.turns != 1 || f.unsubscribes != 1 || p.closed != 1 {
+		t.Fatalf("turns=%d unsubscribes=%d closed=%d", f.turns, f.unsubscribes, p.closed)
 	}
 }
 
@@ -173,6 +273,58 @@ func TestRuntime_ItemCompletionDoesNotCompleteTurn(t *testing.T) {
 	}
 }
 
+func TestRuntimeStreamsAgentOutputWithoutDuplicatingCompletion(t *testing.T) {
+	r, _, _ := testRuntime(t)
+	defer r.Close(context.Background())
+	if err := r.Start(context.Background(), Options{}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.StartTurn(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	render := &fakeRenderer{}
+	events := []appserver.Event{
+		{Method: "item/agentMessage/delta", Params: []byte(`{"itemId":"item-1","delta":"hello "}`)},
+		{Method: "item/agentMessage/delta", Params: []byte(`{"itemId":"item-1","delta":"world"}`)},
+		{Method: "item/completed", Params: []byte(`{"item":{"id":"item-1","type":"agentMessage","text":"hello world"}}`)},
+		{Method: "turn/completed", Params: []byte(`{"turn":{"status":"completed","items":[{"id":"item-1","type":"agentMessage","text":"hello world"}]}}`)},
+	}
+	for _, event := range events {
+		if err := r.renderEvent(event, render); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := strings.Count(render.String(), "hello world"); got != 1 {
+		t.Fatalf("rendered response %d times: %q", got, render.String())
+	}
+}
+
+func TestRuntimeRendersTurnFallbackAndErrors(t *testing.T) {
+	r, _, _ := testRuntime(t)
+	defer r.Close(context.Background())
+	if err := r.Start(context.Background(), Options{}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	render := &fakeRenderer{}
+	completed := appserver.Event{
+		Method: "turn/completed",
+		Params: []byte(`{"turn":{"status":"completed","items":[{"id":"item-1","type":"agentMessage","text":"fallback"}]}}`),
+	}
+	if err := r.renderEvent(completed, render); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(render.String(), "fallback") {
+		t.Fatalf("final message fallback was not rendered: %q", render.String())
+	}
+	render.Reset()
+	if err := r.renderEvent(appserver.Event{Method: "error", Params: []byte(`{"error":{"message":"quota exceeded"}}`)}, render); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(render.String(), "quota exceeded") {
+		t.Fatalf("turn error was not rendered: %q", render.String())
+	}
+}
+
 func TestRuntime_CloseIsIdempotent(t *testing.T) {
 	r, _, p := testRuntime(t)
 	if err := r.Close(context.Background()); err != nil {
@@ -183,6 +335,9 @@ func TestRuntime_CloseIsIdempotent(t *testing.T) {
 	}
 	if p.closed != 1 {
 		t.Fatalf("process closed %d times", p.closed)
+	}
+	if r.api.(*fakeClient).unsubscribes != 0 {
+		t.Fatal("runtime without a selected thread unsubscribed")
 	}
 }
 
@@ -283,7 +438,7 @@ func testRuntimeWithTimeouts(t *testing.T, timeouts instance.Timeouts) (*Runtime
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, process := newFakeClient(), &fakeProcess{}
+	client, process := newFakeClient(), &fakeProcess{codexVersion: "0.149.0"}
 	r, err := New(in, client, process, lock)
 	if err != nil {
 		t.Fatal(err)

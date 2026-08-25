@@ -33,7 +33,7 @@ func CodexConfig(executable string, in *instance.Instance) ([]byte, error) {
 	if in == nil || executable == "" || !filepath.IsAbs(executable) {
 		return nil, errors.New("MCP configuration requires an absolute executable and instance")
 	}
-	args := []string{"toolbox", "serve", "--instance", in.Name(), "--cwd", in.WorkingDirectory(), "--state-root", in.StateRoot()}
+	args := []string{"mcp-server", "--cwd", in.WorkingDirectory()}
 	quotedArgs := make([]string, len(args))
 	for index, arg := range args {
 		quotedArgs[index] = strconv.Quote(arg)
