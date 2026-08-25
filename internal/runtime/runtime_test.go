@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -100,10 +101,11 @@ func (f *fakeClient) Err() error            { return nil }
 type fakeProcess struct {
 	closed       int
 	codexVersion string
+	closeErr     error
 }
 
 func (p *fakeProcess) CodexVersion() string        { return p.codexVersion }
-func (p *fakeProcess) Close(context.Context) error { p.closed++; return nil }
+func (p *fakeProcess) Close(context.Context) error { p.closed++; return p.closeErr }
 
 type blockingProcess struct{}
 
@@ -120,6 +122,10 @@ func (r *fakeRenderer) Delta(s string) error    { _, e := r.WriteString(s); retu
 func (r *fakeRenderer) Text(s string) error     { _, e := r.WriteString(s); return e }
 func (r *fakeRenderer) Progress(s string) error { _, e := r.WriteString(s); return e }
 func (r *fakeRenderer) Error(e error) error     { _, e2 := r.WriteString(e.Error()); return e2 }
+
+type recordingObserver struct{ events []Event }
+
+func (o *recordingObserver) Observe(event Event) { o.events = append(o.events, event) }
 
 func testRuntime(t *testing.T) (*Runtime, *fakeClient, *fakeProcess) {
 	t.Helper()
@@ -259,6 +265,85 @@ func TestRuntime_RunRendersTurnAndClosesOnEOF(t *testing.T) {
 	}
 	if f.turns != 1 || f.unsubscribes != 1 || p.closed != 1 {
 		t.Fatalf("turns=%d unsubscribes=%d closed=%d", f.turns, f.unsubscribes, p.closed)
+	}
+}
+
+func TestRuntimeObserverRecordsLifecycleEventsOnce(t *testing.T) {
+	r, client, _ := testRuntime(t)
+	observer := &recordingObserver{}
+	r.SetObserver(observer)
+	if err := r.Start(context.Background(), Options{}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.StartTurn(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.renderEvent(appserver.Event{Method: "turn/completed"}, &fakeRenderer{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.renderEvent(appserver.Event{Method: "turn/completed"}, &fakeRenderer{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.handleRequest(context.Background(), appserver.ServerRequest{
+		ID: 1, Method: "item/tool/call",
+		Params: []byte(`{"threadId":"new-thread","namespace":"toolbox","tool":"pwd","arguments":{}}`),
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]EventKind, len(observer.events))
+	for index, event := range observer.events {
+		got[index] = event.Kind
+	}
+	want := []EventKind{EventTurnAccepted, EventTurnCompleted, EventToolActivity, EventShutdown}
+	if !slices.Equal(got, want) {
+		t.Fatalf("event order = %v, want %v", got, want)
+	}
+	if client.replies != 1 {
+		t.Fatalf("tool request replies = %d, want 1", client.replies)
+	}
+}
+
+func TestRuntimeObserverRecordsFailedTurnAndInjectedProcessFault(t *testing.T) {
+	r, _, process := testRuntime(t)
+	observer := &recordingObserver{}
+	r.SetObserver(observer)
+	if err := r.Start(context.Background(), Options{}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.StartTurn(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.renderEvent(appserver.Event{Method: "turn/completed", Params: []byte(`{"turn":{"status":"failed"}}`)}, &fakeRenderer{}); err != nil {
+		t.Fatal(err)
+	}
+	fault := errors.New("injected process close fault")
+	process.closeErr = fault
+	if err := r.Close(context.Background()); !errors.Is(err, fault) {
+		t.Fatalf("Close error = %v, want injected fault", err)
+	}
+	got := []EventKind{observer.events[0].Kind, observer.events[1].Kind, observer.events[2].Kind}
+	want := []EventKind{EventTurnAccepted, EventTurnFailed, EventShutdown}
+	if !slices.Equal(got, want) || !errors.Is(observer.events[2].Err, fault) {
+		t.Fatalf("events = %#v", observer.events)
+	}
+}
+
+func TestRuntimeDefaultObserverIsOptional(t *testing.T) {
+	r, _, _ := testRuntime(t)
+	if err := r.Start(context.Background(), Options{}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.StartTurn(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.renderEvent(appserver.Event{Method: "turn/completed"}, &fakeRenderer{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 

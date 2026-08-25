@@ -52,6 +52,7 @@ type Config struct {
 	ToolboxEnabled   bool
 	Timeouts         Timeouts
 	OutputCaps       OutputCaps
+	StateRename      func(string, string) error
 }
 
 // Instance is immutable configuration and its private filesystem layout.
@@ -69,6 +70,7 @@ type Instance struct {
 	toolboxEnabled   bool
 	timeouts         Timeouts
 	outputCaps       OutputCaps
+	stateRename      func(string, string) error
 }
 
 func (i *Instance) Name() string               { return i.name }
@@ -166,11 +168,15 @@ func New(cfg Config) (*Instance, error) {
 	if caps.StderrBytes <= 0 {
 		caps.StderrBytes = 1 << 20
 	}
+	renameState := cfg.StateRename
+	if renameState == nil {
+		renameState = os.Rename
+	}
 	return &Instance{name: cfg.Name, stateRoot: root, stateDir: stateDir, workingRoot: workingRoot,
 		workingDirectory: workingDirectory, codexExecutable: executable, codexHome: codexHome,
 		model: model, reasoningEffort: cfg.ReasoningEffort, approvalMode: mode,
 		toolboxEnabled: cfg.ToolboxEnabled,
-		timeouts:       timeouts, outputCaps: caps}, nil
+		timeouts:       timeouts, outputCaps: caps, stateRename: renameState}, nil
 }
 
 func resolveStateRoot(euid int, supplied, homeDirectory string) (string, error) {

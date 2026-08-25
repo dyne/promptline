@@ -3,6 +3,7 @@ package governance
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -101,4 +102,17 @@ func index(text, want string) int {
 		}
 	}
 	return -1
+}
+
+func TestJournalRotationPropagatesInjectedRenameFault(t *testing.T) {
+	fault := errors.New("rename fault")
+	j, err := OpenJournal(JournalConfig{Directory: t.TempDir(), MaxJournalBytes: 1, Rename: func(string, string) error { return fault }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	err = j.Append(Event{Instance: "test", Kind: "effect"}, true)
+	if !errors.Is(err, fault) {
+		t.Fatalf("Append error = %v", err)
+	}
 }
