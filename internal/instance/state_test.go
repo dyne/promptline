@@ -10,6 +10,17 @@ import (
 	"testing"
 )
 
+func TestSaveStatePropagatesInjectedRenameFault(t *testing.T) {
+	fault := errors.New("rename fault")
+	i, err := New(Config{Name: "fault", StateRoot: t.TempDir(), WorkingRoot: t.TempDir(), StateRename: func(string, string) error { return fault }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := i.SaveState(State{}); !errors.Is(err, fault) {
+		t.Fatalf("SaveState error = %v", err)
+	}
+}
+
 func testInstance(t *testing.T) *Instance {
 	t.Helper()
 	i, err := New(Config{Name: "instance", StateRoot: t.TempDir(), WorkingRoot: t.TempDir()})

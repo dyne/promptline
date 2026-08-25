@@ -118,7 +118,7 @@ func (i *Instance) SaveState(state State) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, i.statePath()); err != nil {
+	if err := i.stateRename(tmpPath, i.statePath()); err != nil {
 		return err
 	}
 	// Syncing the directory makes the rename durable on Unix filesystems.

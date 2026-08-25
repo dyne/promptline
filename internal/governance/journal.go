@@ -36,6 +36,8 @@ type JournalConfig struct {
 	MaxRecordBytes  int
 	MaxJournalBytes int64
 	Retention       int
+	Now             func() time.Time
+	Rename          func(string, string) error
 }
 
 // Journal serializes append-only JSONL records. An append is fsynced at each
@@ -46,6 +48,8 @@ type Journal struct {
 	path   string
 	file   *os.File
 	closed bool
+	now    func() time.Time
+	rename func(string, string) error
 }
 
 func OpenJournal(cfg JournalConfig) (*Journal, error) {
@@ -67,7 +71,13 @@ func OpenJournal(cfg JournalConfig) (*Journal, error) {
 	if err := os.Chmod(cfg.Directory, 0o700); err != nil {
 		return nil, err
 	}
-	j := &Journal{cfg: cfg, path: filepath.Join(cfg.Directory, "events.jsonl")}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.Rename == nil {
+		cfg.Rename = os.Rename
+	}
+	j := &Journal{cfg: cfg, path: filepath.Join(cfg.Directory, "events.jsonl"), now: cfg.Now, rename: cfg.Rename}
 	if err := j.open(); err != nil {
 		return nil, err
 	}
@@ -100,7 +110,7 @@ func (j *Journal) Append(event Event, syncBoundary bool) error {
 		return errors.New("invalid audit event")
 	}
 	if event.Time.IsZero() {
-		event.Time = time.Now().UTC()
+		event.Time = j.now().UTC()
 	} else {
 		event.Time = event.Time.UTC()
 	}
@@ -139,9 +149,9 @@ func (j *Journal) rotateLocked(incoming int64) error {
 		return err
 	}
 	for n := j.cfg.Retention - 1; n >= 1; n-- {
-		_ = os.Rename(fmt.Sprintf("%s.%d", j.path, n), fmt.Sprintf("%s.%d", j.path, n+1))
+		_ = j.rename(fmt.Sprintf("%s.%d", j.path, n), fmt.Sprintf("%s.%d", j.path, n+1))
 	}
-	if err := os.Rename(j.path, j.path+".1"); err != nil {
+	if err := j.rename(j.path, j.path+".1"); err != nil {
 		return err
 	}
 	return j.open()

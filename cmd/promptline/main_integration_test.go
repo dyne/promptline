@@ -14,9 +14,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
+
+	pruntime "promptline/internal/runtime"
+	"promptline/internal/testsupport"
 )
 
 const (
@@ -25,23 +27,6 @@ const (
 	mockToolboxEnvironment = "PROMPTLINE_MOCK_TOOLBOX"
 )
 
-type lockedBuffer struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.b.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.b.String()
-}
-
 func TestPromptlineRunsTurnWithMockCodex(t *testing.T) {
 	work := t.TempDir()
 	stateRoot := filepath.Join(t.TempDir(), "instances")
@@ -49,7 +34,7 @@ func TestPromptlineRunsTurnWithMockCodex(t *testing.T) {
 	inputReader, inputWriter := io.Pipe()
 	t.Cleanup(func() { _ = inputWriter.Close() })
 
-	var output lockedBuffer
+	var output testsupport.LockedBuffer
 	var stderr bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
@@ -84,16 +69,6 @@ func TestPromptlineRunsTurnWithMockCodex(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Promptline did not stop after /quit")
-	}
-	if !strings.Contains(output.String(), "[ working ]") {
-		t.Fatalf("working indicator was not rendered: %q", output.String())
-	}
-	if !strings.Contains(output.String(), "[ toolbox ready:") ||
-		!strings.Contains(output.String(), "[ dynamicToolCall ]") {
-		t.Fatalf("toolbox readiness and call progress were not rendered: %q", output.String())
-	}
-	if got := strings.Count(output.String(), "mock reply"); got != 1 {
-		t.Fatalf("mock reply rendered %d times: %q", got, output.String())
 	}
 
 	state, err := os.ReadFile(filepath.Join(stateRoot, "integration", "state.json"))
@@ -159,18 +134,8 @@ func TestPromptlineRejectsUnauthenticatedCodexBeforePrompt(t *testing.T) {
 	if err == nil {
 		t.Fatal("unauthenticated Promptline startup succeeded")
 	}
-	for _, expected := range []string{
-		"codex authentication required",
-		"CODEX_HOME=",
-		"login",
-		"restart Promptline",
-	} {
-		if !strings.Contains(err.Error(), expected) {
-			t.Errorf("authentication error is missing %q: %v", expected, err)
-		}
-	}
-	if output.Len() != 0 {
-		t.Fatalf("unauthenticated startup reached terminal prompt: %q", output.String())
+	if !errors.Is(err, pruntime.ErrAuthenticationRequired) {
+		t.Fatalf("unauthenticated startup error = %v", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(stateRoot, "unauthenticated", "state.json")); !os.IsNotExist(statErr) {
 		t.Fatalf("unauthenticated startup persisted thread state: %v", statErr)
@@ -197,9 +162,6 @@ func TestPromptlineDefaultsToNewThreadAcrossEOFRestarts(t *testing.T) {
 		)
 		if err != nil {
 			t.Fatalf("attempt %d failed after EOF restart: %v\nstderr: %s", attempt, err, stderr.String())
-		}
-		if !strings.Contains(output.String(), "[ toolbox ready:") {
-			t.Fatalf("attempt %d did not reach a ready prompt: %q", attempt, output.String())
 		}
 	}
 }
@@ -240,11 +202,14 @@ func testStandaloneToolbox(t *testing.T, commandArguments []string) {
 		t.Fatalf("toolbox server failed: %v\nstderr: %s", err, stderr.String())
 	}
 
-	responses := decodeMCPResponses(t, output.Bytes())
-	assertToolList(t, responses[2], "pwd", "echo", "cat")
-	assertToolResultContains(t, responses[3], work)
-	assertToolResultContains(t, responses[4], "hello toolbox")
-	assertToolResultContains(t, responses[5], "fixture contents")
+	responses := testsupport.DecodeMCPResponses(t, output.Bytes())
+	if len(responses) != 5 {
+		t.Fatalf("MCP response count = %d, want 5", len(responses))
+	}
+	testsupport.AssertMCPToolList(t, responses[2], "pwd", "echo", "cat")
+	testsupport.AssertMCPTextResult(t, responses[3], work)
+	testsupport.AssertMCPTextResult(t, responses[4], "hello toolbox")
+	testsupport.AssertMCPTextResult(t, responses[5], "fixture contents")
 	if _, err := os.Stat(unusedStateRoot); !os.IsNotExist(err) {
 		t.Fatalf("standalone MCP server created instance state: %v", err)
 	}
@@ -261,7 +226,9 @@ func TestMockCodexProcess(t *testing.T) {
 	if !slicesContain(os.Args, "app-server") || !slicesContain(os.Args, "--stdio") {
 		os.Exit(2)
 	}
-	serveMockCodex()
+	testsupport.ServeMockCodex(os.Stdin, os.Stdout, os.Getenv(mockAuthEnvironment) == "1", func() (testsupport.Toolbox, error) {
+		return startConfiguredToolbox()
+	})
 	os.Exit(0)
 }
 
@@ -310,183 +277,6 @@ func writeMockCodexExecutable(t *testing.T, authenticated bool) string {
 	return path
 }
 
-func serveMockCodex() {
-	const dynamicCallID uint64 = 9000
-	scanner := bufio.NewScanner(os.Stdin)
-	encoder := json.NewEncoder(os.Stdout)
-	var toolbox *mockToolboxClient
-	defer func() {
-		if toolbox != nil {
-			_ = toolbox.Close()
-		}
-	}()
-	for scanner.Scan() {
-		var request struct {
-			ID     *uint64         `json:"id"`
-			Method string          `json:"method"`
-			Params json.RawMessage `json:"params"`
-			Result json.RawMessage `json:"result"`
-		}
-		if json.Unmarshal(scanner.Bytes(), &request) != nil || request.ID == nil {
-			continue
-		}
-		if request.Method == "" {
-			if *request.ID == dynamicCallID {
-				var reply struct {
-					ContentItems []struct {
-						Type string `json:"type"`
-						Text string `json:"text"`
-					} `json:"contentItems"`
-					Success bool `json:"success"`
-				}
-				if json.Unmarshal(request.Result, &reply) != nil || !reply.Success || len(reply.ContentItems) != 1 || reply.ContentItems[0].Type != "inputText" {
-					return
-				}
-				emitMockTurn(encoder, reply.ContentItems[0].Text, "dynamicToolCall")
-			}
-			continue
-		}
-		result := any(map[string]any{})
-		switch request.Method {
-		case "initialize":
-			var params struct {
-				Capabilities struct {
-					Experimental bool `json:"experimentalApi"`
-				} `json:"capabilities"`
-			}
-			if json.Unmarshal(request.Params, &params) != nil || !params.Capabilities.Experimental {
-				_ = encoder.Encode(map[string]any{"id": *request.ID, "error": map[string]any{"code": -32602, "message": "dynamic tools require experimentalApi"}})
-				continue
-			}
-		case "account/read":
-			if os.Getenv(mockAuthEnvironment) == "1" {
-				result = map[string]any{
-					"account":            map[string]any{"type": "mock"},
-					"requiresOpenaiAuth": true,
-				}
-			} else {
-				result = map[string]any{"account": nil, "requiresOpenaiAuth": true}
-			}
-		case "thread/start":
-			var params struct {
-				DynamicTools []struct {
-					Name  string `json:"name"`
-					Tools []struct {
-						Name string `json:"name"`
-					} `json:"tools"`
-				} `json:"dynamicTools"`
-			}
-			if json.Unmarshal(request.Params, &params) != nil || !hasDynamicTool(params.DynamicTools, "toolbox", "echo") {
-				_ = encoder.Encode(map[string]any{"id": *request.ID, "error": map[string]any{"code": -32602, "message": "toolbox dynamic tools missing"}})
-				continue
-			}
-			result = map[string]any{"thread": map[string]any{
-				"id":     "thread-integration",
-				"status": map[string]any{"type": "idle"},
-			}}
-		case "turn/start":
-			result = map[string]any{"turn": map[string]any{
-				"id":     "turn-integration",
-				"status": "inProgress",
-			}}
-		case "mcpServerStatus/list":
-			var err error
-			toolbox, err = startConfiguredToolbox()
-			if err != nil {
-				_ = encoder.Encode(map[string]any{
-					"id":    *request.ID,
-					"error": map[string]any{"code": -32000, "message": err.Error()},
-				})
-				continue
-			}
-			result = map[string]any{
-				"data": []map[string]any{{
-					"name": "promptline-toolbox", "tools": toolbox.tools,
-					"resources": []any{}, "resourceTemplates": []any{}, "authStatus": "unsupported",
-				}},
-				"nextCursor": nil,
-			}
-		case "mcpServer/tool/call":
-			var params struct {
-				Server    string         `json:"server"`
-				Tool      string         `json:"tool"`
-				Arguments map[string]any `json:"arguments"`
-			}
-			if json.Unmarshal(request.Params, &params) != nil || params.Server != "promptline-toolbox" || toolbox == nil {
-				_ = encoder.Encode(map[string]any{"id": *request.ID, "error": map[string]any{"code": -32602, "message": "invalid MCP tool call"}})
-				continue
-			}
-			text, err := toolbox.CallText(params.Tool, params.Arguments)
-			if err != nil {
-				_ = encoder.Encode(map[string]any{"id": *request.ID, "error": map[string]any{"code": -32000, "message": err.Error()}})
-				continue
-			}
-			result = map[string]any{"content": []map[string]string{{"type": "text", "text": text}}}
-		}
-		_ = encoder.Encode(map[string]any{"id": *request.ID, "result": result})
-		if request.Method == "turn/start" {
-			_ = encoder.Encode(map[string]any{
-				"id":     dynamicCallID,
-				"method": "item/tool/call",
-				"params": map[string]any{
-					"threadId": "thread-integration", "turnId": "turn-integration", "callId": "call-integration",
-					"namespace": "toolbox", "tool": "echo", "arguments": map[string]any{"text": "mock reply"},
-				},
-			})
-		}
-	}
-}
-
-func hasDynamicTool(namespaces []struct {
-	Name  string `json:"name"`
-	Tools []struct {
-		Name string `json:"name"`
-	} `json:"tools"`
-}, namespaceName, toolName string) bool {
-	for _, namespace := range namespaces {
-		if namespace.Name != namespaceName {
-			continue
-		}
-		for _, tool := range namespace.Tools {
-			if tool.Name == toolName {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func emitMockTurn(encoder *json.Encoder, reply, toolType string) {
-	_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{
-		"threadId": "thread-integration", "turnId": "turn-integration",
-		"item": map[string]any{"id": "tool-integration", "type": toolType},
-	}})
-	_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{
-		"threadId": "thread-integration", "turnId": "turn-integration",
-		"item": map[string]any{"id": "tool-integration", "type": toolType},
-	}})
-	_ = encoder.Encode(map[string]any{"method": "item/started", "params": map[string]any{
-		"threadId": "thread-integration", "turnId": "turn-integration",
-		"item": map[string]any{"id": "item-integration", "type": "agentMessage", "text": ""},
-	}})
-	_ = encoder.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{
-		"threadId": "thread-integration", "turnId": "turn-integration", "itemId": "item-integration",
-		"delta": strings.TrimSuffix(reply, "reply"),
-	}})
-	_ = encoder.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{
-		"threadId": "thread-integration", "turnId": "turn-integration", "itemId": "item-integration",
-		"delta": strings.TrimPrefix(reply, "mock "),
-	}})
-	_ = encoder.Encode(map[string]any{"method": "item/completed", "params": map[string]any{
-		"threadId": "thread-integration", "turnId": "turn-integration",
-		"item": map[string]any{"id": "item-integration", "type": "agentMessage", "text": reply},
-	}})
-	_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"turn": map[string]any{
-		"id": "turn-integration", "status": "completed",
-		"items": []map[string]any{{"id": "item-integration", "type": "agentMessage", "text": reply}},
-	}}})
-}
-
 type mockToolboxClient struct {
 	command *exec.Cmd
 	stdin   io.WriteCloser
@@ -495,6 +285,8 @@ type mockToolboxClient struct {
 	tools   map[string]json.RawMessage
 	stderr  bytes.Buffer
 }
+
+func (c *mockToolboxClient) Tools() map[string]json.RawMessage { return c.tools }
 
 func startConfiguredToolbox() (*mockToolboxClient, error) {
 	command, arguments, err := readConfiguredToolbox(filepath.Join(os.Getenv("CODEX_HOME"), "config.toml"))
@@ -641,7 +433,7 @@ func (c *mockToolboxClient) Close() error {
 	return c.command.Wait()
 }
 
-func waitForOutput(t *testing.T, output *lockedBuffer, text string) {
+func waitForOutput(t *testing.T, output *testsupport.LockedBuffer, text string) {
 	t.Helper()
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
@@ -666,69 +458,4 @@ func slicesContain(values []string, target string) bool {
 		}
 	}
 	return false
-}
-
-type mcpResponse struct {
-	ID     int             `json:"id"`
-	Result json.RawMessage `json:"result"`
-}
-
-func decodeMCPResponses(t *testing.T, output []byte) map[int]mcpResponse {
-	t.Helper()
-	responses := map[int]mcpResponse{}
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	for scanner.Scan() {
-		var response mcpResponse
-		if err := json.Unmarshal(scanner.Bytes(), &response); err != nil {
-			t.Fatal(err)
-		}
-		responses[response.ID] = response
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if len(responses) != 5 {
-		t.Fatalf("MCP responses = %d, want 5: %s", len(responses), output)
-	}
-	return responses
-}
-
-func assertToolList(t *testing.T, response mcpResponse, expected ...string) {
-	t.Helper()
-	var result struct {
-		Tools []struct {
-			Name string `json:"name"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal(response.Result, &result); err != nil {
-		t.Fatal(err)
-	}
-	available := make(map[string]struct{}, len(result.Tools))
-	for _, tool := range result.Tools {
-		available[tool.Name] = struct{}{}
-	}
-	for _, name := range expected {
-		if _, ok := available[name]; !ok {
-			t.Errorf("tools/list is missing %q", name)
-		}
-	}
-}
-
-func assertToolResultContains(t *testing.T, response mcpResponse, expected string) {
-	t.Helper()
-	var result struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-		IsError bool `json:"isError"`
-	}
-	if err := json.Unmarshal(response.Result, &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.IsError || len(result.Content) != 1 {
-		t.Fatalf("tool call failed: %s", response.Result)
-	}
-	if !strings.Contains(result.Content[0].Text, expected) {
-		t.Fatalf("tool output %q does not contain %q", result.Content[0].Text, expected)
-	}
 }

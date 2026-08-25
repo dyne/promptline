@@ -28,6 +28,15 @@ type Process struct {
 var sensitiveDiagnostic = regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password|authorization|cookie)\s*[:=]\s*[^\s]+`)
 
 func Start(ctx context.Context, in *instance.Instance) (*Process, error) {
+	return StartWith(ctx, in, func(cmd *exec.Cmd) error { return cmd.Start() })
+}
+
+// StartWith is the injectable process-launch boundary; Start always supplies
+// the real exec.Cmd.Start production dependency.
+func StartWith(ctx context.Context, in *instance.Instance, launch func(*exec.Cmd) error) (*Process, error) {
+	if launch == nil {
+		launch = func(cmd *exec.Cmd) error { return cmd.Start() }
+	}
 	startupCtx, cancel := context.WithTimeout(ctx, in.Timeouts().Startup)
 	defer cancel()
 	codexVersion, err := Probe(startupCtx, in.CodexExecutable())
@@ -52,7 +61,7 @@ func Start(ctx context.Context, in *instance.Instance) (*Process, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app-server stderr: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
+	if err := launch(cmd); err != nil {
 		return nil, fmt.Errorf("start app-server: %w", err)
 	}
 	p := &Process{

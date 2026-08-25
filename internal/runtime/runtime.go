@@ -71,6 +71,34 @@ type Renderer interface {
 	Error(error) error
 }
 
+// EventKind identifies a lifecycle fact independently from terminal rendering.
+type EventKind string
+
+const (
+	EventTurnAccepted      EventKind = "turn_accepted"
+	EventTurnCompleted     EventKind = "turn_completed"
+	EventTurnFailed        EventKind = "turn_failed"
+	EventToolActivity      EventKind = "tool_activity"
+	EventApprovalRequested EventKind = "approval_requested"
+	EventApprovalResolved  EventKind = "approval_resolved"
+	EventShutdown          EventKind = "shutdown"
+)
+
+// Event is a semantic runtime observation. Its fields deliberately avoid
+// terminal text and formatting so callers can observe behavior without making
+// the console part of the runtime contract.
+type Event struct {
+	Kind     EventKind
+	ThreadID string
+	TurnID   string
+	Tool     string
+	Err      error
+}
+
+// Observer receives runtime lifecycle observations. Implementations must not
+// block; runtime execution remains the owner of ordering and delivery.
+type Observer interface{ Observe(Event) }
+
 type Options struct {
 	Resume       bool
 	ResumeID     string
@@ -96,6 +124,7 @@ type Runtime struct {
 	streamOpen         bool
 	turnErrorRendered  bool
 	toolboxTools       int
+	observer           Observer
 }
 
 func New(in *instance.Instance, api Client, process Process, lock *instance.Lock) (*Runtime, error) {
@@ -118,6 +147,16 @@ func New(in *instance.Instance, api Client, process Process, lock *instance.Lock
 // SetRequestHandler installs the sole approval/effect response path. A nil
 // handler is safe: every request is declined, never implicitly approved.
 func (r *Runtime) SetRequestHandler(handler RequestHandler) { r.handler = handler }
+
+// SetObserver installs an optional semantic observer. A nil observer restores
+// the production default, which performs no observation.
+func (r *Runtime) SetObserver(observer Observer) { r.observer = observer }
+
+func (r *Runtime) observe(event Event) {
+	if r.observer != nil {
+		r.observer.Observe(event)
+	}
+}
 
 func (r *Runtime) Start(ctx context.Context, opts Options, version string) error {
 	ctx, cancel := context.WithTimeout(ctx, r.instance.Timeouts().Startup)
@@ -246,6 +285,7 @@ func (r *Runtime) StartTurn(ctx context.Context, text string) (appserver.Turn, e
 	r.streamOpen = false
 	r.turnErrorRendered = false
 	r.mu.Unlock()
+	r.observe(Event{Kind: EventTurnAccepted, ThreadID: threadID, TurnID: turn.ID})
 	return turn, nil
 }
 
@@ -356,13 +396,18 @@ func (r *Runtime) handleRequest(ctx context.Context, request appserver.ServerReq
 	if request.Method == "item/tool/call" {
 		return r.handleDynamicToolCall(ctx, request)
 	}
+	r.observe(Event{Kind: EventApprovalRequested, ThreadID: r.ThreadID()})
 	if r.handler != nil {
 		if err := r.handler(ctx, request, input); err != nil {
+			r.observe(Event{Kind: EventApprovalResolved, ThreadID: r.ThreadID(), Err: err})
 			return err
 		}
+		r.observe(Event{Kind: EventApprovalResolved, ThreadID: r.ThreadID()})
 		return nil
 	}
-	return r.requests.ReplyRequest(ctx, request.ID, map[string]string{"decision": "decline"})
+	err := r.requests.ReplyRequest(ctx, request.ID, map[string]string{"decision": "decline"})
+	r.observe(Event{Kind: EventApprovalResolved, ThreadID: r.ThreadID(), Err: err})
+	return err
 }
 
 func (r *Runtime) handleDynamicToolCall(ctx context.Context, request appserver.ServerRequest) error {
@@ -381,6 +426,7 @@ func (r *Runtime) handleDynamicToolCall(ctx context.Context, request appserver.S
 	if call.Namespace != "toolbox" || call.Tool == "" || call.ThreadID != threadID {
 		return r.replyDynamicToolError(ctx, request.ID, "invalid toolbox namespace, tool, or thread")
 	}
+	r.observe(Event{Kind: EventToolActivity, ThreadID: threadID, Tool: call.Tool})
 	result, err := r.api.CallMCPTool(ctx, threadID, "promptline-toolbox", call.Tool, call.Arguments)
 	if err != nil {
 		return r.replyDynamicToolError(ctx, request.ID, err.Error())
@@ -526,6 +572,13 @@ func (r *Runtime) renderTurnCompletion(params []byte, render Renderer) error {
 		}
 	}
 	r.completeTurn(turnID)
+	if turnID != "" {
+		kind := EventTurnCompleted
+		if completion.Status == "failed" {
+			kind = EventTurnFailed
+		}
+		r.observe(Event{Kind: kind, ThreadID: r.ThreadID(), TurnID: turnID})
+	}
 	return render.Prompt()
 }
 
@@ -568,6 +621,7 @@ func (r *Runtime) Close(ctx context.Context) error {
 			errs = append(errs, err)
 		}
 		r.closeErr = errors.Join(errs...)
+		r.observe(Event{Kind: EventShutdown, ThreadID: threadID, Err: r.closeErr})
 	})
 	return r.closeErr
 }
