@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Package the skill inside the installable Promptline Codex plugin.
+- Package the skill inside the installable `sysadmin` Codex plugin.
 - Add CI validation with ShellCheck and Skill Creator-compatible frontmatter checks.
 - Compare the documented toolbox catalog with Promptline's live MCP `tools/list` schema.
 - Document the four Promptline-native helpers that share the toolbox namespace with the u-root tools.

@@ -78,8 +78,8 @@ jobs:
           go-version-file: go.mod
       - run: make test-fuzz-smoke
 
-  promptline-plugin:
-    name: Promptline plugin and Debian skill
+  sysadmin-plugin:
+    name: Sysadmin plugin and Debian skill
     runs-on: ubuntu-latest
     env:
       GOCACHE: ${{ github.workspace }}/.gocache
@@ -108,7 +108,11 @@ jobs:
           python3 plugins/promptline/scripts/validate_package.py \
             --promptline "${RUNNER_TEMP}/promptline-plugin-check"
       - name: Run ShellCheck
-        run: shellcheck plugins/promptline/skills/debian-sysadmin/scripts/validate-skill.sh
+        run: |
+          shellcheck install.sh scripts/test-install.sh
+          shellcheck plugins/promptline/skills/debian-sysadmin/scripts/validate-skill.sh
+      - name: Test installer contract
+        run: scripts/test-install.sh
       - name: Compare toolbox catalog with live MCP schema
         shell: bash
         run: |
@@ -130,7 +134,7 @@ jobs:
 
   semantic-versioning:
     name: 🤖 Semantic versioning
-    needs: [build-and-test, integration, race-integration, fuzz-smoke, promptline-plugin, compile]
+    needs: [build-and-test, integration, race-integration, fuzz-smoke, sysadmin-plugin, compile]
     runs-on: ubuntu-latest
     outputs:
       new_release_published: ${{ steps.semantic-release.outputs.new_release_published }}

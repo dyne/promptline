@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -21,7 +20,6 @@ type Process struct {
 	codexVersion string
 	stderr       bytes.Buffer
 	stderrLimit  int
-	captured     chan struct{}
 	wait         chan error
 	once         sync.Once
 }
@@ -58,29 +56,21 @@ func StartWith(ctx context.Context, in *instance.Instance, launch func(*exec.Cmd
 	if err != nil {
 		return nil, fmt.Errorf("app-server stdout: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("app-server stderr: %w", err)
-	}
-	if err := launch(cmd); err != nil {
-		return nil, fmt.Errorf("start app-server: %w", err)
-	}
 	p := &Process{
 		cmd:          cmd,
 		codexVersion: codexVersion,
 		stderrLimit:  in.OutputCaps().StderrBytes,
-		captured:     make(chan struct{}),
 		wait:         make(chan error, 1),
 	}
+	cmd.Stderr = &boundedWriter{b: &p.stderr, n: p.stderrLimit}
+	if err := launch(cmd); err != nil {
+		return nil, fmt.Errorf("start app-server: %w", err)
+	}
 	p.Client = New(stdin, stdout, Config{Limits: Limits{MaxFrameBytes: in.OutputCaps().StdoutBytes}})
-	go func() { p.capture(stderr); close(p.captured) }()
 	go func() { p.wait <- cmd.Wait(); close(p.wait) }()
 	return p, nil
 }
 func (p *Process) CodexVersion() string { return p.codexVersion }
-func (p *Process) capture(r io.Reader) {
-	_, _ = io.Copy(&boundedWriter{b: &p.stderr, n: p.stderrLimit}, r)
-}
 func (p *Process) Stderr() string {
 	return sensitiveDiagnostic.ReplaceAllString(p.stderr.String(), "$1=[REDACTED]")
 }

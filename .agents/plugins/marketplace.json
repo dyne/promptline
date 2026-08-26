@@ -1,0 +1,20 @@
+{
+  "name": "promptline",
+  "interface": {
+    "displayName": "Promptline"
+  },
+  "plugins": [
+    {
+      "name": "sysadmin",
+      "source": {
+        "source": "local",
+        "path": "./plugins/promptline"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

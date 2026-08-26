@@ -94,11 +94,6 @@ exit 23
 	if err := p.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-p.captured:
-	case <-time.After(time.Second):
-		t.Fatal("stderr capture did not finish")
-	}
 	if err := p.Close(ctx); err != nil {
 		t.Fatal(err)
 	}

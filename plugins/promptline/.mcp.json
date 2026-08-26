@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "promptline-toolbox": {
+      "command": "promptline",
+      "args": ["mcp-server"],
+      "default_tools_approval_mode": "approve"
+    }
+  }
+}
