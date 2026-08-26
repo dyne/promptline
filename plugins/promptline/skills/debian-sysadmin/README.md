@@ -10,18 +10,18 @@ Primary targets are Debian stable and oldstable on physical hosts, VMs, VPS inst
 
 ## Install
 
-For a normal human-managed installation, copy this reviewed directory into the Codex skills directory. If an agent performs installation inside Promptline and both paths are inside its configured roots, it must call `toolbox.mkdir` and recursive `toolbox.cp` rather than invoke the same-named host binaries.
+The preferred installation is the repository's Promptline Codex plugin, which bundles this skill with the Promptline toolbox MCP configuration. For a standalone human-managed skill installation, copy this reviewed directory into the Codex skills directory. If an agent performs installation inside Promptline and both paths are inside its configured roots, it must call `toolbox.mkdir` and recursive `toolbox.cp` rather than invoke the same-named host binaries.
 
 ```sh
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-cp -a ./plugins/debian-sysadmin "${CODEX_HOME:-$HOME/.codex}/skills/debian-sysadmin"
+cp -a ./plugins/promptline/skills/debian-sysadmin "${CODEX_HOME:-$HOME/.codex}/skills/debian-sysadmin"
 ```
 
 For development, a symlink keeps the installed skill synchronized:
 
 ```sh
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-ln -s "$PWD/plugins/debian-sysadmin" "${CODEX_HOME:-$HOME/.codex}/skills/debian-sysadmin"
+ln -s "$PWD/plugins/promptline/skills/debian-sysadmin" "${CODEX_HOME:-$HOME/.codex}/skills/debian-sysadmin"
 ```
 
 Use the symlink only with a trusted, access-controlled working tree: later checkout or workspace changes immediately become installed instructions. An agent creating the link must call `toolbox.ln` with `symbolic: true`; if source or destination is outside toolbox authority, it must stop rather than fall back to host `ln`. Prefer a reviewed copy for normal use.

@@ -40,6 +40,45 @@ not require network access, Codex credentials, or a live account. Tests select
 their generated fixture explicitly with `--mock-codex PATH`; this flag is not
 for normal operation.
 
+## Codex plugin
+
+This repository is also a Codex plugin marketplace. The `promptline` plugin
+bundles the `debian-sysadmin` skill and a stdio MCP definition for the Go/u-root
+toolbox. The MCP definition invokes exactly `promptline mcp-server`; installing
+the plugin does not start Promptline's interactive thread host, run a shell
+installer, or download an executable.
+
+Build and install the `promptline` executable somewhere on `PATH`, add this
+checkout as a repository marketplace, then install the plugin:
+
+```bash
+make install
+command -v promptline
+codex plugin marketplace add .
+codex plugin add promptline@promptline
+```
+
+After the marketplace files are on the repository's default branch, Codex can
+track the GitHub source instead of a checkout:
+
+```bash
+codex plugin marketplace add dyne/promptline
+codex plugin add promptline@promptline
+```
+
+Start a new Codex thread after installation so Codex discovers the bundled
+skill and `promptline-toolbox` MCP server. The server inherits Codex's working
+directory and uses it as its only filesystem capability root. Run Codex from
+the directory that should be visible to the toolbox; do not launch it from `/`
+merely to broaden access.
+
+The standalone MCP mode applies Promptline's read-only toolbox policy. Mutating
+toolbox definitions remain visible for schema compatibility but fail closed
+unless a future explicitly approved integration supplies an authorization
+path. Remove the plugin with `codex plugin remove promptline`; remove the
+marketplace separately with `codex plugin marketplace remove promptline` when
+it is no longer needed.
+
 Install and authenticate a compatible Codex CLI before starting Promptline.
 Promptline verifies the configured binary before it creates or resumes a
 thread.

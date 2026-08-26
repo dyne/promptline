@@ -78,8 +78,8 @@ jobs:
           go-version-file: go.mod
       - run: make test-fuzz-smoke
 
-  debian-sysadmin-skill:
-    name: Debian sysadmin skill
+  promptline-plugin:
+    name: Promptline plugin and Debian skill
     runs-on: ubuntu-latest
     env:
       GOCACHE: ${{ github.workspace }}/.gocache
@@ -97,19 +97,24 @@ jobs:
       - name: Run skill validator
         shell: bash
         run: |
-          bash -n plugins/debian-sysadmin/scripts/validate-skill.sh
-          plugins/debian-sysadmin/scripts/validate-skill.sh
+          bash -n plugins/promptline/skills/debian-sysadmin/scripts/validate-skill.sh
+          plugins/promptline/skills/debian-sysadmin/scripts/validate-skill.sh
       - name: Run Skill Creator validation
-        run: python3 plugins/debian-sysadmin/scripts/skill_creator_validate.py plugins/debian-sysadmin
+        run: python3 plugins/promptline/skills/debian-sysadmin/scripts/skill_creator_validate.py plugins/promptline/skills/debian-sysadmin
+      - name: Run plugin package validation
+        shell: bash
+        run: |
+          go build -trimpath -o "${RUNNER_TEMP}/promptline-plugin-check" ./cmd/promptline
+          python3 plugins/promptline/scripts/validate_package.py \
+            --promptline "${RUNNER_TEMP}/promptline-plugin-check"
       - name: Run ShellCheck
-        run: shellcheck plugins/debian-sysadmin/scripts/validate-skill.sh
+        run: shellcheck plugins/promptline/skills/debian-sysadmin/scripts/validate-skill.sh
       - name: Compare toolbox catalog with live MCP schema
         shell: bash
         run: |
-          python3 -B plugins/debian-sysadmin/tests/test_toolbox_catalog.py
-          go build -trimpath -o "${RUNNER_TEMP}/promptline-catalog-check" ./cmd/promptline
-          python3 plugins/debian-sysadmin/scripts/check_toolbox_catalog.py \
-            --promptline "${RUNNER_TEMP}/promptline-catalog-check"
+          python3 -B plugins/promptline/skills/debian-sysadmin/tests/test_toolbox_catalog.py
+          python3 plugins/promptline/skills/debian-sysadmin/scripts/check_toolbox_catalog.py \
+            --promptline "${RUNNER_TEMP}/promptline-plugin-check"
 
   compile:
     runs-on: ubuntu-latest
@@ -125,7 +130,7 @@ jobs:
 
   semantic-versioning:
     name: 🤖 Semantic versioning
-    needs: [build-and-test, integration, race-integration, fuzz-smoke, debian-sysadmin-skill, compile]
+    needs: [build-and-test, integration, race-integration, fuzz-smoke, promptline-plugin, compile]
     runs-on: ubuntu-latest
     outputs:
       new_release_published: ${{ steps.semantic-release.outputs.new_release_published }}
