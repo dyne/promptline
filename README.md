@@ -42,28 +42,30 @@ for normal operation.
 
 ## Codex plugin
 
-This repository is also a Codex plugin marketplace. The `promptline` plugin
+This repository is also a Codex plugin marketplace. The `sysadmin` plugin
 bundles the `debian-sysadmin` skill and a stdio MCP definition for the Go/u-root
 toolbox. The MCP definition invokes exactly `promptline mcp-server`; installing
 the plugin does not start Promptline's interactive thread host, run a shell
 installer, or download an executable.
 
-Build and install the `promptline` executable somewhere on `PATH`, add this
-checkout as a repository marketplace, then install the plugin:
+Run the installer from a checkout to build `promptline`, add this repository as
+the `promptline` marketplace, and install and enable `sysadmin`:
 
 ```bash
-make install
-command -v promptline
-codex plugin marketplace add .
-codex plugin add promptline@promptline
+./install.sh
 ```
+
+The binary is installed under `${PROMPTLINE_BIN_DIR:-$HOME/.local/bin}`. Set
+`PROMPTLINE_BIN_DIR` to another absolute directory when needed. It must be on
+`PATH` when Codex starts so the bundled MCP configuration can invoke
+`promptline mcp-server`.
 
 After the marketplace files are on the repository's default branch, Codex can
 track the GitHub source instead of a checkout:
 
 ```bash
 codex plugin marketplace add dyne/promptline
-codex plugin add promptline@promptline
+codex plugin add sysadmin@promptline
 ```
 
 Start a new Codex thread after installation so Codex discovers the bundled
@@ -75,7 +77,7 @@ merely to broaden access.
 The standalone MCP mode applies Promptline's read-only toolbox policy. Mutating
 toolbox definitions remain visible for schema compatibility but fail closed
 unless a future explicitly approved integration supplies an authorization
-path. Remove the plugin with `codex plugin remove promptline`; remove the
+path. Remove the plugin with `codex plugin remove sysadmin@promptline`; remove the
 marketplace separately with `codex plugin marketplace remove promptline` when
 it is no longer needed.
 

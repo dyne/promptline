@@ -1,0 +1,35 @@
+{
+  "name": "sysadmin",
+  "version": "0.1.0",
+  "description": "Debian administration guidance with Promptline's bounded Go/u-root MCP toolbox.",
+  "author": {
+    "name": "Dyne.org foundation",
+    "url": "https://dyne.org"
+  },
+  "homepage": "https://github.com/dyne/promptline#readme",
+  "repository": "https://github.com/dyne/promptline",
+  "license": "AGPL-3.0-or-later",
+  "keywords": [
+    "debian",
+    "mcp",
+    "system-administration",
+    "u-root"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Sysadmin",
+    "shortDescription": "Careful Debian administration with a bounded toolbox",
+    "longDescription": "Diagnose and administer Debian systems with evidence-first procedures and Promptline's structured Go/u-root toolbox MCP server.",
+    "developerName": "Dyne.org foundation",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Debian system administration",
+      "Bounded Go/u-root toolbox"
+    ],
+    "defaultPrompt": [
+      "Diagnose this Debian host and propose the smallest safe intervention.",
+      "Inspect this Debian service failure without risking remote access."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

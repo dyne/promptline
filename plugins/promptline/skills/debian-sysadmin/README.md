@@ -10,7 +10,7 @@ Primary targets are Debian stable and oldstable on physical hosts, VMs, VPS inst
 
 ## Install
 
-The preferred installation is the repository's Promptline Codex plugin, which bundles this skill with the Promptline toolbox MCP configuration. For a standalone human-managed skill installation, copy this reviewed directory into the Codex skills directory. If an agent performs installation inside Promptline and both paths are inside its configured roots, it must call `toolbox.mkdir` and recursive `toolbox.cp` rather than invoke the same-named host binaries.
+The preferred installation is the repository's `sysadmin` Codex plugin, which bundles this skill with the Promptline toolbox MCP configuration. For a standalone human-managed skill installation, copy this reviewed directory into the Codex skills directory. If an agent performs installation inside Promptline and both paths are inside its configured roots, it must call `toolbox.mkdir` and recursive `toolbox.cp` rather than invoke the same-named host binaries.
 
 ```sh
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
