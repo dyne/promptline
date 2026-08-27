@@ -100,6 +100,75 @@ func TestCatalogDiscoversFixtureSkillsAndNestedFiles(t *testing.T) {
 	}
 }
 
+func TestCatalogEnforcesCanonicalTextInputs(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture fstest.MapFS
+	}{
+		{
+			name: "skill name with URI delimiter",
+			fixture: fstest.MapFS{
+				"alpha?query/SKILL.md": &fstest.MapFile{Data: []byte("skill")},
+			},
+		},
+		{
+			name: "file name with URI delimiter",
+			fixture: fstest.MapFS{
+				"alpha/SKILL.md":        &fstest.MapFile{Data: []byte("skill")},
+				"alpha/docs/a?query.md": &fstest.MapFile{Data: []byte("reference")},
+			},
+		},
+		{
+			name: "non UTF-8 content",
+			fixture: fstest.MapFS{
+				"alpha/SKILL.md":   &fstest.MapFile{Data: []byte("skill")},
+				"alpha/binary.bin": &fstest.MapFile{Data: []byte{0xff, 0xfe}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := NewCatalog(tt.fixture); err == nil {
+				t.Fatal("NewCatalog() accepted a non-canonical text catalog")
+			}
+		})
+	}
+}
+
+func TestCatalogFutureSkillURIsRoundTrip(t *testing.T) {
+	fixture := fstest.MapFS{
+		"alpha~one/SKILL.md":                &fstest.MapFile{Data: []byte("skill")},
+		"alpha~one/references/a_b-1.2~x.md": &fstest.MapFile{Data: []byte("reference")},
+	}
+	catalog, err := NewCatalog(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const file = "references/a_b-1.2~x.md"
+	uri, err := catalog.URI("alpha~one", file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill, parsedFile, err := catalog.ParseURI(uri)
+	if err != nil || skill != "alpha~one" || parsedFile != file {
+		t.Fatalf("ParseURI(URI()) = %q, %q, %v", skill, parsedFile, err)
+	}
+}
+
+func TestCatalogReadRejectsChangedNonUTF8Content(t *testing.T) {
+	fixture := fstest.MapFS{
+		"alpha/SKILL.md": &fstest.MapFile{Data: []byte("skill")},
+	}
+	catalog, err := NewCatalog(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture["alpha/SKILL.md"].Data = []byte{0xff}
+	if _, err := catalog.ReadFile("alpha", "SKILL.md"); !errors.Is(err, ErrInvalidResource) {
+		t.Fatalf("ReadFile() error = %v, want ErrInvalidResource", err)
+	}
+}
+
 func TestCatalogReadAndURICanonicalization(t *testing.T) {
 	catalog := testEmbeddedCatalog(t)
 	bytes, err := catalog.ReadFile(debianSysadmin, "references/systemd.md")
@@ -292,12 +361,11 @@ func TestCatalogMaterializeRejectsSymlinkParent(t *testing.T) {
 	}
 }
 
-func TestMaterializedPathRejectsTraversal(t *testing.T) {
-	root := t.TempDir()
+func TestMaterializedLocationRejectsTraversal(t *testing.T) {
 	for _, file := range []string{"../outside", "/outside", "references/../../outside", "references\\outside"} {
 		t.Run(file, func(t *testing.T) {
-			if _, err := materializedPath(root, file); err == nil {
-				t.Fatalf("materializedPath(%q) accepted traversal", file)
+			if _, _, err := materializedLocation(file); err == nil {
+				t.Fatalf("materializedLocation(%q) accepted traversal", file)
 			}
 		})
 	}
@@ -318,7 +386,7 @@ func TestCatalogMaterializeCleansOwnedStagingAfterWriteFailure(t *testing.T) {
 	catalog := testEmbeddedCatalog(t)
 	destination := filepath.Join(t.TempDir(), "export")
 	original := writeMaterializedFile
-	writeMaterializedFile = func(string, []byte) error { return errors.New("injected write failure") }
+	writeMaterializedFile = func(*os.Root, string, []byte) error { return errors.New("injected write failure") }
 	t.Cleanup(func() { writeMaterializedFile = original })
 	if err := catalog.Materialize(destination); err == nil {
 		t.Fatal("materialization succeeded despite injected failure")
@@ -329,6 +397,67 @@ func TestCatalogMaterializeCleansOwnedStagingAfterWriteFailure(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("materialization left staging entries: %v", entries)
+	}
+}
+
+func TestCatalogMaterializeRejectsDirectorySwapAfterValidation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated Windows permissions")
+	}
+	catalog := testEmbeddedCatalog(t)
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "export")
+	outside := filepath.Join(parent, "outside")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := beforeOpenMaterializationDirectory
+	swapped := false
+	beforeOpenMaterializationDirectory = func(_ *os.Root, name string) error {
+		if swapped || name != "export" {
+			return nil
+		}
+		swapped = true
+		if err := os.Remove(destination); err != nil {
+			return err
+		}
+		return os.Symlink("outside", destination)
+	}
+	t.Cleanup(func() { beforeOpenMaterializationDirectory = original })
+	if err := catalog.Materialize(destination); err == nil {
+		t.Fatal("materialization followed a directory swapped to a symlink")
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("materialization wrote through swapped symlink: %v", entries)
+	}
+}
+
+func TestCatalogMaterializeAtomicallyRefusesRacedTarget(t *testing.T) {
+	catalog := testEmbeddedCatalog(t)
+	destination := filepath.Join(t.TempDir(), "export")
+	original := beforeInstallMaterializedSkill
+	created := false
+	beforeInstallMaterializedSkill = func(root *os.Root, _, skill string) error {
+		if created {
+			return nil
+		}
+		created = true
+		return root.Mkdir(skill, 0o755)
+	}
+	t.Cleanup(func() { beforeInstallMaterializedSkill = original })
+	if err := catalog.Materialize(destination); err == nil {
+		t.Fatal("materialization replaced a concurrently created target")
+	}
+	entries, err := os.ReadDir(filepath.Join(destination, debianSysadmin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("concurrent target was replaced: %v", entries)
 	}
 }
 
