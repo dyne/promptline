@@ -185,6 +185,8 @@ func testStandaloneToolbox(t *testing.T, commandArguments []string) {
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"pwd","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"echo","arguments":{"text":"hello toolbox"}}}`,
 		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"cat","arguments":{"path":"fixture.txt"}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"resources/list"}`,
+		`{"jsonrpc":"2.0","id":7,"method":"resources/read","params":{"uri":"skill://debian-sysadmin/SKILL.md"}}`,
 	}
 	input := strings.NewReader(strings.Join(requests, "\n") + "\n")
 	var output bytes.Buffer
@@ -203,13 +205,39 @@ func testStandaloneToolbox(t *testing.T, commandArguments []string) {
 	}
 
 	responses := testsupport.DecodeMCPResponses(t, output.Bytes())
-	if len(responses) != 5 {
-		t.Fatalf("MCP response count = %d, want 5", len(responses))
+	if len(responses) != 7 {
+		t.Fatalf("MCP response count = %d, want 7", len(responses))
 	}
 	testsupport.AssertMCPToolList(t, responses[2], "pwd", "echo", "cat")
 	testsupport.AssertMCPTextResult(t, responses[3], work)
 	testsupport.AssertMCPTextResult(t, responses[4], "hello toolbox")
 	testsupport.AssertMCPTextResult(t, responses[5], "fixture contents")
+	var resources struct {
+		Resources []struct {
+			URI string `json:"uri"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(responses[6].Result, &resources); err != nil {
+		t.Fatal(err)
+	}
+	foundSkill := false
+	for _, resource := range resources.Resources {
+		foundSkill = foundSkill || resource.URI == "skill://debian-sysadmin/SKILL.md"
+	}
+	if !foundSkill {
+		t.Fatal("standalone toolbox omitted embedded skill resource")
+	}
+	var resource struct {
+		Contents []struct {
+			Text string `json:"text"`
+		} `json:"contents"`
+	}
+	if err := json.Unmarshal(responses[7].Result, &resource); err != nil {
+		t.Fatal(err)
+	}
+	if len(resource.Contents) != 1 || !strings.Contains(resource.Contents[0].Text, "Debian") {
+		t.Fatalf("standalone toolbox returned invalid skill resource: %s", responses[7].Result)
+	}
 	if _, err := os.Stat(unusedStateRoot); !os.IsNotExist(err) {
 		t.Fatalf("standalone MCP server created instance state: %v", err)
 	}
