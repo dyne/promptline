@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,30 @@ func TestStartWithPropagatesInjectedLaunchFault(t *testing.T) {
 	_, err = StartWith(context.Background(), in, func(*exec.Cmd) error { return fault })
 	if !errors.Is(err, fault) {
 		t.Fatalf("StartWith error = %v", err)
+	}
+}
+
+func TestStartWithUsesIsolatedSkillArguments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho 'codex-cli 0.149.0'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	in, err := instance.New(instance.Config{Name: "isolated", StateRoot: t.TempDir(), WorkingRoot: t.TempDir(), CodexExecutable: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fault := errors.New("stop after argv capture")
+	var arguments []string
+	_, err = StartWith(context.Background(), in, func(cmd *exec.Cmd) error {
+		arguments = append([]string(nil), cmd.Args...)
+		return fault
+	})
+	if !errors.Is(err, fault) {
+		t.Fatalf("StartWith error = %v", err)
+	}
+	want := []string{path, "app-server", "--stdio", "-c", "skills.include_instructions=false", "-c", "skills.bundled.enabled=false"}
+	if !slices.Equal(arguments, want) {
+		t.Fatalf("app-server argv = %q, want %q", arguments, want)
 	}
 }
 

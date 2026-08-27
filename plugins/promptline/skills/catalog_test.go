@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -206,6 +207,128 @@ func TestEmbeddedCatalogWorksOutsideSourceTree(t *testing.T) {
 	}
 	if _, err := fs.Stat(os.DirFS(tempDir), "plugins/promptline/skills"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("temporary cwd unexpectedly has source path: %v", err)
+	}
+}
+
+func TestCatalogMaterializeReconstructsOnlyPublicFiles(t *testing.T) {
+	catalog := testEmbeddedCatalog(t)
+	destination := filepath.Join(t.TempDir(), "export")
+	if err := catalog.Materialize(destination); err != nil {
+		t.Fatal(err)
+	}
+	files := mustListFiles(t, catalog, debianSysadmin)
+	if len(files) != 33 {
+		t.Fatalf("public file count = %d, want 33", len(files))
+	}
+	for _, file := range files {
+		want, err := catalog.ReadFile(debianSysadmin, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(filepath.Join(destination, debianSysadmin, filepath.FromSlash(file)))
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("materialized %q = %d bytes, %v", file, len(got), err)
+		}
+	}
+	for _, excluded := range []string{"scripts/validate-skill.sh", "tests/scenarios.md"} {
+		if _, err := os.Stat(filepath.Join(destination, debianSysadmin, excluded)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("excluded materialized path %q: %v", excluded, err)
+		}
+	}
+}
+
+func TestCatalogMaterializeSupportsNestedMultipleSkillsAndRefusesExistingTargets(t *testing.T) {
+	fixture := fstest.MapFS{
+		"alpha/SKILL.md":             &fstest.MapFile{Data: []byte("alpha")},
+		"alpha/references/nested.md": &fstest.MapFile{Data: []byte("nested")},
+		"beta/SKILL.md":              &fstest.MapFile{Data: []byte("beta")},
+	}
+	catalog, err := NewCatalog(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "nested", "export")
+	if err := catalog.Materialize(destination); err != nil {
+		t.Fatal(err)
+	}
+	if bytes, err := os.ReadFile(filepath.Join(destination, "alpha", "references", "nested.md")); err != nil || string(bytes) != "nested" {
+		t.Fatalf("nested materialization = %q, %v", bytes, err)
+	}
+	if _, err := os.Stat(filepath.Join(destination, "beta", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Materialize(destination); err == nil {
+		t.Fatal("materialization overwrote existing skill")
+	}
+}
+
+func TestCatalogMaterializePreservesUnrelatedDestinationData(t *testing.T) {
+	catalog := testEmbeddedCatalog(t)
+	destination := t.TempDir()
+	unrelated := filepath.Join(destination, "notes.txt")
+	if err := os.WriteFile(unrelated, []byte("leave me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Materialize(destination); err != nil {
+		t.Fatal(err)
+	}
+	if bytes, err := os.ReadFile(unrelated); err != nil || string(bytes) != "leave me" {
+		t.Fatalf("unrelated destination data = %q, %v", bytes, err)
+	}
+}
+
+func TestCatalogMaterializeRejectsSymlinkParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink permissions vary on Windows")
+	}
+	catalog := testEmbeddedCatalog(t)
+	base := t.TempDir()
+	linked := filepath.Join(base, "linked")
+	if err := os.Symlink(t.TempDir(), linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Materialize(filepath.Join(linked, "export")); err == nil {
+		t.Fatal("materialization followed symlink")
+	}
+}
+
+func TestMaterializedPathRejectsTraversal(t *testing.T) {
+	root := t.TempDir()
+	for _, file := range []string{"../outside", "/outside", "references/../../outside", "references\\outside"} {
+		t.Run(file, func(t *testing.T) {
+			if _, err := materializedPath(root, file); err == nil {
+				t.Fatalf("materializedPath(%q) accepted traversal", file)
+			}
+		})
+	}
+}
+
+func TestCatalogMaterializeRejectsNonDirectoryParent(t *testing.T) {
+	catalog := testEmbeddedCatalog(t)
+	parent := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(parent, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Materialize(filepath.Join(parent, "export")); err == nil {
+		t.Fatal("materialization accepted non-directory parent")
+	}
+}
+
+func TestCatalogMaterializeCleansOwnedStagingAfterWriteFailure(t *testing.T) {
+	catalog := testEmbeddedCatalog(t)
+	destination := filepath.Join(t.TempDir(), "export")
+	original := writeMaterializedFile
+	writeMaterializedFile = func(string, []byte) error { return errors.New("injected write failure") }
+	t.Cleanup(func() { writeMaterializedFile = original })
+	if err := catalog.Materialize(destination); err == nil {
+		t.Fatal("materialization succeeded despite injected failure")
+	}
+	entries, err := os.ReadDir(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("materialization left staging entries: %v", entries)
 	}
 }
 

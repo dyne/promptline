@@ -254,10 +254,36 @@ func TestMockCodexProcess(t *testing.T) {
 	if !slicesContain(os.Args, "app-server") || !slicesContain(os.Args, "--stdio") {
 		os.Exit(2)
 	}
+	if !hasExactIsolatedSkillOverrides(os.Args) {
+		os.Exit(3)
+	}
 	testsupport.ServeMockCodex(os.Stdin, os.Stdout, os.Getenv(mockAuthEnvironment) == "1", func() (testsupport.Toolbox, error) {
 		return startConfiguredToolbox()
 	})
 	os.Exit(0)
+}
+
+func hasExactIsolatedSkillOverrides(arguments []string) bool {
+	want := map[string]bool{
+		"skills.include_instructions=false": false,
+		"skills.bundled.enabled=false":      false,
+	}
+	for index := 0; index < len(arguments); index++ {
+		if arguments[index] != "-c" {
+			continue
+		}
+		if index+1 >= len(arguments) {
+			return false
+		}
+		value := arguments[index+1]
+		seen, required := want[value]
+		if !required || seen {
+			return false
+		}
+		want[value] = true
+		index++
+	}
+	return want["skills.include_instructions=false"] && want["skills.bundled.enabled=false"]
 }
 
 func TestMockToolboxProcess(t *testing.T) {

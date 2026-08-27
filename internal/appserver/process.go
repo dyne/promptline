@@ -45,7 +45,16 @@ func StartWith(ctx context.Context, in *instance.Instance, launch func(*exec.Cmd
 	if err := startupCtx.Err(); err != nil {
 		return nil, fmt.Errorf("app-server startup: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, in.CodexExecutable(), "app-server", "--stdio")
+	cmd := exec.CommandContext(
+		ctx,
+		in.CodexExecutable(),
+		"app-server",
+		"--stdio",
+		"-c",
+		"skills.include_instructions=false",
+		"-c",
+		"skills.bundled.enabled=false",
+	)
 	cmd.Dir = in.WorkingDirectory()
 	cmd.Env = in.EnvironmentForChild(os.Environ(), nil, nil)
 	stdin, err := cmd.StdinPipe()

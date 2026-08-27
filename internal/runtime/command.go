@@ -19,6 +19,9 @@ type Command struct {
 	Debug        bool
 	Version      bool
 	ToolboxServe bool
+	ListSkills   bool
+	SkillFiles   string
+	Materialize  string
 	MockCodex    bool
 }
 
@@ -69,6 +72,16 @@ func Parse(args []string, stderr io.Writer) (Command, error) {
 		c.ResumeID = commandArgument
 	}
 	c.ToolboxServe = command == "mcp-server"
+	c.ListSkills = command == "list-skills"
+	if command == "list-skill-files" {
+		c.SkillFiles = commandArgument
+	}
+	if command == "materialize-skill" {
+		c.Materialize = commandArgument
+	}
+	if (command == "list-skill-files" || command == "materialize-skill") && commandArgument == "" {
+		return Command{}, fmt.Errorf("%s requires an argument", command)
+	}
 	if c.ToolboxServe && (command == "resume" || command == "new") {
 		return Command{}, errors.New("mcp-server cannot be combined with a thread command")
 	}
@@ -84,6 +97,9 @@ func Parse(args []string, stderr io.Writer) (Command, error) {
 		return Command{}, fmt.Errorf("invalid approval mode %q", approvalMode)
 	}
 	if c.Version {
+		return c, nil
+	}
+	if c.ListSkills || c.SkillFiles != "" || c.Materialize != "" {
 		return c, nil
 	}
 	if c.Instance.WorkingDirectory == "" {
@@ -109,15 +125,15 @@ func splitCommand(args []string) (command, argument string, remaining []string, 
 		return "", "", args, nil
 	}
 	switch args[0] {
-	case "new", "mcp-server", "help":
+	case "new", "mcp-server", "help", "list-skills":
 		return args[0], "", args[1:], nil
-	case "resume":
+	case "resume", "list-skill-files", "materialize-skill":
 		remaining = args[1:]
 		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
 			argument = remaining[0]
 			remaining = remaining[1:]
 		}
-		return "resume", argument, remaining, nil
+		return args[0], argument, remaining, nil
 	default:
 		return "", "", nil, fmt.Errorf("unknown command %q", args[0])
 	}
@@ -130,11 +146,17 @@ func printUsage(fs *flag.FlagSet, output io.Writer) {
 	fmt.Fprintln(output, "       promptline new [OPTIONS]")
 	fmt.Fprintln(output, "       promptline resume [THREAD_ID] [OPTIONS]")
 	fmt.Fprintln(output, "       promptline mcp-server [OPTIONS]")
+	fmt.Fprintln(output, "       promptline list-skills")
+	fmt.Fprintln(output, "       promptline list-skill-files SKILL")
+	fmt.Fprintln(output, "       promptline materialize-skill DIRECTORY")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Commands:")
 	fmt.Fprintln(output, "  new         Start a new interactive thread (default)")
 	fmt.Fprintln(output, "  resume      Resume THREAD_ID, or the last saved thread when omitted")
 	fmt.Fprintln(output, "  mcp-server  Run only the u-root toolbox MCP server on stdio")
+	fmt.Fprintln(output, "  list-skills List embedded skills")
+	fmt.Fprintln(output, "  list-skill-files List public files in an embedded skill")
+	fmt.Fprintln(output, "  materialize-skill Export embedded skills without overwriting")
 	fmt.Fprintln(output, "  help        Print this help")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Options:")
