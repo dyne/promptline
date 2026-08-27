@@ -74,6 +74,18 @@ directory and uses it as its only filesystem capability root. Run Codex from
 the directory that should be visible to the toolbox; do not launch it from `/`
 merely to broaden access.
 
+### Embedded Debian skill and compatibility
+
+The reviewed on-disk source is [`plugins/promptline/skills/debian-sysadmin`](plugins/promptline/skills/debian-sysadmin). Each build embeds its public files, so these commands work from a copied executable outside a checkout and do not create an instance:
+
+```bash
+./promptline list-skills
+./promptline list-skill-files debian-sysadmin
+./promptline materialize-skill /tmp/promptline-skills
+```
+
+The standalone `mcp-server` exposes the same public files as ordinary `skill://` MCP resources through `resources/list` and `resources/read`. Scripts and tests are excluded from that public surface and from exports, although Go's broad embed pattern can retain their bytes in the binary. The full source, safe export behavior, plugin discovery, and executable-only fallback are documented in [the embedded-skills guide](plugins/promptline/skills/README.md).
+
 The standalone MCP mode applies Promptline's read-only toolbox policy. Mutating
 toolbox definitions remain visible for schema compatibility but fail closed
 unless a future explicitly approved integration supplies an authorization
@@ -149,6 +161,8 @@ operations. Calls to that namespace are routed through app-server's
 `mcpServer/tool/call` method to the real MCP server. This explicit bridge avoids
 Codex configurations that discover MCP tools but defer them without exposing a
 tool-search facility.
+
+The MCP server also publishes the embedded Debian skill as ordinary resources; it does not claim a nonstandard MCP skill-discovery extension. A plugin installation supplies the on-disk skill for independently launched Codex environments. Promptline's own app-server child deliberately disables both user/system skill instructions and Codex-bundled skills. If its MCP client cannot access the embedded resources, that executable-only child cannot activate the authoritative skill; exporting it is a compatibility aid, not a bypass of this isolation.
 
 The embedded developer instructions are maintained as Markdown in
 `internal/runtime/init-prompt.md`; edit that file to extend Promptline's initial

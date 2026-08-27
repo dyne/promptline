@@ -43,6 +43,10 @@ receive the namespace and developer instructions to prefer it for supported
 Unix operations. The same toolbox is exposed to other harnesses by the
 standalone `mcp-server` command without creating an instance.
 
+The executable also embeds the plugin skill catalog. The standalone MCP server publishes every public catalog file as an ordinary `skill://` resource; it is not a custom skill-discovery protocol. Interactive startup writes an instance-private Codex configuration that invokes the same executable's `mcp-server` command. In contrast, installed plugin files provide normal filesystem skill discovery to independently launched Codex environments.
+
+Promptline starts its owned app-server child with the exact overrides `skills.include_instructions=false` and `skills.bundled.enabled=false`. This prevents user/system instructions and Codex-bundled skills from entering the managed child. Therefore an executable-only child whose MCP client cannot expose the embedded resources has no supported path to activate the Debian skill in that run. Materialization is deliberately limited to a safe export for filesystem-based compatibility/debugging, not an isolation bypass.
+
 Child environments are built from an explicit allow policy, never inherited
 wholesale. Values written to diagnostics or audit output pass through central
 redaction. Defaults fail closed: invalid instance names, unsafe state paths,
