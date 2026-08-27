@@ -24,6 +24,8 @@ Integration tests exercise the real command and MCP-server process boundaries.
 They use temporary instance roots and `CODEX_HOME`, bounded deadlines, and
 assert child exit, persisted state, and tool results.
 
+The embedded-skill contracts additionally verify that the catalog exposes 33 public Debian files, excludes `scripts/` and `tests/`, discovers future top-level `SKILL.md` directories, and preserves bytes when materialized. Command and MCP tests cover `list-skills`, `list-skill-files`, `materialize-skill`, and raw `resources/list`/`resources/read` without creating instance state. App-server integration asserts the two required skill-isolation arguments exactly.
+
 ### Filesystem and authority
 
 Instance, state, path-confinement, locking, approval, and audit tests verify
