@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"syscall"
 
 	"promptline/internal/application"
@@ -35,6 +36,7 @@ import (
 	"promptline/internal/instance"
 	"promptline/internal/mcp"
 	pruntime "promptline/internal/runtime"
+	"promptline/plugins/promptline/skills"
 )
 
 // Version is set at build time via ldflags. Defaults to "dev".
@@ -64,6 +66,25 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 	}
 	if cmd.Version {
 		return printVersionReport(output, cmd.Instance.CodexExecutable)
+	}
+	if cmd.ListSkills || cmd.SkillFiles != "" || cmd.Materialize != "" {
+		catalog, err := skills.EmbeddedCatalog()
+		if err != nil {
+			return err
+		}
+		if cmd.ListSkills {
+			_, err := fmt.Fprintln(output, strings.Join(catalog.ListSkills(), "\n"))
+			return err
+		}
+		if cmd.SkillFiles != "" {
+			files, err := catalog.ListFiles(cmd.SkillFiles)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(output, strings.Join(files, "\n"))
+			return err
+		}
+		return catalog.Materialize(cmd.Materialize)
 	}
 	if cmd.ToolboxServe {
 		registry, err := application.Toolbox(cmd.Instance.WorkingDirectory, cmd.Instance.WorkingRoot)

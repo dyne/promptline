@@ -190,6 +190,31 @@ func TestRuntime_StartSelectsOneThread(t *testing.T) {
 	}
 }
 
+func TestRuntime_StartSendsSkillBootstrapForNewAndResumedThreads(t *testing.T) {
+	for _, options := range []struct {
+		name string
+		opts Options
+	}{
+		{name: "new"},
+		{name: "resumed", opts: Options{ResumeID: "thread-1"}},
+	} {
+		t.Run(options.name, func(t *testing.T) {
+			r, client, _ := testRuntime(t)
+			defer r.Close(context.Background())
+			if err := r.Start(context.Background(), options.opts, "test"); err != nil {
+				t.Fatal(err)
+			}
+			instructions := client.threadInstructions
+			if options.opts.ResumeID != "" {
+				instructions = client.resumeInstructions
+			}
+			if !strings.Contains(instructions, "skill://debian-sysadmin/SKILL.md") {
+				t.Fatalf("skill bootstrap missing from instructions: %q", instructions)
+			}
+		})
+	}
+}
+
 func TestRuntimeRejectsMissingAuthenticationBeforeStartingThread(t *testing.T) {
 	r, client, _ := testRuntime(t)
 	defer r.Close(context.Background())

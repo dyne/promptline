@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io/fs"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -28,6 +30,21 @@ var (
 	// ErrUnknownFile identifies a well-formed public path absent from a skill.
 	ErrUnknownFile = errors.New("unknown embedded skill file")
 )
+
+var writeMaterializedFile = func(path string, bytes []byte) error {
+	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err = out.Write(bytes); err == nil {
+		err = out.Sync()
+	}
+	closeErr := out.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
+}
 
 // Catalog is a discovered, immutable view of public skill files.
 type Catalog struct {
@@ -164,6 +181,128 @@ func (c *Catalog) ParseURI(rawURI string) (string, string, error) {
 		return "", "", err
 	}
 	return u.Host, file, nil
+}
+
+// Materialize writes every public embedded skill below destination. It never
+// overwrites a skill directory and rejects symlinks anywhere in the path.
+func (c *Catalog) Materialize(destination string) error {
+	root, err := filepath.Abs(destination)
+	if err != nil {
+		return fmt.Errorf("resolve materialization destination: %w", err)
+	}
+	if err := requireDirectoryTree(filepath.Dir(root)); err != nil {
+		return err
+	}
+	if info, err := os.Lstat(root); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("materialization destination %q is not a directory", root)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("inspect materialization destination: %w", err)
+	}
+
+	for _, skill := range c.skills {
+		target := filepath.Join(root, skill)
+		if filepath.Dir(target) != root {
+			return fmt.Errorf("invalid materialization target %q", skill)
+		}
+		if _, err := os.Lstat(target); err == nil {
+			return fmt.Errorf("materialization target already exists: %s", target)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("inspect materialization target: %w", err)
+		}
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return fmt.Errorf("create materialization destination: %w", err)
+	}
+	staging, err := os.MkdirTemp(root, ".promptline-skills-")
+	if err != nil {
+		return fmt.Errorf("create materialization staging: %w", err)
+	}
+	defer os.RemoveAll(staging)
+	for _, skill := range c.skills {
+		if err := c.materializeSkill(staging, skill); err != nil {
+			return err
+		}
+	}
+	for _, skill := range c.skills {
+		if err := os.Rename(filepath.Join(staging, skill), filepath.Join(root, skill)); err != nil {
+			return fmt.Errorf("install materialized skill %q: %w", skill, err)
+		}
+	}
+	return syncDirectory(root)
+}
+
+func (c *Catalog) materializeSkill(staging, skill string) error {
+	target := filepath.Join(staging, skill)
+	if err := os.Mkdir(target, 0o755); err != nil {
+		return fmt.Errorf("create materialized skill %q: %w", skill, err)
+	}
+	files, err := c.ListFiles(skill)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		path, err := materializedPath(target, file)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("create materialized directory: %w", err)
+		}
+		bytes, err := c.ReadFile(skill, file)
+		if err != nil {
+			return err
+		}
+		if err := writeMaterializedFile(path, bytes); err != nil {
+			return fmt.Errorf("write materialized file: %w", err)
+		}
+	}
+	return syncDirectory(target)
+}
+
+func materializedPath(root, file string) (string, error) {
+	if !validRelativePath(file) {
+		return "", fmt.Errorf("invalid materialized file path %q", file)
+	}
+	path := filepath.Join(root, filepath.FromSlash(file))
+	if relative, err := filepath.Rel(root, path); err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("materialized file escapes target: %q", file)
+	}
+	return path, nil
+}
+
+func requireDirectoryTree(directory string) error {
+	for current := directory; ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				return fmt.Errorf("materialization parent %q is not a directory", current)
+			}
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("inspect materialization parent: %w", err)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return nil
+		}
+	}
+}
+
+func syncDirectory(directory string) error {
+	handle, err := os.Open(directory)
+	if err != nil {
+		return fmt.Errorf("open materialization directory: %w", err)
+	}
+	err = handle.Sync()
+	closeErr := handle.Close()
+	if err != nil {
+		return fmt.Errorf("sync materialization directory: %w", err)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close materialization directory: %w", closeErr)
+	}
+	return nil
 }
 
 func (c *Catalog) resolve(skill, file string) (string, error) {

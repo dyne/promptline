@@ -19,6 +19,8 @@ package main
 import (
 	"bytes"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -71,6 +73,41 @@ func TestExitCodeReturnsSuccessForHelp(t *testing.T) {
 	}
 	if bytes.Contains(stderr.Bytes(), []byte("promptline: flag: help requested")) {
 		t.Fatalf("help was reported as fatal: %q", stderr.String())
+	}
+}
+
+func TestSkillCommandsUseEmbeddedCatalogWithoutInstanceState(t *testing.T) {
+	stateRoot := filepath.Join(t.TempDir(), "state-must-not-exist")
+	var output bytes.Buffer
+	if err := run([]string{"list-skills", "--state-root", stateRoot, "--mock-codex", "/must-not-run"}, nil, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output.String(), "debian-sysadmin\n"; got != want {
+		t.Fatalf("list-skills output = %q, want %q", got, want)
+	}
+	output.Reset()
+	if err := run([]string{"list-skill-files", "debian-sysadmin", "--state-root", stateRoot, "--mock-codex", "/must-not-run"}, nil, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(strings.TrimSpace(output.String()), "\n") + 1; got != 33 {
+		t.Fatalf("list-skill-files count = %d, want 33", got)
+	}
+	if _, err := os.Stat(stateRoot); !os.IsNotExist(err) {
+		t.Fatalf("skill discovery created instance state: %v", err)
+	}
+}
+
+func TestMaterializeSkillCommandDoesNotCreateInstanceState(t *testing.T) {
+	stateRoot := filepath.Join(t.TempDir(), "state-must-not-exist")
+	destination := filepath.Join(t.TempDir(), "skills")
+	if err := run([]string{"materialize-skill", destination, "--state-root", stateRoot, "--mock-codex", "/must-not-run"}, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(destination, "debian-sysadmin", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stateRoot); !os.IsNotExist(err) {
+		t.Fatalf("materialization created instance state: %v", err)
 	}
 }
 

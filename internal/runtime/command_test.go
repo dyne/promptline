@@ -22,6 +22,12 @@ func TestParse(t *testing.T) {
 		{"resume last command", []string{"resume", "--cwd", "."}, false},
 		{"resume ID command", []string{"resume", "thread-1", "--cwd", "."}, false},
 		{"MCP server command", []string{"mcp-server"}, false},
+		{"list skills command", []string{"list-skills"}, false},
+		{"list skill files command", []string{"list-skill-files", "debian-sysadmin"}, false},
+		{"materialize skill command", []string{"materialize-skill", "/tmp/skills"}, false},
+		{"list skill files missing argument", []string{"list-skill-files"}, true},
+		{"materialize skill missing argument", []string{"materialize-skill"}, true},
+		{"list skills extra argument", []string{"list-skills", "extra"}, true},
 		{"removed new flag", []string{"--cwd", ".", "--new"}, true},
 		{"removed resume flag", []string{"--cwd", ".", "--resume", "x"}, true},
 		{"removed MCP server flag", []string{"--mcp-server"}, true},
@@ -37,6 +43,17 @@ func TestParse(t *testing.T) {
 				t.Fatalf("err=%v", err)
 			}
 		})
+	}
+}
+
+func TestParseSkillCommandsDoNotRequireCWD(t *testing.T) {
+	command, err := Parse([]string{"list-skills"}, io.Discard)
+	if err != nil || !command.ListSkills || command.Instance.WorkingDirectory != "" {
+		t.Fatalf("Parse(list-skills) = %+v, %v", command, err)
+	}
+	command, err = Parse([]string{"list-skill-files", "debian-sysadmin"}, io.Discard)
+	if err != nil || command.SkillFiles != "debian-sysadmin" || command.Instance.WorkingDirectory != "" {
+		t.Fatalf("Parse(list-skill-files) = %+v, %v", command, err)
 	}
 }
 
