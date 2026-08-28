@@ -609,6 +609,40 @@ func TestVerifyJournalWithAnchorRejectsMissingAndBrokenRotation(t *testing.T) {
 	}
 }
 
+func TestVerifyJournalRejectsCrashTailEvenWithAnchor(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	j, err := OpenJournal(JournalConfig{Directory: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Append(Event{Instance: "test", Kind: "effect"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := VerifyJournalWithAnchor(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"schemaVersion":`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, anchor := range []string{"", hash} {
+		if _, err := VerifyJournalWithAnchor(path, anchor); err == nil {
+			t.Fatalf("incomplete verification tail accepted with anchor %q", anchor)
+		}
+	}
+}
+
 func TestRootedLoadHeadRecoversRetainedRotation(t *testing.T) {
 	base := t.TempDir()
 	root, err := os.OpenRoot(base)
