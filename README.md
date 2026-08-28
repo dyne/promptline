@@ -206,6 +206,16 @@ or search/index service. See [the architecture](docs/ARCHITECTURE.md),
 [toolbox documentation](docs/TOOLS.md), and [test guidance](docs/TESTING.md)
 for boundaries, portability, and maintenance commands.
 
+## Audit verification
+
+`promptline verify-audit STATE_DIRECTORY` verifies only the retained
+`audit/events.jsonl` artifact beneath that state directory and
+reports that it is **local-chain-only** evidence. It detects corruption, but a
+process able to rewrite both the journal and its local files can construct a
+new internally consistent chain. Supplying `--audit-anchor HASH`, where HASH
+was exported to a separately trusted system, verifies that external anchor and
+detects such a rewrite relative to that anchor. The command is read-only.
+
 ## License
 
 Copyright (C) 2025-2026 Dyne.org foundation. Licensed under the GNU Affero

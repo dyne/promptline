@@ -160,6 +160,35 @@ func TestLockCloseIsIdempotentAndReleasesForReacquisition(t *testing.T) {
 	defer reacquired.Close()
 }
 
+func TestStateRejectsSubstitutedArtifacts(t *testing.T) {
+	i := testInstance(t)
+	sentinel := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(sentinel, []byte("outside"), privateFileMode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(sentinel, i.statePath()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := i.LoadState(); err == nil {
+		t.Fatal("state symlink accepted")
+	}
+	if err := i.SaveState(State{LastPrimaryThreadID: "safe"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(sentinel); err != nil || string(got) != "outside" {
+		t.Fatalf("outside sentinel = %q, %v", got, err)
+	}
+	if err := os.Remove(i.statePath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(sentinel, i.lockPath()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := i.AcquireLock(); err == nil {
+		t.Fatal("lock symlink accepted")
+	}
+}
+
 func TestConcurrentLockRace(t *testing.T) {
 	i := testInstance(t)
 	var wg sync.WaitGroup

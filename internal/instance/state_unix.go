@@ -31,7 +31,10 @@ func (i *Instance) lockPath() string  { return filepath.Join(i.stateDir, "instan
 func (i *Instance) statePath() string { return filepath.Join(i.stateDir, "state.json") }
 
 func (i *Instance) AcquireLock() (*Lock, error) {
-	f, err := os.OpenFile(i.lockPath(), os.O_CREATE|os.O_RDWR|syscall.O_CLOEXEC, privateFileMode)
+	if err := i.rejectUnsafeArtifact("instance.lock"); err != nil {
+		return nil, err
+	}
+	f, err := i.stateRootHandle.OpenFile("instance.lock", os.O_CREATE|os.O_RDWR|syscall.O_CLOEXEC, privateFileMode)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +66,10 @@ func (l *Lock) Close() error {
 }
 
 func (i *Instance) LoadState() (State, error) {
-	f, err := os.Open(i.statePath())
+	if err := i.rejectUnsafeArtifact("state.json"); err != nil {
+		return State{}, err
+	}
+	f, err := i.stateRootHandle.Open("state.json")
 	if errors.Is(err, os.ErrNotExist) {
 		return State{SchemaVersion: stateSchemaVersion}, nil
 	}
@@ -83,6 +89,26 @@ func (i *Instance) LoadState() (State, error) {
 		return State{}, fmt.Errorf("unsupported instance state schema %d", state.SchemaVersion)
 	}
 	return state, nil
+}
+
+func (i *Instance) rejectUnsafeArtifact(name string) error {
+	info, err := i.stateRootHandle.Lstat(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("unsafe private state artifact %q", name)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("private state artifact %q has unsafe mode", name)
+	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || int(stat.Uid) != os.Geteuid() || stat.Nlink != 1 {
+		return fmt.Errorf("unsafe private state artifact %q identity", name)
+	}
+	return nil
 }
 
 func (i *Instance) SaveState(state State) error {
