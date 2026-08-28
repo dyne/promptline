@@ -21,10 +21,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/user"
@@ -39,14 +44,11 @@ import (
 	"promptline/internal/paths"
 
 	"github.com/u-root/u-root/pkg/core"
-	corebase64 "github.com/u-root/u-root/pkg/core/base64"
 	corecat "github.com/u-root/u-root/pkg/core/cat"
 	corecp "github.com/u-root/u-root/pkg/core/cp"
-	corels "github.com/u-root/u-root/pkg/core/ls"
 	coremkdir "github.com/u-root/u-root/pkg/core/mkdir"
 	coremv "github.com/u-root/u-root/pkg/core/mv"
 	corerm "github.com/u-root/u-root/pkg/core/rm"
-	coreshasum "github.com/u-root/u-root/pkg/core/shasum"
 	coretouch "github.com/u-root/u-root/pkg/core/touch"
 )
 
@@ -70,7 +72,7 @@ func registerURootTools(r *Registry) {
 		NameValue:        "cat",
 		DescriptionValue: "Concatenate and print files",
 		ParametersValue:  mustSchemaParametersFor[catArgs](),
-		ExecuteFunc:      wrapURootCommand(buildCatArgs, runCat),
+		ExecuteFunc:      catText,
 		ValidateFunc:     validatePathsArg("paths", "path"),
 	})
 
@@ -78,7 +80,7 @@ func registerURootTools(r *Registry) {
 		NameValue:        "cp",
 		DescriptionValue: "Copy files and directories",
 		ParametersValue:  mustSchemaParametersFor[copyArgs](),
-		ExecuteFunc:      wrapURootCommand(buildCopyArgs, runCopy),
+		ExecuteFunc:      copyRooted,
 		ValidateFunc:     validateRequiredStrings([]string{"destination"}, []string{"sources"}),
 	})
 
@@ -86,7 +88,7 @@ func registerURootTools(r *Registry) {
 		NameValue:        "mv",
 		DescriptionValue: "Move or rename files and directories",
 		ParametersValue:  mustSchemaParametersFor[moveArgs](),
-		ExecuteFunc:      wrapURootCommand(buildMoveArgs, runMove),
+		ExecuteFunc:      moveRooted,
 		ValidateFunc:     validateRequiredStrings([]string{"destination"}, []string{"sources"}),
 	})
 
@@ -94,7 +96,7 @@ func registerURootTools(r *Registry) {
 		NameValue:        "rm",
 		DescriptionValue: "Remove files or directories",
 		ParametersValue:  mustSchemaParametersFor[removeArgs](),
-		ExecuteFunc:      wrapURootCommand(buildRemoveArgs, runRemove),
+		ExecuteFunc:      removeRooted,
 		ValidateFunc:     validatePathsArg("paths", "path"),
 	})
 
@@ -110,7 +112,7 @@ func registerURootTools(r *Registry) {
 		NameValue:        "touch",
 		DescriptionValue: "Create files or update timestamps",
 		ParametersValue:  mustSchemaParametersFor[touchArgs](),
-		ExecuteFunc:      wrapURootCommand(buildTouchArgs, runTouch),
+		ExecuteFunc:      touchRooted,
 		ValidateFunc:     validatePathsArg("paths", "path"),
 	})
 
@@ -270,7 +272,7 @@ func registerURootTools(r *Registry) {
 		NameValue:        "mkdir",
 		DescriptionValue: "Create directories",
 		ParametersValue:  mustSchemaParametersFor[mkdirArgs](),
-		ExecuteFunc:      wrapURootCommand(buildMkdirArgs, runMkdir),
+		ExecuteFunc:      mkdirRooted,
 		ValidateFunc:     validatePathsArg("paths", "path"),
 	})
 
@@ -436,6 +438,139 @@ func registerURootTools(r *Registry) {
 	})
 }
 
+func copyRooted(ctx context.Context, args map[string]interface{}) (string, error) {
+	sources, err := extractStringSliceArg(args, "sources")
+	if err != nil {
+		return "", err
+	}
+	dest, err := extractStringArg(args, "destination")
+	if err != nil {
+		return "", err
+	}
+	if len(sources) > 1 {
+		d, e := capabilityPathFor(dest, configFromContext(ctx))
+		if e != nil {
+			return "", e
+		}
+		fi, e := d.capability.root.Stat(d.name)
+		if e != nil || !fi.IsDir() {
+			return "", fmt.Errorf("multiple sources require destination directory")
+		}
+		for _, raw := range sources {
+			s, e := capabilityPathFor(raw, configFromContext(ctx))
+			if e != nil {
+				return "", e
+			}
+			if e = copyCapabilityTree(s, capabilityPath{d.capability, filepath.Join(d.name, filepath.Base(s.name))}, getBoolArg(args, "recursive"), getBoolArg(args, "force"), limitsFromContext(ctx).MaxFileSizeBytes); e != nil {
+				return "", e
+			}
+		}
+		return "copied", nil
+	}
+	s, err := capabilityPathFor(sources[0], configFromContext(ctx))
+	if err != nil {
+		return "", err
+	}
+	d, err := capabilityPathFor(dest, configFromContext(ctx))
+	if err != nil {
+		return "", err
+	}
+	if s.capability.root != d.capability.root {
+		return "", fmt.Errorf("copy across roots is not supported")
+	}
+	if err = copyCapabilityTree(s, d, getBoolArg(args, "recursive"), getBoolArg(args, "force"), limitsFromContext(ctx).MaxFileSizeBytes); err != nil {
+		return "", err
+	}
+	return "copied", nil
+}
+func moveRooted(ctx context.Context, args map[string]interface{}) (string, error) {
+	sources, err := extractStringSliceArg(args, "sources")
+	if err != nil {
+		return "", err
+	}
+	dest, err := extractStringArg(args, "destination")
+	if err != nil {
+		return "", err
+	}
+	if len(sources) > 1 {
+		d, e := capabilityPathFor(dest, configFromContext(ctx))
+		if e != nil {
+			return "", e
+		}
+		fi, e := d.capability.root.Stat(d.name)
+		if e != nil || !fi.IsDir() {
+			return "", fmt.Errorf("multiple sources require destination directory")
+		}
+		for _, raw := range sources {
+			s, e := capabilityPathFor(raw, configFromContext(ctx))
+			if e != nil {
+				return "", e
+			}
+			child := filepath.Join(d.name, filepath.Base(s.name))
+			if !getBoolArg(args, "force") || getBoolArg(args, "no_clobber") {
+				e = rootRenameNoReplace(s.capability.root, s.name, child)
+			} else {
+				e = rootRename(s.capability.root, s.name, child)
+			}
+			if e != nil {
+				return "", e
+			}
+		}
+		return "moved", nil
+	}
+	s, err := capabilityPathFor(sources[0], configFromContext(ctx))
+	if err != nil {
+		return "", err
+	}
+	d, err := capabilityPathFor(dest, configFromContext(ctx))
+	if err != nil {
+		return "", err
+	}
+	if s.capability.root != d.capability.root {
+		return "", fmt.Errorf("move across roots is not supported")
+	}
+	if !getBoolArg(args, "force") || getBoolArg(args, "no_clobber") {
+		if err := rootRenameNoReplace(s.capability.root, s.name, d.name); err != nil {
+			return "", err
+		}
+		return "moved", nil
+	}
+	if err := rootRename(s.capability.root, s.name, d.name); err != nil {
+		return "", err
+	}
+	return "moved", nil
+}
+
+// catText intentionally does not delegate to u-root: u-root accepts host
+// pathnames and would reopen a path after validation. Each file is opened via
+// the registry-owned os.Root capability instead.
+func catText(ctx context.Context, args map[string]interface{}) (string, error) {
+	if err := ensureContext(ctx); err != nil {
+		return "", err
+	}
+	requested, err := extractPaths(args, "paths", "path")
+	if err != nil {
+		return "", err
+	}
+	limits := limitsFromContext(ctx)
+	var output strings.Builder
+	for _, raw := range requested {
+		if err := ensureContext(ctx); err != nil {
+			return "", err
+		}
+		path, err := capabilityPathFor(raw, configFromContext(ctx))
+		if err != nil {
+			return "", err
+		}
+		data, _, err := readCapabilityFile(path, limits.MaxFileSizeBytes)
+		if err != nil {
+			return "", err
+		}
+		output.Write(data)
+	}
+	return output.String(), nil
+}
+
 func wrapURootCommand(buildArgs func(context.Context, map[string]interface{}) ([]string, error), run urootCommand) ExecutorFunc {
 	return func(ctx context.Context, args map[string]interface{}) (string, error) {
 		if err := ensureContext(ctx); err != nil {
@@ -573,7 +708,11 @@ func executeLs(ctx context.Context, args map[string]interface{}) (string, error)
 	if err != nil {
 		return "", err
 	}
-	info, err := os.Stat(resolved)
+	capability, err := capabilityPathFor(resolved, configFromContext(ctx))
+	if err != nil {
+		return "", err
+	}
+	info, err := capability.capability.root.Stat(capability.name)
 	if err != nil {
 		return "", fmt.Errorf("path not found: %v", err)
 	}
@@ -593,23 +732,7 @@ func executeLs(ctx context.Context, args map[string]interface{}) (string, error)
 		}
 	}
 
-	var cmdArgs []string
-	if showHidden {
-		cmdArgs = append(cmdArgs, "-a")
-	}
-	if recursive {
-		cmdArgs = append(cmdArgs, "-R")
-	}
-	if path != "" {
-		cmdArgs = append(cmdArgs, path)
-	}
-	output, err := runCoreCommand(ctx, corels.New(), cmdArgs)
-	if err != nil {
-		return "", err
-	}
-	if !showHidden {
-		output = filterHiddenOutput(output, resolved)
-	}
+	output := limiter.String()
 	if strings.TrimSpace(output) == "" {
 		return "Directory is empty", nil
 	}
@@ -756,6 +879,28 @@ func runRemove(ctx context.Context, args []string) (string, error) {
 	return runCoreCommand(ctx, corerm.New(), args)
 }
 
+func removeRooted(ctx context.Context, args map[string]interface{}) (string, error) {
+	paths, err := extractPaths(args, "paths", "path")
+	if err != nil {
+		return "", err
+	}
+	for _, raw := range paths {
+		p, err := capabilityPathFor(raw, configFromContext(ctx))
+		if err != nil {
+			return "", err
+		}
+		if getBoolArg(args, "recursive") {
+			err = rootRemoveAll(p.capability.root, p.name)
+		} else {
+			err = p.capability.root.Remove(p.name)
+		}
+		if err != nil && !getBoolArg(args, "force") {
+			return "", err
+		}
+	}
+	return "removed", nil
+}
+
 func buildTouchArgs(ctx context.Context, args map[string]interface{}) ([]string, error) {
 	pathsArg, err := extractPaths(args, "paths", "path")
 	if err != nil {
@@ -786,6 +931,26 @@ func buildTouchArgs(ctx context.Context, args map[string]interface{}) ([]string,
 func runTouch(ctx context.Context, args []string) (string, error) {
 	return runCoreCommand(ctx, coretouch.New(), args)
 }
+func touchRooted(ctx context.Context, args map[string]interface{}) (string, error) {
+	paths, err := extractPaths(args, "paths", "path")
+	if err != nil {
+		return "", err
+	}
+	for _, raw := range paths {
+		p, err := capabilityPathFor(raw, configFromContext(ctx))
+		if err != nil {
+			return "", err
+		}
+		f, err := p.capability.root.OpenFile(p.name, os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return "", err
+		}
+		if err = f.Close(); err != nil {
+			return "", err
+		}
+	}
+	return "touched", nil
+}
 
 func buildMkdirArgs(ctx context.Context, args map[string]interface{}) ([]string, error) {
 	pathsArg, err := extractPaths(args, "paths", "path")
@@ -813,6 +978,28 @@ func buildMkdirArgs(ctx context.Context, args map[string]interface{}) ([]string,
 
 func runMkdir(ctx context.Context, args []string) (string, error) {
 	return runCoreCommand(ctx, coremkdir.New(), args)
+}
+
+func mkdirRooted(ctx context.Context, args map[string]interface{}) (string, error) {
+	paths, err := extractPaths(args, "paths", "path")
+	if err != nil {
+		return "", err
+	}
+	for _, raw := range paths {
+		p, err := capabilityPathFor(raw, configFromContext(ctx))
+		if err != nil {
+			return "", err
+		}
+		if getBoolArg(args, "parents") {
+			err = rootMkdirAll(p.capability.root, p.name, 0o755)
+		} else {
+			err = p.capability.root.Mkdir(p.name, 0o755)
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	return "created", nil
 }
 
 func grepText(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -860,7 +1047,7 @@ func grepText(ctx context.Context, args map[string]interface{}) (string, error) 
 		if err := ensureContext(ctx); err != nil {
 			return "", err
 		}
-		data, err := readFileLimited(file.Path, true)
+		data, err := readFileLimited(ctx, file.Path, true)
 		if err != nil {
 			return "", err
 		}
@@ -916,27 +1103,31 @@ type walkOptions struct {
 }
 
 func walkDirEntries(ctx context.Context, root string, opts walkOptions) ([]walkEntry, error) {
+	capability, err := capabilityPathFor(root, configFromContext(ctx))
+	if err != nil {
+		return nil, err
+	}
 	maxDepth := opts.maxDepth
 	if maxDepth <= 0 {
 		maxDepth = 1
 	}
 	matches := make([]walkEntry, 0, 64)
 	entries := 0
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	err = fs.WalkDir(capability.capability.root.FS(), capability.name, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if err := ensureContext(ctx); err != nil {
 			return err
 		}
-		depth := relativeDepth(root, path)
+		depth := relativeDepth(capability.name, path)
 		if depth > maxDepth {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		rel, err := filepath.Rel(root, path)
+		rel, err := filepath.Rel(capability.name, path)
 		if err != nil {
 			return err
 		}
@@ -988,7 +1179,7 @@ func collectGrepFiles(ctx context.Context, inputPaths []string, recursive bool, 
 	expandedResolved := make([]string, 0, len(inputPaths))
 	for _, input := range inputPaths {
 		if hasGlobMeta(input) {
-			matches, err := expandGlobPattern(baseResolved, input)
+			matches, err := expandGlobPattern(ctx, baseResolved, input)
 			if err != nil {
 				return nil, err
 			}
@@ -1064,20 +1255,23 @@ func hasGlobMeta(path string) bool {
 	return strings.ContainsAny(path, "*?[")
 }
 
-func expandGlobPattern(baseResolved, input string) ([]string, error) {
+func expandGlobPattern(ctx context.Context, baseResolved, input string) ([]string, error) {
 	if err := paths.ValidatePathString(input, maxPathLength); err != nil {
 		return nil, err
 	}
-	var pattern string
-	if filepath.IsAbs(input) {
-		pattern = filepath.Clean(input)
-	} else {
-		pattern = filepath.Clean(filepath.Join(baseResolved, input))
+	capability, err := capabilityPathFor(input, configFromContext(ctx))
+	if err != nil {
+		return nil, err
 	}
-	if !paths.HasPathPrefix(pattern, baseResolved) {
-		return nil, fmt.Errorf("path escapes working directory")
+	matches, err := fs.Glob(capability.capability.root.FS(), capability.name)
+	if err != nil {
+		return nil, err
 	}
-	return filepath.Glob(pattern)
+	result := make([]string, 0, len(matches))
+	for _, match := range matches {
+		result = append(result, filepath.Join(capability.capability.rootPath, match))
+	}
+	return result, nil
 }
 
 func headText(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -1100,7 +1294,7 @@ func sortText(ctx context.Context, args map[string]interface{}) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	lines, err := readTextLines(resolved)
+	lines, err := readTextLines(ctx, resolved)
 	if err != nil {
 		return "", err
 	}
@@ -1125,7 +1319,7 @@ func uniqText(ctx context.Context, args map[string]interface{}) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	lines, err := readTextLines(resolved)
+	lines, err := readTextLines(ctx, resolved)
 	if err != nil {
 		return "", err
 	}
@@ -1162,7 +1356,7 @@ func wordCount(ctx context.Context, args map[string]interface{}) (string, error)
 		if err := ensureContext(ctx); err != nil {
 			return "", err
 		}
-		data, err := readFileLimited(path, false)
+		data, err := readFileLimited(ctx, path, false)
 		if err != nil {
 			return "", err
 		}
@@ -1200,7 +1394,7 @@ func translateText(ctx context.Context, args map[string]interface{}) (string, er
 		if err != nil {
 			return "", err
 		}
-		data, err := readFileLimited(resolved, false)
+		data, err := readFileLimited(ctx, resolved, false)
 		if err != nil {
 			return "", err
 		}
@@ -1235,16 +1429,19 @@ func teeText(ctx context.Context, args map[string]interface{}) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolvedPaths, err := resolveToolPathsContext(ctx, pathsArg)
-	if err != nil {
-		return "", err
-	}
 	limits := limitsFromContext(ctx)
 	if limits.MaxFileSizeBytes > 0 && int64(len(content)) > limits.MaxFileSizeBytes {
 		return "", fmt.Errorf("content exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
 	}
-	for _, path := range resolvedPaths {
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	for _, raw := range pathsArg {
+		if err := ensureContext(ctx); err != nil {
+			return "", err
+		}
+		path, err := capabilityPathFor(raw, configFromContext(ctx))
+		if err != nil {
+			return "", err
+		}
+		if err := replaceCapabilityFile(path, []byte(content), 0o644, true); err != nil {
 			return "", err
 		}
 	}
@@ -1271,11 +1468,11 @@ func compareFiles(ctx context.Context, args map[string]interface{}) (string, err
 	if err != nil {
 		return "", err
 	}
-	lines1, err := readTextLines(resolved1)
+	lines1, err := readTextLines(ctx, resolved1)
 	if err != nil {
 		return "", err
 	}
-	lines2, err := readTextLines(resolved2)
+	lines2, err := readTextLines(ctx, resolved2)
 	if err != nil {
 		return "", err
 	}
@@ -1327,7 +1524,7 @@ func stringsText(ctx context.Context, args map[string]interface{}) (string, erro
 	if minLength <= 0 {
 		return "", fmt.Errorf("min_length must be positive")
 	}
-	data, err := readFileLimited(resolved, true)
+	data, err := readFileLimited(ctx, resolved, true)
 	if err != nil {
 		return "", err
 	}
@@ -1372,7 +1569,7 @@ func hexDump(ctx context.Context, args map[string]interface{}) (string, error) {
 	if maxBytes <= 0 {
 		return "", fmt.Errorf("max_bytes must be positive")
 	}
-	data, err := readFileLimited(resolved, true)
+	data, err := readFileLimited(ctx, resolved, true)
 	if err != nil {
 		return "", err
 	}
@@ -1428,20 +1625,28 @@ func compareBytes(ctx context.Context, args map[string]interface{}) (string, err
 	if err != nil {
 		return "", err
 	}
-	if err := ensureFileWithinLimit(resolved1); err != nil {
+	if err := ensureFileWithinLimit(ctx, resolved1); err != nil {
 		return "", err
 	}
-	if err := ensureFileWithinLimit(resolved2); err != nil {
+	if err := ensureFileWithinLimit(ctx, resolved2); err != nil {
 		return "", err
 	}
 
-	file1, err := os.Open(resolved1)
+	capability1, err := capabilityPathFor(resolved1, configFromContext(ctx))
+	if err != nil {
+		return "", err
+	}
+	file1, err := capability1.capability.root.Open(capability1.name)
 	if err != nil {
 		return "", err
 	}
 	defer file1.Close()
 
-	file2, err := os.Open(resolved2)
+	capability2, err := capabilityPathFor(resolved2, configFromContext(ctx))
+	if err != nil {
+		return "", err
+	}
+	file2, err := capability2.capability.root.Open(capability2.name)
 	if err != nil {
 		return "", err
 	}
@@ -1501,10 +1706,14 @@ func md5Sum(ctx context.Context, args map[string]interface{}) (string, error) {
 		if err := ensureContext(ctx); err != nil {
 			return "", err
 		}
-		if err := ensureFileWithinLimit(path); err != nil {
+		if err := ensureFileWithinLimit(ctx, path); err != nil {
 			return "", err
 		}
-		file, err := os.Open(path)
+		capability, err := capabilityPathFor(path, configFromContext(ctx))
+		if err != nil {
+			return "", err
+		}
+		file, err := capability.capability.root.Open(capability.name)
 		if err != nil {
 			return "", err
 		}
@@ -1532,10 +1741,6 @@ func shaSum(ctx context.Context, args map[string]interface{}) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolvedPaths, err := resolveToolPathsContext(ctx, pathsArg)
-	if err != nil {
-		return "", err
-	}
 	algorithm, err := extractIntArg(args, "algorithm", 1)
 	if err != nil {
 		return "", err
@@ -1544,31 +1749,34 @@ func shaSum(ctx context.Context, args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("invalid algorithm, only 1, 256, or 512 are valid")
 	}
 
-	for _, path := range resolvedPaths {
+	var output []string
+	for _, path := range pathsArg {
 		if err := ensureContext(ctx); err != nil {
 			return "", err
 		}
-		if err := ensureFileWithinLimit(path); err != nil {
-			return "", err
-		}
-		file, err := os.Open(path)
+		capability, err := capabilityPathFor(path, configFromContext(ctx))
 		if err != nil {
 			return "", err
 		}
-		file.Close()
+		data, _, err := readCapabilityFile(capability, limitsFromContext(ctx).MaxFileSizeBytes)
+		if err != nil {
+			return "", err
+		}
+		var sum []byte
+		switch algorithm {
+		case 1:
+			x := sha1.Sum(data)
+			sum = x[:]
+		case 256:
+			x := sha256.Sum256(data)
+			sum = x[:]
+		case 512:
+			x := sha512.Sum512(data)
+			sum = x[:]
+		}
+		output = append(output, fmt.Sprintf("%x  %s", sum, path))
 	}
-
-	var cmdArgs []string
-	if algorithm != 1 {
-		cmdArgs = append(cmdArgs, "-a", fmt.Sprintf("%d", algorithm))
-	}
-	cmdArgs = append(cmdArgs, resolvedPaths...)
-
-	outputStr, err := runCoreCommand(ctx, coreshasum.New(), cmdArgs)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimRight(outputStr, "\n"), nil
+	return strings.Join(output, "\n"), nil
 }
 
 func base64Tool(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -1579,23 +1787,23 @@ func base64Tool(ctx context.Context, args map[string]interface{}) (string, error
 	if err != nil {
 		return "", err
 	}
-	resolved, err := resolveToolPathContext(ctx, path)
+	capability, err := capabilityPathFor(path, configFromContext(ctx))
 	if err != nil {
 		return "", err
 	}
-	if err := ensureFileWithinLimit(resolved); err != nil {
+	data, _, err := readCapabilityFile(capability, limitsFromContext(ctx).MaxFileSizeBytes)
+	if err != nil {
 		return "", err
 	}
-
-	var cmdArgs []string
+	var output string
 	if getBoolArg(args, "decode") {
-		cmdArgs = append(cmdArgs, "-d")
-	}
-	cmdArgs = append(cmdArgs, resolved)
-
-	output, err := runCoreCommand(ctx, corebase64.New(), cmdArgs)
-	if err != nil {
-		return "", err
+		decoded, err := base64.StdEncoding.DecodeString(string(data))
+		if err != nil {
+			return "", err
+		}
+		output = string(decoded)
+	} else {
+		output = base64.StdEncoding.EncodeToString(data)
 	}
 	if getBoolArg(args, "decode") && !isTextContent([]byte(output)) {
 		return "", fmt.Errorf("decoded output appears to be binary")
@@ -2454,18 +2662,18 @@ func linkPath(ctx context.Context, args map[string]interface{}) (string, error) 
 		return "", err
 	}
 
-	resolvedTarget, err := resolveToolPathContext(ctx, target)
+	resolvedTarget, err := capabilityPathFor(target, configFromContext(ctx))
 	if err != nil {
 		return "", err
 	}
-	resolvedLink, err := resolveToolPathContext(ctx, linkPathArg)
+	resolvedLink, err := capabilityPathFor(linkPathArg, configFromContext(ctx))
 	if err != nil {
 		return "", err
 	}
 
 	if getBoolArg(args, "force") {
-		if _, err := os.Lstat(resolvedLink); err == nil {
-			if err := os.Remove(resolvedLink); err != nil {
+		if _, err := resolvedLink.capability.root.Lstat(resolvedLink.name); err == nil {
+			if err := resolvedLink.capability.root.Remove(resolvedLink.name); err != nil {
 				return "", err
 			}
 		} else if !os.IsNotExist(err) {
@@ -2474,16 +2682,22 @@ func linkPath(ctx context.Context, args map[string]interface{}) (string, error) 
 	}
 
 	if getBoolArg(args, "symbolic") {
-		if err := os.Symlink(resolvedTarget, resolvedLink); err != nil {
+		if resolvedTarget.capability.root != resolvedLink.capability.root {
+			return "", fmt.Errorf("link across roots is not supported")
+		}
+		if err := rootSymlink(resolvedLink.capability.root, resolvedTarget.name, resolvedLink.name); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Created symlink %s -> %s", resolvedLink, resolvedTarget), nil
+		return fmt.Sprintf("Created symlink %s -> %s", linkPathArg, target), nil
 	}
 
-	if err := os.Link(resolvedTarget, resolvedLink); err != nil {
+	if resolvedTarget.capability.root != resolvedLink.capability.root {
+		return "", fmt.Errorf("link across roots is not supported")
+	}
+	if err := rootLink(resolvedLink.capability.root, resolvedTarget.name, resolvedLink.name); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Created link %s -> %s", resolvedLink, resolvedTarget), nil
+	return fmt.Sprintf("Created link %s -> %s", linkPathArg, target), nil
 }
 
 func printWorkingDirectory(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -2538,13 +2752,13 @@ func truncateFile(ctx context.Context, args map[string]interface{}) (string, err
 		return "", fmt.Errorf("size exceeds maximum of %d bytes", limits.MaxFileSizeBytes)
 	}
 
-	resolved, err := resolveToolPathContext(ctx, path)
+	capability, err := capabilityPathFor(path, configFromContext(ctx))
 	if err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(resolved); err != nil {
+	if _, err := capability.capability.root.Stat(capability.name); err != nil {
 		if os.IsNotExist(err) && !getBoolArg(args, "no_create") {
-			file, createErr := os.Create(resolved)
+			file, createErr := capability.capability.root.OpenFile(capability.name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 			if createErr != nil {
 				return "", createErr
 			}
@@ -2554,10 +2768,15 @@ func truncateFile(ctx context.Context, args map[string]interface{}) (string, err
 		}
 	}
 
-	if err := os.Truncate(resolved, size); err != nil {
+	file, err := capability.capability.root.OpenFile(capability.name, os.O_WRONLY, 0)
+	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Truncated %s to %d bytes", resolved, size), nil
+	defer file.Close()
+	if err := file.Truncate(size); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Truncated %s to %d bytes", path, size), nil
 }
 
 func readLinkPath(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -2568,40 +2787,27 @@ func readLinkPath(ctx context.Context, args map[string]interface{}) (string, err
 	if err != nil {
 		return "", err
 	}
-	resolved, err := resolveToolPathNoSymlinkContext(ctx, path)
+	capability, err := capabilityPathFor(path, configFromContext(ctx))
 	if err != nil {
 		return "", err
 	}
-
-	linkTarget, err := os.Readlink(resolved)
+	linkTarget, err := rootReadlink(capability.capability.root, capability.name)
 	if err != nil {
 		return "", err
 	}
 
 	if getBoolArg(args, "follow") {
-		final, err := filepath.EvalSymlinks(resolved)
-		if err != nil {
+		// Opening through Root validates every link component against the live
+		// capability. Return the stable, capability-relative spelling.
+		if _, err := capability.capability.root.Open(capability.name); err != nil {
 			return "", err
 		}
-		baseResolved := configFromContext(ctx).WorkingDirectory
-		final, err = ensureResolvedPathWithinBase(final, baseResolved)
-		if err != nil {
-			return "", err
-		}
-		return final, nil
+		return filepath.Join(capability.capability.rootPath, capability.name), nil
 	}
-
 	if filepath.IsAbs(linkTarget) {
-		baseResolved := configFromContext(ctx).WorkingDirectory
-		if _, err := ensureResolvedPathWithinBase(linkTarget, baseResolved); err != nil {
-			return "", err
-		}
-		return linkTarget, nil
+		return "", fmt.Errorf("absolute symbolic link target is not permitted")
 	}
-
-	baseResolved := configFromContext(ctx).WorkingDirectory
-	relTarget := filepath.Clean(filepath.Join(filepath.Dir(resolved), linkTarget))
-	if _, err := ensureResolvedPathWithinBase(relTarget, baseResolved); err != nil {
+	if _, err := capability.capability.root.Open(filepath.Join(filepath.Dir(capability.name), linkTarget)); err != nil {
 		return "", err
 	}
 	return linkTarget, nil
@@ -2616,21 +2822,36 @@ func realpathPath(ctx context.Context, args map[string]interface{}) (string, err
 		return "", err
 	}
 
-	resolved, err := resolveToolPathContext(ctx, path)
+	capability, err := capabilityPathFor(path, configFromContext(ctx))
 	if err != nil {
 		return "", err
 	}
-
-	final, err := filepath.EvalSymlinks(resolved)
+	name := capability.name
+	for range 40 {
+		info, err := capability.capability.root.Lstat(name)
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			break
+		}
+		target, err := rootReadlink(capability.capability.root, name)
+		if err != nil {
+			return "", err
+		}
+		if filepath.IsAbs(target) {
+			return "", fmt.Errorf("absolute symbolic link target is not permitted")
+		}
+		name = filepath.Clean(filepath.Join(filepath.Dir(name), target))
+	}
+	file, err := capability.capability.root.Open(name)
 	if err != nil {
 		return "", err
 	}
-	baseResolved := configFromContext(ctx).WorkingDirectory
-	final, err = ensureResolvedPathWithinBase(final, baseResolved)
-	if err != nil {
+	if err := file.Close(); err != nil {
 		return "", err
 	}
-	return final, nil
+	return filepath.Join(capability.capability.rootPath, name), nil
 }
 
 func extractStringArg(args map[string]interface{}, key string) (string, error) {
@@ -2849,7 +3070,7 @@ func readHeadTail(ctx context.Context, args map[string]interface{}, head bool, d
 		if err := ensureContext(ctx); err != nil {
 			return "", err
 		}
-		lines, err := readTextLines(path)
+		lines, err := readTextLines(ctx, path)
 		if err != nil {
 			return "", err
 		}
@@ -2875,19 +3096,13 @@ func readHeadTail(ctx context.Context, args map[string]interface{}, head bool, d
 	return strings.Join(output, "\n"), nil
 }
 
-func readFileLimited(path string, allowBinary bool) ([]byte, error) {
-	info, err := os.Stat(path)
+func readFileLimited(ctx context.Context, path string, allowBinary bool) ([]byte, error) {
+	limits := DefaultLimits()
+	capability, err := capabilityPathFor(path, configFromContext(ctx))
 	if err != nil {
 		return nil, err
 	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("path '%s' is a directory", path)
-	}
-	limits := DefaultLimits()
-	if limits.MaxFileSizeBytes > 0 && info.Size() > limits.MaxFileSizeBytes {
-		return nil, fmt.Errorf("file exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
-	}
-	data, err := os.ReadFile(path)
+	data, _, err := readCapabilityFile(capability, limits.MaxFileSizeBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -2897,23 +3112,18 @@ func readFileLimited(path string, allowBinary bool) ([]byte, error) {
 	return data, nil
 }
 
-func ensureFileWithinLimit(path string) error {
-	info, err := os.Stat(path)
+func ensureFileWithinLimit(ctx context.Context, path string) error {
+	limits := DefaultLimits()
+	capability, err := capabilityPathFor(path, configFromContext(ctx))
 	if err != nil {
 		return err
 	}
-	if info.IsDir() {
-		return fmt.Errorf("path '%s' is a directory", path)
-	}
-	limits := DefaultLimits()
-	if limits.MaxFileSizeBytes > 0 && info.Size() > limits.MaxFileSizeBytes {
-		return fmt.Errorf("file exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
-	}
-	return nil
+	_, _, err = readCapabilityFile(capability, limits.MaxFileSizeBytes)
+	return err
 }
 
-func readTextLines(path string) ([]string, error) {
-	data, err := readFileLimited(path, false)
+func readTextLines(ctx context.Context, path string) ([]string, error) {
+	data, err := readFileLimited(ctx, path, false)
 	if err != nil {
 		return nil, err
 	}

@@ -21,6 +21,10 @@ type Config struct {
 	OutputFilters    OutputFilterConfig
 	Policy           Policy
 	Now              func() time.Time
+	// capabilities are opened once, after configuration validation. They are
+	// deliberately not exported: callers must not turn them back into host
+	// pathnames and reintroduce a check-then-open race.
+	capabilities []rootCapability
 }
 
 func DefaultConfig() Config {
@@ -79,6 +83,11 @@ func normalizeConfig(config Config) (Config, error) {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
+	capabilities, err := openRootCapabilities(config.Roots, config.WorkingDirectory)
+	if err != nil {
+		return Config{}, err
+	}
+	config.capabilities = capabilities
 	return config, nil
 }
 

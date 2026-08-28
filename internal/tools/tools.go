@@ -311,6 +311,9 @@ func (r *Registry) Close() error {
 			limiter.Stop()
 		}
 		r.rateLimiters = make(map[string]*toolRateLimiter)
+		for _, capability := range r.config.capabilities {
+			_ = capability.root.Close()
+		}
 	})
 	return nil
 }

@@ -117,29 +117,15 @@ func readFile(ctx context.Context, args map[string]interface{}) (string, error) 
 		return "", err
 	}
 
-	resolved, err := resolvePathWithinBase(path, configFromContext(ctx).WorkingDirectory)
-	if err != nil {
-		return "", err
-	}
-	if !pathAllowedByConfig(ctx, resolved) {
-		return "", fmt.Errorf("path is outside allowed tool base directories")
-	}
-
 	limits := limitsFromContext(ctx)
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return "", fmt.Errorf("failed to read file: %v", err)
-	}
-	if info.Size() > limits.MaxFileSizeBytes {
-		return "", fmt.Errorf("file exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
-	}
-
 	if err := ensureContext(ctx); err != nil {
 		return "", err
 	}
-
-	// Use os.ReadFile instead of exec for better security
-	content, err := os.ReadFile(resolved)
+	capability, err := capabilityPathFor(path, configFromContext(ctx))
+	if err != nil {
+		return "", err
+	}
+	content, _, err := readCapabilityFile(capability, limits.MaxFileSizeBytes)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %v", err)
 	}
