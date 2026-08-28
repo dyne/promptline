@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"promptline/internal/appserver"
+	"promptline/internal/governance"
 	"promptline/internal/instance"
 )
 
@@ -141,6 +142,19 @@ func New(in *instance.Instance, api Client, process Process, lock *instance.Lock
 // SetRequestHandler installs the sole approval/effect response path. A nil
 // handler is safe: every request is declined, never implicitly approved.
 func (r *Runtime) SetRequestHandler(handler RequestHandler) { r.handler = handler }
+
+// ActiveTurnIdentity is a synchronized snapshot for approval correlation.
+func (r *Runtime) ActiveTurnIdentity() (string, string) { return r.state.activeTurn() }
+func (r *Runtime) ApprovalIdentity(request appserver.ServerRequest) governance.ApprovalIdentity {
+	var wire struct {
+		ItemID        string `json:"itemId"`
+		EnvironmentID string `json:"environmentId"`
+		ApprovalID    string `json:"approvalId"`
+	}
+	_ = json.Unmarshal(request.Params, &wire)
+	threadID, turnID := r.state.activeTurn()
+	return governance.ApprovalIdentity{ThreadID: threadID, TurnID: turnID, ItemID: wire.ItemID, EnvironmentID: wire.EnvironmentID, ApprovalID: wire.ApprovalID, PendingItem: r.state.pendingItem(wire.ItemID).Raw}
+}
 
 // SetObserver installs an optional semantic observer. A nil observer restores
 // the production default, which performs no observation.
@@ -490,6 +504,9 @@ func (r *Runtime) renderEvent(event appserver.Event, render Renderer) error {
 			return nil
 		}
 		return render.Text(item.Text)
+	}
+	if event.Method == "item/started" && (item.Type == "fileChange" || item.Type == "commandExecution") {
+		r.state.rememberPending(item)
 	}
 	isProgressItem := item.Type == "commandExecution" || item.Type == "fileChange" ||
 		item.Type == "mcpToolCall" || item.Type == "dynamicToolCall" || item.Type == "webSearch"

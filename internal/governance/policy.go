@@ -3,6 +3,7 @@
 package governance
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -17,13 +18,17 @@ const (
 )
 
 type Effect struct {
-	Kind              string
-	Operation         string
-	CWD               string
-	Paths             []string
-	RequestsNetwork   bool
-	PersistentGrant   bool
-	PrivilegeExpanded bool
+	Kind                                                string
+	Operation                                           string
+	CWD                                                 string
+	Paths                                               []string
+	RequestsNetwork                                     bool
+	PersistentGrant                                     bool
+	PrivilegeExpanded                                   bool
+	ThreadID, TurnID, ItemID, EnvironmentID, ApprovalID string
+	CommandActions                                      json.RawMessage
+	Changes                                             []FileChange
+	AllowedDecisions                                    []Decision
 }
 
 // Policy defaults to ask for all effects. Read effects can be automatically
@@ -31,6 +36,9 @@ type Effect struct {
 type Policy struct {
 	Roots          []string
 	AutoAllowReads bool
+	ActiveThreadID string
+	ActiveTurnID   string
+	Approval       ApprovalIdentity
 }
 
 func (p Policy) Evaluate(effect Effect) Decision {
@@ -73,6 +81,9 @@ type Prompt interface {
 
 func Decide(policy Policy, prompt Prompt, effect Effect) (Decision, error) {
 	if decision := policy.Evaluate(effect); decision == DecisionAccept {
+		if decision == DecisionAccept && len(effect.AllowedDecisions) != 0 && !containsDecision(effect.AllowedDecisions, DecisionAccept) {
+			return DecisionDecline, nil
+		}
 		return decision, nil
 	}
 	if prompt == nil {
@@ -84,8 +95,19 @@ func Decide(policy Policy, prompt Prompt, effect Effect) (Decision, error) {
 	}
 	switch decision {
 	case DecisionAccept, DecisionDecline, DecisionCancel:
+		if decision == DecisionAccept && len(effect.AllowedDecisions) != 0 && !containsDecision(effect.AllowedDecisions, DecisionAccept) {
+			return DecisionDecline, nil
+		}
 		return decision, nil
 	default:
 		return DecisionDecline, errors.New("invalid approval decision")
 	}
+}
+func containsDecision(values []Decision, want Decision) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
