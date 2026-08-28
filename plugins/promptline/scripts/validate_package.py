@@ -60,8 +60,38 @@ def validate(promptline: Path | None = None) -> list[str]:
         failures.append("plugin skills must resolve to ./skills/")
     if manifest.get("mcpServers") != "./.mcp.json":
         failures.append("plugin mcpServers must resolve to ./.mcp.json")
-    if not (PLUGIN_ROOT / "skills" / "debian-sysadmin" / "SKILL.md").is_file():
-        failures.append("plugin is missing the debian-sysadmin skill")
+    skills_root = PLUGIN_ROOT / "skills"
+    if not skills_root.is_dir():
+        failures.append("plugin is missing its skills directory")
+        skill_names: list[str] = []
+    else:
+        skill_names = sorted(
+            path.name for path in skills_root.iterdir()
+            if path.is_dir() and (path / "SKILL.md").is_file()
+        )
+    if not skill_names:
+        failures.append("plugin must contain at least one skill")
+    if not (skills_root / "LICENSE.txt").is_file():
+        failures.append("plugin skills must have one shared LICENSE.txt")
+    else:
+        license_text = (skills_root / "LICENSE.txt").read_text(encoding="utf-8")
+        for required_notice in (
+            "MIT License",
+            "Apache License",
+            "Copyright (c) 2024 Seth Hobson",
+            "Copyright (c) 2026 Antigravity User",
+            "security-ownership-map",
+            "security-threat-model",
+        ):
+            if required_notice not in license_text:
+                failures.append(
+                    f"shared skills license is missing {required_notice!r}"
+                )
+    for skill_name in skill_names:
+        if (skills_root / skill_name / "LICENSE").exists() or (
+            skills_root / skill_name / "LICENSE.txt"
+        ).exists():
+            failures.append(f"skill {skill_name} duplicates the shared license")
 
     interface = manifest.get("interface")
     if not isinstance(interface, dict):

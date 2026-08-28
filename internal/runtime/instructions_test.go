@@ -6,7 +6,10 @@ import (
 )
 
 func TestEmbeddedInitPromptContainsToolboxGuidance(t *testing.T) {
-	prompt := initPrompt()
+	prompt, err := initPrompt()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, expected := range []string{"# Promptline runtime instructions", "promptline-toolbox", "MCP"} {
 		if !strings.Contains(prompt, expected) {
 			t.Errorf("embedded init prompt is missing %q: %q", expected, prompt)
@@ -15,12 +18,19 @@ func TestEmbeddedInitPromptContainsToolboxGuidance(t *testing.T) {
 }
 
 func TestEmbeddedInitPromptBootstrapsAuthoritativeSkill(t *testing.T) {
-	prompt := initPrompt()
+	prompt, err := initPrompt()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, expected := range []string{
+		"bash-defensive-patterns",
+		"bash-linux",
 		"debian-sysadmin",
-		"skill://debian-sysadmin/SKILL.md",
-		"skill://debian-sysadmin/...",
-		"MCP\nresource content is authoritative",
+		"security-ownership-map",
+		"security-threat-model",
+		"skill://<name>/SKILL.md",
+		"skill-bundle://promptline/LICENSE.txt",
+		"MCP-served content as authoritative",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Errorf("embedded init prompt is missing %q: %q", expected, prompt)

@@ -16,7 +16,7 @@ fail() {
 }
 
 required_files=(
-    SKILL.md README.md LICENSE CHANGELOG.md agents/openai.yaml
+    SKILL.md README.md CHANGELOG.md agents/openai.yaml
     docs/DESIGN.md docs/PROVENANCE.md docs/UPSTREAM-REVIEW.md
     tests/scenarios.md tests/test_toolbox_catalog.py
     references/principles.md references/toolbox.md references/local-documentation.md
@@ -30,6 +30,8 @@ required_files=(
     playbooks/ssh-failure.md playbooks/failed-upgrade.md playbooks/failed-boot.md
     scripts/check_toolbox_catalog.py scripts/skill_creator_validate.py
 )
+
+[[ -f "${skill_dir}/../LICENSE.txt" ]] || fail 'missing shared skills/LICENSE.txt'
 
 for relative_path in "${required_files[@]}"; do
     [[ -f "${skill_dir}/${relative_path}" ]] || fail "missing ${relative_path}"
@@ -66,7 +68,7 @@ for path in sorted(root.rglob("*")):
     if not path.is_file():
         failures.append(f"non-regular entry: {relative}")
         continue
-    if path.name != "LICENSE" and path.suffix not in allowed_suffixes:
+    if path.suffix not in allowed_suffixes:
         failures.append(f"unexpected file type: {relative}")
     if path.stat().st_size > 262144:
         failures.append(f"file exceeds 256 KiB: {relative}")

@@ -16,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"gopkg.in/yaml.v3"
 )
 
 // embeddedFiles includes the complete authoritative source tree. Development
@@ -24,6 +26,12 @@ import (
 //
 //go:embed *
 var embeddedFiles embed.FS
+
+const (
+	bundleLicense              = "LICENSE.txt"
+	bundleLicenseURI           = "skill-bundle://promptline/LICENSE.txt"
+	validationOnlyScriptsSkill = "debian-sysadmin"
+)
 
 var (
 	// ErrInvalidResource identifies a non-canonical skill name, file path, or URI.
@@ -53,15 +61,24 @@ var (
 	// These nil production hooks let tests force changes at the two filesystem
 	// race boundaries without timing-dependent goroutines.
 	beforeOpenMaterializationDirectory func(*os.Root, string) error
-	beforeInstallMaterializedSkill     func(*os.Root, string, string) error
+	beforeInstallMaterializedBundle    func(*os.Root, string, string) error
 )
 
 // Catalog is a discovered, immutable view of public UTF-8 skill files whose
 // names have canonical skill URI representations.
 type Catalog struct {
-	fsys   fs.FS
-	files  map[string]map[string]string
-	skills []string
+	fsys        fs.FS
+	files       map[string]map[string]string
+	metadata    map[string]Metadata
+	skills      []string
+	bundleFiles map[string]string
+}
+
+// Metadata is the startup-sized discovery information from a skill's
+// SKILL.md frontmatter. Full skill instructions remain progressively loaded.
+type Metadata struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
 }
 
 // EmbeddedCatalog returns a catalog over the skill files compiled into this package.
@@ -70,7 +87,9 @@ func EmbeddedCatalog() (*Catalog, error) {
 }
 
 // NewCatalog discovers top-level skill directories from fsys. A skill is a
-// directory containing SKILL.md; scripts and tests subtrees are excluded.
+// directory containing SKILL.md. Tests and Debian's validation-only scripts
+// are excluded; scripts belonging to other skills are static readable skill
+// material and are never executable through the catalog or MCP server.
 // Skill names and file path segments are restricted to RFC 3986 unreserved
 // ASCII characters so every public file has one canonical skill URI.
 func NewCatalog(fsys fs.FS) (*Catalog, error) {
@@ -79,7 +98,13 @@ func NewCatalog(fsys fs.FS) (*Catalog, error) {
 		return nil, fmt.Errorf("read skill root: %w", err)
 	}
 
-	catalog := &Catalog{fsys: fsys, files: map[string]map[string]string{}, skills: []string{}}
+	catalog := &Catalog{
+		fsys: fsys, files: map[string]map[string]string{}, metadata: map[string]Metadata{},
+		skills: []string{}, bundleFiles: map[string]string{},
+	}
+	if err := catalog.discoverBundleFile(bundleLicense); err != nil {
+		return nil, err
+	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -104,11 +129,61 @@ func NewCatalog(fsys fs.FS) (*Catalog, error) {
 		if err != nil {
 			return nil, err
 		}
+		metadata, err := parseMetadata(fsys, files["SKILL.md"])
+		if err != nil {
+			return nil, fmt.Errorf("read skill metadata %q: %w", skill, err)
+		}
+		if metadata.Name != skill || strings.TrimSpace(metadata.Description) == "" {
+			return nil, fmt.Errorf("skill %q has invalid name or description metadata", skill)
+		}
 		catalog.files[skill] = files
+		catalog.metadata[skill] = metadata
 		catalog.skills = append(catalog.skills, skill)
 	}
 	sort.Strings(catalog.skills)
 	return catalog, nil
+}
+
+func (c *Catalog) discoverBundleFile(file string) error {
+	info, err := fs.Stat(c.fsys, file)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect embedded bundle file %q: %w", file, err)
+	}
+	if !info.Mode().IsRegular() || !validRelativePath(file) {
+		return fmt.Errorf("invalid embedded bundle file %q", file)
+	}
+	content, err := fs.ReadFile(c.fsys, file)
+	if err != nil {
+		return fmt.Errorf("read embedded bundle file %q: %w", file, err)
+	}
+	if !utf8.Valid(content) {
+		return fmt.Errorf("embedded bundle file %q is not UTF-8 text", file)
+	}
+	c.bundleFiles[file] = file
+	return nil
+}
+
+func parseMetadata(fsys fs.FS, name string) (Metadata, error) {
+	content, err := fs.ReadFile(fsys, name)
+	if err != nil {
+		return Metadata{}, err
+	}
+	text := string(content)
+	if !strings.HasPrefix(text, "---\n") {
+		return Metadata{}, errors.New("SKILL.md is missing YAML frontmatter")
+	}
+	end := strings.Index(text[4:], "\n---\n")
+	if end < 0 {
+		return Metadata{}, errors.New("SKILL.md has unterminated YAML frontmatter")
+	}
+	var metadata Metadata
+	if err := yaml.Unmarshal([]byte(text[4:4+end]), &metadata); err != nil {
+		return Metadata{}, fmt.Errorf("decode SKILL.md frontmatter: %w", err)
+	}
+	return metadata, nil
 }
 
 func discoverFiles(fsys fs.FS, skill string) (map[string]string, error) {
@@ -121,7 +196,7 @@ func discoverFiles(fsys fs.FS, skill string) (map[string]string, error) {
 			return nil
 		}
 		rel := strings.TrimPrefix(name, skill+"/")
-		if excluded(rel) {
+		if excluded(skill, rel) {
 			if entry.IsDir() {
 				return fs.SkipDir
 			}
@@ -161,6 +236,27 @@ func (c *Catalog) ListSkills() []string {
 	return append([]string{}, c.skills...)
 }
 
+// ListMetadata returns sorted startup discovery metadata for all skills.
+func (c *Catalog) ListMetadata() []Metadata {
+	metadata := make([]Metadata, 0, len(c.skills))
+	for _, skill := range c.skills {
+		metadata = append(metadata, c.metadata[skill])
+	}
+	return metadata
+}
+
+// BootstrapInstructions returns concise server-wide progressive-disclosure
+// guidance. It deliberately does not preload every full SKILL.md document.
+func (c *Catalog) BootstrapInstructions() string {
+	var instructions strings.Builder
+	instructions.WriteString("Promptline provides authoritative embedded skills as read-only MCP resources. Match tasks against these startup summaries; when one applies, read skill://<name>/SKILL.md before acting, follow it, and resolve relative files as skill://<name>/<path>. Do not load every full skill speculatively. MCP resource access cannot execute bundled scripts; materialize the bundle before running a skill-owned script. Available skills:\n")
+	for _, metadata := range c.ListMetadata() {
+		fmt.Fprintf(&instructions, "- %s: %s Entry resource: skill://%s/SKILL.md.\n", metadata.Name, metadata.Description, metadata.Name)
+	}
+	instructions.WriteString("The shared license for the embedded bundle is skill-bundle://promptline/LICENSE.txt.")
+	return instructions.String()
+}
+
 // ListFiles returns the sorted public, slash-separated paths for skill.
 func (c *Catalog) ListFiles(skill string) ([]string, error) {
 	files, err := c.skillFiles(skill)
@@ -191,6 +287,54 @@ func (c *Catalog) ReadFile(skill, file string) ([]byte, error) {
 	return bytes, nil
 }
 
+// ListBundleFiles returns sorted files shared by the complete skill bundle.
+func (c *Catalog) ListBundleFiles() []string {
+	files := make([]string, 0, len(c.bundleFiles))
+	for file := range c.bundleFiles {
+		files = append(files, file)
+	}
+	sort.Strings(files)
+	return files
+}
+
+// ReadBundleFile returns exact bytes for a shared bundle file.
+func (c *Catalog) ReadBundleFile(file string) ([]byte, error) {
+	if !validRelativePath(file) {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidResource, file)
+	}
+	name, ok := c.bundleFiles[file]
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrUnknownFile, file)
+	}
+	content, err := fs.ReadFile(c.fsys, name)
+	if err != nil {
+		return nil, fmt.Errorf("read embedded bundle file: %w", err)
+	}
+	if !utf8.Valid(content) {
+		return nil, fmt.Errorf("%w: embedded bundle file is not UTF-8 text", ErrInvalidResource)
+	}
+	return content, nil
+}
+
+// BundleURI returns the canonical URI for a shared bundle file.
+func (c *Catalog) BundleURI(file string) (string, error) {
+	if _, err := c.ReadBundleFile(file); err != nil {
+		return "", err
+	}
+	if file != bundleLicense {
+		return "", fmt.Errorf("%w: %q", ErrUnknownFile, file)
+	}
+	return bundleLicenseURI, nil
+}
+
+// ParseBundleURI resolves the canonical shared-bundle resource URI.
+func (c *Catalog) ParseBundleURI(rawURI string) (string, error) {
+	if rawURI != bundleLicenseURI {
+		return "", fmt.Errorf("%w: %q", ErrInvalidResource, rawURI)
+	}
+	return bundleLicense, nil
+}
+
 // URI returns the canonical URI for an embedded public file.
 func (c *Catalog) URI(skill, file string) (string, error) {
 	if _, err := c.resolve(skill, file); err != nil {
@@ -216,28 +360,27 @@ func (c *Catalog) ParseURI(rawURI string) (string, string, error) {
 	return u.Host, file, nil
 }
 
-// Materialize writes every public embedded skill below destination. It never
-// overwrites a skill directory and rejects symlinks anywhere in the path.
+// Materialize atomically installs the complete public bundle at destination.
+// The destination itself must not already exist; parent directories are
+// created safely and symlinks are rejected throughout the parent path.
 func (c *Catalog) Materialize(destination string) error {
-	destinationRoot, absolute, err := openMaterializationDestination(destination)
+	parentRoot, absolute, target, err := openMaterializationParent(destination)
 	if err != nil {
 		return err
 	}
-	defer destinationRoot.Close()
+	defer parentRoot.Close()
 
-	for _, skill := range c.skills {
-		if _, err := destinationRoot.Lstat(skill); err == nil {
-			return fmt.Errorf("materialization target already exists: %s", filepath.Join(absolute, skill))
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("inspect materialization target: %w", err)
-		}
+	if _, err := parentRoot.Lstat(target); err == nil {
+		return fmt.Errorf("materialization destination already exists: %s", absolute)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("inspect materialization destination: %w", err)
 	}
-	staging, err := mkdirTempRoot(destinationRoot, ".promptline-skills-")
+	staging, err := mkdirTempRoot(parentRoot, ".promptline-skills-")
 	if err != nil {
 		return fmt.Errorf("create materialization staging: %w", err)
 	}
-	defer removeAllRoot(destinationRoot, staging)
-	stagingRoot, err := openDirectoryNoFollow(destinationRoot, staging, false, 0)
+	defer removeAllRoot(parentRoot, staging)
+	stagingRoot, err := openDirectoryNoFollow(parentRoot, staging, false, 0)
 	if err != nil {
 		return fmt.Errorf("open materialization staging: %w", err)
 	}
@@ -252,25 +395,32 @@ func (c *Catalog) Materialize(destination string) error {
 			return err
 		}
 	}
+	for _, file := range c.ListBundleFiles() {
+		content, err := c.ReadBundleFile(file)
+		if err != nil {
+			return err
+		}
+		if err := writeMaterializedFile(stagingRoot, file, content); err != nil {
+			return fmt.Errorf("write materialized bundle file %q: %w", file, err)
+		}
+	}
 	if err := syncRootDirectory(stagingRoot, "."); err != nil {
 		return err
-	}
-	for _, skill := range c.skills {
-		if beforeInstallMaterializedSkill != nil {
-			if err := beforeInstallMaterializedSkill(destinationRoot, staging, skill); err != nil {
-				return fmt.Errorf("prepare materialized skill installation: %w", err)
-			}
-		}
-		if err := renameNoReplace(stagingRoot, skill, destinationRoot, skill); err != nil {
-			return fmt.Errorf("install materialized skill %q: %w", skill, err)
-		}
 	}
 	closeErr := stagingRoot.Close()
 	stagingOpen = false
 	if closeErr != nil {
 		return fmt.Errorf("close materialization staging: %w", closeErr)
 	}
-	return syncRootDirectory(destinationRoot, ".")
+	if beforeInstallMaterializedBundle != nil {
+		if err := beforeInstallMaterializedBundle(parentRoot, staging, target); err != nil {
+			return fmt.Errorf("prepare materialized bundle installation: %w", err)
+		}
+	}
+	if err := renameNoReplace(parentRoot, staging, parentRoot, target); err != nil {
+		return fmt.Errorf("install materialized bundle: %w", err)
+	}
+	return syncRootDirectory(parentRoot, ".")
 }
 
 func (c *Catalog) materializeSkill(staging *os.Root, skill string) error {
@@ -357,6 +507,22 @@ func openMaterializationDestination(destination string) (*os.Root, string, error
 		root = next
 	}
 	return root, absolute, nil
+}
+
+func openMaterializationParent(destination string) (*os.Root, string, string, error) {
+	absolute, err := filepath.Abs(destination)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("resolve materialization destination: %w", err)
+	}
+	target := filepath.Base(absolute)
+	if !filepath.IsLocal(target) || target == "." || target == string(filepath.Separator) {
+		return nil, "", "", fmt.Errorf("invalid materialization destination %q", absolute)
+	}
+	root, _, err := openMaterializationDestination(filepath.Dir(absolute))
+	if err != nil {
+		return nil, "", "", err
+	}
+	return root, absolute, target, nil
 }
 
 func openRelativeDirectory(root *os.Root, directory string) (*os.Root, error) {
@@ -498,7 +664,7 @@ func (c *Catalog) resolve(skill, file string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !validRelativePath(file) || excluded(file) {
+	if !validRelativePath(file) || excluded(skill, file) {
 		return "", fmt.Errorf("%w: %q", ErrInvalidResource, file)
 	}
 	name, ok := files[file]
@@ -553,9 +719,9 @@ func validURIPathSegment(segment string) bool {
 	return true
 }
 
-func excluded(name string) bool {
+func excluded(skill, name string) bool {
 	for _, part := range strings.Split(name, "/") {
-		if part == "scripts" || part == "tests" {
+		if part == "tests" || skill == validationOnlyScriptsSkill && part == "scripts" {
 			return true
 		}
 	}

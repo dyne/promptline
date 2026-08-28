@@ -82,15 +82,23 @@ func TestSkillCommandsUseEmbeddedCatalogWithoutInstanceState(t *testing.T) {
 	if err := run([]string{"list-skills", "--state-root", stateRoot, "--mock-codex", "/must-not-run"}, nil, &output, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := output.String(), "debian-sysadmin\n"; got != want {
-		t.Fatalf("list-skills output = %q, want %q", got, want)
+	wantSkills := "bash-defensive-patterns\nbash-linux\ndebian-sysadmin\nsecurity-ownership-map\nsecurity-threat-model\n"
+	if got := output.String(); got != wantSkills {
+		t.Fatalf("list-skills output = %q, want %q", got, wantSkills)
 	}
 	output.Reset()
 	if err := run([]string{"list-skill-files", "debian-sysadmin", "--state-root", stateRoot, "--mock-codex", "/must-not-run"}, nil, &output, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(strings.TrimSpace(output.String()), "\n") + 1; got != 35 {
-		t.Fatalf("list-skill-files count = %d, want 35", got)
+	if got := strings.Count(strings.TrimSpace(output.String()), "\n") + 1; got != 34 {
+		t.Fatalf("list-skill-files count = %d, want 34", got)
+	}
+	output.Reset()
+	if err := run([]string{"list-skill-files", "security-ownership-map", "--state-root", stateRoot, "--mock-codex", "/must-not-run"}, nil, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "scripts/query_ownership.py\n") {
+		t.Fatalf("operational skill scripts are not discoverable: %q", output.String())
 	}
 	if _, err := os.Stat(stateRoot); !os.IsNotExist(err) {
 		t.Fatalf("skill discovery created instance state: %v", err)
@@ -104,6 +112,9 @@ func TestMaterializeSkillCommandDoesNotCreateInstanceState(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(destination, "debian-sysadmin", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(destination, "LICENSE.txt")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(stateRoot); !os.IsNotExist(err) {

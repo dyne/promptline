@@ -82,6 +82,8 @@ func TestServerListsAndReadsEmbeddedResources(t *testing.T) {
 		`{"jsonrpc":"2.0","id":6,"method":"resources/read","params":{"uri":"skill://debian-sysadmin/references/local-documentation.md"}}`,
 		`{"jsonrpc":"2.0","id":7,"method":"resources/read","params":{"uri":"skill://debian-sysadmin/references/systemd.md"}}`,
 		`{"jsonrpc":"2.0","id":8,"method":"resources/read","params":{"uri":"skill://debian-sysadmin/playbooks/disk-full.md"}}`,
+		`{"jsonrpc":"2.0","id":9,"method":"resources/read","params":{"uri":"skill://security-ownership-map/scripts/query_ownership.py"}}`,
+		`{"jsonrpc":"2.0","id":10,"method":"resources/read","params":{"uri":"skill-bundle://promptline/LICENSE.txt"}}`,
 	}
 	var output bytes.Buffer
 	server, err := NewServer(registry, strings.NewReader(strings.Join(requests, "\n")+"\n"), &output, 1<<20)
@@ -99,6 +101,7 @@ func TestServerListsAndReadsEmbeddedResources(t *testing.T) {
 	var initialized struct {
 		Result struct {
 			Capabilities map[string]json.RawMessage `json:"capabilities"`
+			Instructions string                     `json:"instructions"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal([]byte(responses[0]), &initialized); err != nil {
@@ -109,6 +112,11 @@ func TestServerListsAndReadsEmbeddedResources(t *testing.T) {
 	}
 	if _, ok := initialized.Result.Capabilities["resources"]; !ok {
 		t.Fatal("initialize omitted resources capability")
+	}
+	for _, skill := range catalog.ListSkills() {
+		if !strings.Contains(initialized.Result.Instructions, "- "+skill+":") {
+			t.Fatalf("initialize instructions omitted skill %q: %q", skill, initialized.Result.Instructions)
+		}
 	}
 
 	var listed struct {
@@ -124,45 +132,26 @@ func TestServerListsAndReadsEmbeddedResources(t *testing.T) {
 	if err := json.Unmarshal([]byte(responses[2]), &listed); err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Result.Resources) != 35 {
-		t.Fatalf("resources/list count = %d, want 35", len(listed.Result.Resources))
+	var wantURIs []string
+	for _, skill := range catalog.ListSkills() {
+		for _, file := range mustListSkillFiles(t, catalog, skill) {
+			uri, err := catalog.URI(skill, file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantURIs = append(wantURIs, uri)
+		}
 	}
-	wantURIs := []string{
-		"skill://debian-sysadmin/CHANGELOG.md",
-		"skill://debian-sysadmin/LICENSE",
-		"skill://debian-sysadmin/README.md",
-		"skill://debian-sysadmin/SKILL.md",
-		"skill://debian-sysadmin/agents/openai.yaml",
-		"skill://debian-sysadmin/docs/DESIGN.md",
-		"skill://debian-sysadmin/docs/PROVENANCE.md",
-		"skill://debian-sysadmin/docs/UPSTREAM-REVIEW.md",
-		"skill://debian-sysadmin/playbooks/disk-full.md",
-		"skill://debian-sysadmin/playbooks/dns-failure.md",
-		"skill://debian-sysadmin/playbooks/failed-boot.md",
-		"skill://debian-sysadmin/playbooks/failed-upgrade.md",
-		"skill://debian-sysadmin/playbooks/high-load.md",
-		"skill://debian-sysadmin/playbooks/networking-failure.md",
-		"skill://debian-sysadmin/playbooks/package-failure.md",
-		"skill://debian-sysadmin/playbooks/service-failure.md",
-		"skill://debian-sysadmin/playbooks/ssh-failure.md",
-		"skill://debian-sysadmin/references/apt-dpkg.md",
-		"skill://debian-sysadmin/references/backups.md",
-		"skill://debian-sysadmin/references/boot-recovery.md",
-		"skill://debian-sysadmin/references/caddy.md",
-		"skill://debian-sysadmin/references/diagnostics.md",
-		"skill://debian-sysadmin/references/dns.md",
-		"skill://debian-sysadmin/references/local-documentation.md",
-		"skill://debian-sysadmin/references/networking.md",
-		"skill://debian-sysadmin/references/nftables.md",
-		"skill://debian-sysadmin/references/performance.md",
-		"skill://debian-sysadmin/references/principles.md",
-		"skill://debian-sysadmin/references/security.md",
-		"skill://debian-sysadmin/references/shell-safety.md",
-		"skill://debian-sysadmin/references/ssh.md",
-		"skill://debian-sysadmin/references/storage.md",
-		"skill://debian-sysadmin/references/systemd.md",
-		"skill://debian-sysadmin/references/toolbox.md",
-		"skill://debian-sysadmin/references/users-permissions.md",
+	for _, file := range catalog.ListBundleFiles() {
+		uri, err := catalog.BundleURI(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantURIs = append(wantURIs, uri)
+	}
+	slices.Sort(wantURIs)
+	if len(listed.Result.Resources) != len(wantURIs) {
+		t.Fatalf("resources/list count = %d, want %d", len(listed.Result.Resources), len(wantURIs))
 	}
 	gotURIs := make([]string, 0, len(listed.Result.Resources))
 	previous := ""
@@ -170,7 +159,7 @@ func TestServerListsAndReadsEmbeddedResources(t *testing.T) {
 		if resource.URI <= previous || resource.Name == "" || resource.Title == "" || resource.MIMEType == "" {
 			t.Fatalf("invalid or unsorted resource: %+v", resource)
 		}
-		if strings.Contains(resource.URI, "/scripts/") || strings.Contains(resource.URI, "/tests/") {
+		if strings.Contains(resource.URI, "/tests/") || strings.Contains(resource.URI, "debian-sysadmin/scripts/") {
 			t.Fatalf("excluded resource listed: %q", resource.URI)
 		}
 		previous = resource.URI
@@ -179,8 +168,29 @@ func TestServerListsAndReadsEmbeddedResources(t *testing.T) {
 	if !slices.Equal(gotURIs, wantURIs) {
 		t.Fatalf("resources/list URIs = %q, want %q", gotURIs, wantURIs)
 	}
+	for _, expected := range []string{
+		"skill://security-ownership-map/scripts/query_ownership.py",
+		"skill-bundle://promptline/LICENSE.txt",
+	} {
+		if !slices.Contains(gotURIs, expected) {
+			t.Fatalf("resources/list omitted %q", expected)
+		}
+	}
 
-	for index, file := range []string{"SKILL.md", "references/caddy.md", "references/local-documentation.md", "references/systemd.md", "playbooks/disk-full.md"} {
+	reads := []struct {
+		skill string
+		file  string
+		uri   string
+	}{
+		{"debian-sysadmin", "SKILL.md", "skill://debian-sysadmin/SKILL.md"},
+		{"debian-sysadmin", "references/caddy.md", "skill://debian-sysadmin/references/caddy.md"},
+		{"debian-sysadmin", "references/local-documentation.md", "skill://debian-sysadmin/references/local-documentation.md"},
+		{"debian-sysadmin", "references/systemd.md", "skill://debian-sysadmin/references/systemd.md"},
+		{"debian-sysadmin", "playbooks/disk-full.md", "skill://debian-sysadmin/playbooks/disk-full.md"},
+		{"security-ownership-map", "scripts/query_ownership.py", "skill://security-ownership-map/scripts/query_ownership.py"},
+		{"", "LICENSE.txt", "skill-bundle://promptline/LICENSE.txt"},
+	}
+	for index, expected := range reads {
 		var read struct {
 			Result struct {
 				Contents []struct {
@@ -192,12 +202,18 @@ func TestServerListsAndReadsEmbeddedResources(t *testing.T) {
 		if err := json.Unmarshal([]byte(responses[index+3]), &read); err != nil {
 			t.Fatal(err)
 		}
-		want, err := catalog.ReadFile("debian-sysadmin", file)
+		var want []byte
+		var err error
+		if expected.skill == "" {
+			want, err = catalog.ReadBundleFile(expected.file)
+		} else {
+			want, err = catalog.ReadFile(expected.skill, expected.file)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(read.Result.Contents) != 1 || read.Result.Contents[0].Text != string(want) || read.Result.Contents[0].URI != "skill://debian-sysadmin/"+file {
-			t.Fatalf("resources/read %q = %+v, want exact embedded content", file, read.Result.Contents)
+		if len(read.Result.Contents) != 1 || read.Result.Contents[0].Text != string(want) || read.Result.Contents[0].URI != expected.uri {
+			t.Fatalf("resources/read %q = %+v, want exact embedded content", expected.file, read.Result.Contents)
 		}
 	}
 }
@@ -219,6 +235,8 @@ func TestServerRejectsInvalidResourceRequests(t *testing.T) {
 		{name: "unknown skill", method: "resources/read", params: `{"uri":"skill://missing/SKILL.md"}`, message: "invalid embedded skill resource URI"},
 		{name: "unknown file", method: "resources/read", params: `{"uri":"skill://debian-sysadmin/missing.md"}`, message: "invalid embedded skill resource URI"},
 		{name: "excluded", method: "resources/read", params: `{"uri":"skill://debian-sysadmin/scripts/validate-skill.sh"}`, message: "invalid embedded skill resource URI"},
+		{name: "bundle traversal", method: "resources/read", params: `{"uri":"skill-bundle://promptline/../LICENSE.txt"}`, message: "invalid embedded skill resource URI"},
+		{name: "unknown bundle", method: "resources/read", params: `{"uri":"skill-bundle://other/LICENSE.txt"}`, message: "invalid embedded skill resource URI"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -242,7 +260,7 @@ func TestServerRejectsInvalidResourceRequests(t *testing.T) {
 
 func TestServerRejectsResourceResponseExceedingFrameLimit(t *testing.T) {
 	catalog, err := skills.NewCatalog(fstest.MapFS{
-		"example/SKILL.md": &fstest.MapFile{Data: []byte(strings.Repeat("x", 4096))},
+		"example/SKILL.md": &fstest.MapFile{Data: []byte("---\nname: example\ndescription: " + strings.Repeat("x", 4096) + "\n---\n")},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -260,6 +278,15 @@ func TestServerRejectsResourceResponseExceedingFrameLimit(t *testing.T) {
 	if !strings.Contains(output.String(), `"code":-32000`) || !strings.Contains(output.String(), "resource response exceeds frame limit") {
 		t.Fatalf("response = %s", output.String())
 	}
+}
+
+func mustListSkillFiles(t *testing.T, catalog *skills.Catalog, skill string) []string {
+	t.Helper()
+	files, err := catalog.ListFiles(skill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }
 
 func TestCodexConfigIsInstanceScoped(t *testing.T) {

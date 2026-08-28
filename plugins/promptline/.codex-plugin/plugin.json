@@ -1,7 +1,7 @@
 {
   "name": "sysadmin",
   "version": "0.1.0",
-  "description": "Debian administration guidance with Promptline's bounded Go/u-root MCP toolbox.",
+  "description": "Embedded system, shell, and repository-security skills with Promptline's bounded Go/u-root MCP toolbox.",
   "author": {
     "name": "Dyne.org foundation",
     "url": "https://dyne.org"
@@ -11,19 +11,23 @@
   "license": "AGPL-3.0-or-later",
   "keywords": [
     "debian",
+    "bash",
     "mcp",
+    "security",
     "system-administration",
     "u-root"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Sysadmin",
-    "shortDescription": "Careful Debian administration with a bounded toolbox",
-    "longDescription": "Diagnose and administer Debian systems with evidence-first procedures and Promptline's structured Go/u-root toolbox MCP server.",
+    "shortDescription": "System and repository guidance with a bounded toolbox",
+    "longDescription": "Use embedded Debian, Bash, ownership, and threat-modeling guidance with Promptline's structured Go/u-root toolbox MCP server.",
     "developerName": "Dyne.org foundation",
     "category": "Developer Tools",
     "capabilities": [
       "Debian system administration",
+      "Defensive Bash and Linux operations",
+      "Security ownership and threat modeling",
       "Bounded Go/u-root toolbox"
     ],
     "defaultPrompt": [

@@ -26,6 +26,6 @@ ln -s "$PWD/plugins/promptline/skills/debian-sysadmin" "${CODEX_HOME:-$HOME/.cod
 
 Use the symlink only with a trusted, access-controlled working tree: later checkout or workspace changes immediately become installed instructions. An agent creating the link must call `toolbox.ln` with `symbolic: true`; if source or destination is outside toolbox authority, it must stop rather than fall back to host `ln`. Prefer a reviewed copy for normal use.
 
-Run `scripts/validate-skill.sh` before distributing changes. Repository CI also runs ShellCheck, a repository-local Skill Creator compatibility validator, and `scripts/check_toolbox_catalog.py` against a freshly built Promptline MCP server. The catalog check compares the documented names with the live `tools/list` result and validates that every live definition has a name, description, and object input schema.
+The skill is covered by the single shared `../LICENSE.txt` for Promptline's embedded skill bundle. Run `scripts/validate-skill.sh` before distributing changes. Repository CI also runs ShellCheck, a repository-local Skill Creator compatibility validator, and `scripts/check_toolbox_catalog.py` against a freshly built Promptline MCP server. The catalog check compares the documented names with the live `tools/list` result and validates that every live definition has a name, description, and object input schema.
 
 See `docs/DESIGN.md`, `docs/UPSTREAM-REVIEW.md`, and `docs/PROVENANCE.md` for design and source history.
