@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add Debian-focused Caddy reverse-proxy configuration, validation, reload, verification, and failure-isolation guidance.
 - Package the skill inside the installable `sysadmin` Codex plugin.
 - Add CI validation with ShellCheck and Skill Creator-compatible frontmatter checks.
 - Compare the documented toolbox catalog with Promptline's live MCP `tools/list` schema.

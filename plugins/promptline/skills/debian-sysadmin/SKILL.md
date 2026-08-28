@@ -1,6 +1,6 @@
 ---
 name: debian-sysadmin
-description: Diagnose, maintain, recover, and safely change Debian hosts using Debian-native package, systemd, networking, SSH, storage, security, and performance practices. Use for Debian server or workstation administration, especially over SSH or with privileged shell access.
+description: Diagnose, maintain, recover, and safely change Debian hosts using Debian-native package, systemd, networking, Caddy reverse-proxy, SSH, storage, security, and performance practices. Use for Debian server or workstation administration, especially over SSH or with privileged shell access.
 ---
 
 # Debian System Administration
@@ -78,6 +78,7 @@ Read only the references and playbook needed for the active task.
 | Promptline MCP versus host-tool routing | [toolbox](references/toolbox.md) | — |
 | APT, dpkg, repositories, upgrades | [apt-dpkg](references/apt-dpkg.md) | [package failure](playbooks/package-failure.md), [failed upgrade](playbooks/failed-upgrade.md) |
 | Units, journals, timers, sockets, boot timing | [systemd](references/systemd.md) | [service failure](playbooks/service-failure.md) |
+| Caddy, reverse proxies, upstream TLS, reloads | [Caddy reverse proxy](references/caddy.md) | [service failure](playbooks/service-failure.md) |
 | Logs, processes, signals, incident evidence | [diagnostics](references/diagnostics.md) | relevant symptom playbook |
 | Interfaces, routes, MTU, manager discovery | [networking](references/networking.md) | [networking failure](playbooks/networking-failure.md) |
 | nftables and netfilter interactions | [nftables](references/nftables.md) | [networking failure](playbooks/networking-failure.md) |

@@ -78,8 +78,9 @@ func TestServerListsAndReadsEmbeddedResources(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"resources/list"}`,
 		`{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"skill://debian-sysadmin/SKILL.md"}}`,
-		`{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"skill://debian-sysadmin/references/systemd.md"}}`,
-		`{"jsonrpc":"2.0","id":6,"method":"resources/read","params":{"uri":"skill://debian-sysadmin/playbooks/disk-full.md"}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"skill://debian-sysadmin/references/caddy.md"}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"resources/read","params":{"uri":"skill://debian-sysadmin/references/systemd.md"}}`,
+		`{"jsonrpc":"2.0","id":7,"method":"resources/read","params":{"uri":"skill://debian-sysadmin/playbooks/disk-full.md"}}`,
 	}
 	var output bytes.Buffer
 	server, err := NewServer(registry, strings.NewReader(strings.Join(requests, "\n")+"\n"), &output, 1<<20)
@@ -122,8 +123,8 @@ func TestServerListsAndReadsEmbeddedResources(t *testing.T) {
 	if err := json.Unmarshal([]byte(responses[2]), &listed); err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Result.Resources) != 33 {
-		t.Fatalf("resources/list count = %d, want 33", len(listed.Result.Resources))
+	if len(listed.Result.Resources) != 34 {
+		t.Fatalf("resources/list count = %d, want 34", len(listed.Result.Resources))
 	}
 	wantURIs := []string{
 		"skill://debian-sysadmin/CHANGELOG.md",
@@ -146,6 +147,7 @@ func TestServerListsAndReadsEmbeddedResources(t *testing.T) {
 		"skill://debian-sysadmin/references/apt-dpkg.md",
 		"skill://debian-sysadmin/references/backups.md",
 		"skill://debian-sysadmin/references/boot-recovery.md",
+		"skill://debian-sysadmin/references/caddy.md",
 		"skill://debian-sysadmin/references/diagnostics.md",
 		"skill://debian-sysadmin/references/dns.md",
 		"skill://debian-sysadmin/references/networking.md",
@@ -176,7 +178,7 @@ func TestServerListsAndReadsEmbeddedResources(t *testing.T) {
 		t.Fatalf("resources/list URIs = %q, want %q", gotURIs, wantURIs)
 	}
 
-	for index, file := range []string{"SKILL.md", "references/systemd.md", "playbooks/disk-full.md"} {
+	for index, file := range []string{"SKILL.md", "references/caddy.md", "references/systemd.md", "playbooks/disk-full.md"} {
 		var read struct {
 			Result struct {
 				Contents []struct {
