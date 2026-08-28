@@ -43,8 +43,8 @@ for normal operation.
 ## Codex plugin
 
 This repository is also a Codex plugin marketplace. The `sysadmin` plugin
-bundles the `debian-sysadmin` skill and a stdio MCP definition for the Go/u-root
-toolbox. The MCP definition invokes exactly `promptline mcp-server`; installing
+bundles Debian administration, Bash, security ownership, and threat-modeling
+skills plus a stdio MCP definition for the Go/u-root toolbox. The MCP definition invokes exactly `promptline mcp-server`; installing
 the plugin does not start Promptline's interactive thread host, run a shell
 installer, or download an executable.
 
@@ -74,9 +74,9 @@ directory and uses it as its only filesystem capability root. Run Codex from
 the directory that should be visible to the toolbox; do not launch it from `/`
 merely to broaden access.
 
-### Embedded Debian skill and compatibility
+### Embedded skills and compatibility
 
-The reviewed on-disk source is [`plugins/promptline/skills/debian-sysadmin`](plugins/promptline/skills/debian-sysadmin). Each build embeds its public files, so these commands work from a copied executable outside a checkout and do not create an instance:
+The reviewed on-disk sources live under [`plugins/promptline/skills`](plugins/promptline/skills). Each build embeds their public files and one shared `LICENSE.txt`, so these commands work from a copied executable outside a checkout and do not create an instance:
 
 ```bash
 ./promptline list-skills
@@ -84,7 +84,7 @@ The reviewed on-disk source is [`plugins/promptline/skills/debian-sysadmin`](plu
 ./promptline materialize-skill /tmp/promptline-skills
 ```
 
-The standalone `mcp-server` exposes the same public files as ordinary `skill://` MCP resources through `resources/list` and `resources/read`. Scripts and tests are excluded from that public surface and from exports, although Go's broad embed pattern can retain their bytes in the binary. The full source, safe export behavior, plugin discovery, and executable-only fallback are documented in [the embedded-skills guide](plugins/promptline/skills/README.md).
+The standalone `mcp-server` exposes the same public files as ordinary `skill://` MCP resources through `resources/list` and `resources/read`; the shared license uses `skill-bundle://promptline/LICENSE.txt`. Tests and Debian's validation-only scripts are excluded. Operational scripts in other skills are read-only resources and require explicit materialization before execution. The full source, safe export behavior, plugin discovery, and executable-only fallback are documented in [the embedded-skills guide](plugins/promptline/skills/README.md).
 
 The standalone MCP mode applies Promptline's read-only toolbox policy. Mutating
 toolbox definitions remain visible for schema compatibility but fail closed
@@ -162,7 +162,7 @@ operations. Calls to that namespace are routed through app-server's
 Codex configurations that discover MCP tools but defer them without exposing a
 tool-search facility.
 
-The MCP server also publishes the embedded Debian skill as ordinary resources; it does not claim a nonstandard MCP skill-discovery extension. A plugin installation supplies the on-disk skill for independently launched Codex environments. Promptline's own app-server child deliberately disables both user/system skill instructions and Codex-bundled skills. If its MCP client cannot access the embedded resources, that executable-only child cannot activate the authoritative skill; exporting it is a compatibility aid, not a bypass of this isolation.
+The MCP server also publishes all embedded skills as ordinary resources and supplies their names and descriptions in standard MCP server instructions; it does not claim a nonstandard MCP skill-discovery extension. A plugin installation supplies the on-disk skills for independently launched Codex environments. Promptline's own app-server child deliberately disables both user/system skill instructions and Codex-bundled skills. If its MCP client cannot access the embedded resources, that executable-only child cannot activate the authoritative skills; exporting them is a compatibility aid, not a bypass of this isolation.
 
 The embedded developer instructions are maintained as Markdown in
 `internal/runtime/init-prompt.md`; edit that file to extend Promptline's initial

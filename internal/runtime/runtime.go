@@ -188,7 +188,10 @@ func (r *Runtime) Start(ctx context.Context, opts Options, version string) error
 		}
 	}
 	var thread appserver.Thread
-	developerInstructions := initPrompt()
+	developerInstructions, err := initPrompt()
+	if err != nil {
+		return err
+	}
 	if id != "" {
 		thread, err = r.api.ResumeThread(ctx, id, r.instance.Model(), developerInstructions, opts.DynamicTools)
 		if err != nil {

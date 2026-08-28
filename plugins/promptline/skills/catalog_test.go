@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -20,15 +21,19 @@ const debianSysadmin = "debian-sysadmin"
 func TestEmbeddedCatalogInventory(t *testing.T) {
 	catalog := testEmbeddedCatalog(t)
 
-	if got, want := catalog.ListSkills(), []string{debianSysadmin}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("ListSkills() = %v, want %v", got, want)
+	wantSkills := []string{
+		"bash-defensive-patterns", "bash-linux", debianSysadmin,
+		"security-ownership-map", "security-threat-model",
+	}
+	if got := catalog.ListSkills(); !reflect.DeepEqual(got, wantSkills) {
+		t.Fatalf("ListSkills() = %v, want %v", got, wantSkills)
 	}
 	files, err := catalog.ListFiles(debianSysadmin)
 	if err != nil {
 		t.Fatalf("ListFiles() error = %v", err)
 	}
 	want := []string{
-		"CHANGELOG.md", "LICENSE", "README.md", "SKILL.md", "agents/openai.yaml",
+		"CHANGELOG.md", "README.md", "SKILL.md", "agents/openai.yaml",
 		"docs/DESIGN.md", "docs/PROVENANCE.md", "docs/UPSTREAM-REVIEW.md",
 		"playbooks/disk-full.md", "playbooks/dns-failure.md", "playbooks/failed-boot.md",
 		"playbooks/failed-upgrade.md", "playbooks/high-load.md", "playbooks/networking-failure.md",
@@ -51,6 +56,18 @@ func TestEmbeddedCatalogInventory(t *testing.T) {
 	}
 	if !sort.StringsAreSorted(files) {
 		t.Fatalf("ListFiles() is not sorted: %v", files)
+	}
+	ownershipFiles := mustListFiles(t, catalog, "security-ownership-map")
+	for _, script := range []string{
+		"scripts/build_ownership_map.py", "scripts/community_maintainers.py",
+		"scripts/query_ownership.py", "scripts/run_ownership_map.py",
+	} {
+		if !slices.Contains(ownershipFiles, script) {
+			t.Fatalf("security ownership skill omitted operational script %q", script)
+		}
+	}
+	if got, want := catalog.ListBundleFiles(), []string{"LICENSE.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListBundleFiles() = %v, want %v", got, want)
 	}
 }
 
@@ -77,11 +94,50 @@ func TestEmbeddedRootDiscoversTopLevelSkills(t *testing.T) {
 	}
 }
 
+func TestCatalogPublishesSkillMetadataAndSharedLicenseURI(t *testing.T) {
+	catalog := testEmbeddedCatalog(t)
+	metadata := catalog.ListMetadata()
+	if len(metadata) != len(catalog.ListSkills()) {
+		t.Fatalf("ListMetadata() count = %d, want %d", len(metadata), len(catalog.ListSkills()))
+	}
+	for index, skill := range catalog.ListSkills() {
+		if metadata[index].Name != skill || strings.TrimSpace(metadata[index].Description) == "" {
+			t.Fatalf("metadata[%d] = %+v, want name %q and a description", index, metadata[index], skill)
+		}
+		if !strings.Contains(catalog.BootstrapInstructions(), "skill://"+skill+"/SKILL.md") {
+			t.Fatalf("bootstrap instructions omitted entry resource for %q", skill)
+		}
+	}
+	uri, err := catalog.BundleURI("LICENSE.txt")
+	if err != nil || uri != "skill-bundle://promptline/LICENSE.txt" {
+		t.Fatalf("BundleURI() = %q, %v", uri, err)
+	}
+	file, err := catalog.ParseBundleURI(uri)
+	if err != nil || file != "LICENSE.txt" {
+		t.Fatalf("ParseBundleURI() = %q, %v", file, err)
+	}
+}
+
+func TestCatalogRejectsInvalidSkillMetadata(t *testing.T) {
+	for name, content := range map[string][]byte{
+		"missing frontmatter": []byte("# Skill"),
+		"wrong name":          skillDocument("other", "Description"),
+		"empty description":   skillDocument("alpha", ""),
+	} {
+		t.Run(name, func(t *testing.T) {
+			fixture := fstest.MapFS{"alpha/SKILL.md": &fstest.MapFile{Data: content}}
+			if _, err := NewCatalog(fixture); err == nil {
+				t.Fatal("NewCatalog() accepted invalid skill metadata")
+			}
+		})
+	}
+}
+
 func TestCatalogDiscoversFixtureSkillsAndNestedFiles(t *testing.T) {
 	fixture := fstest.MapFS{
-		"alpha/SKILL.md":             &fstest.MapFile{Data: []byte("alpha")},
+		"alpha/SKILL.md":             &fstest.MapFile{Data: skillDocument("alpha", "Alpha skill")},
 		"alpha/references/nested.md": &fstest.MapFile{Data: []byte("nested")},
-		"alpha/scripts/check.sh":     &fstest.MapFile{Data: []byte("excluded")},
+		"alpha/scripts/check.sh":     &fstest.MapFile{Data: []byte("readable")},
 		"alpha/tests/case.md":        &fstest.MapFile{Data: []byte("excluded")},
 		"not-a-skill/file.md":        &fstest.MapFile{Data: []byte("ignore")},
 	}
@@ -92,7 +148,7 @@ func TestCatalogDiscoversFixtureSkillsAndNestedFiles(t *testing.T) {
 	if got, want := catalog.ListSkills(), []string{"alpha"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("ListSkills() = %v, want %v", got, want)
 	}
-	if got, want := mustListFiles(t, catalog, "alpha"), []string{"SKILL.md", "references/nested.md"}; !reflect.DeepEqual(got, want) {
+	if got, want := mustListFiles(t, catalog, "alpha"), []string{"SKILL.md", "references/nested.md", "scripts/check.sh"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("ListFiles() = %v, want %v", got, want)
 	}
 	bytes, err := catalog.ReadFile("alpha", "references/nested.md")
@@ -109,20 +165,20 @@ func TestCatalogEnforcesCanonicalTextInputs(t *testing.T) {
 		{
 			name: "skill name with URI delimiter",
 			fixture: fstest.MapFS{
-				"alpha?query/SKILL.md": &fstest.MapFile{Data: []byte("skill")},
+				"alpha?query/SKILL.md": &fstest.MapFile{Data: skillDocument("alpha?query", "Skill")},
 			},
 		},
 		{
 			name: "file name with URI delimiter",
 			fixture: fstest.MapFS{
-				"alpha/SKILL.md":        &fstest.MapFile{Data: []byte("skill")},
+				"alpha/SKILL.md":        &fstest.MapFile{Data: skillDocument("alpha", "Skill")},
 				"alpha/docs/a?query.md": &fstest.MapFile{Data: []byte("reference")},
 			},
 		},
 		{
 			name: "non UTF-8 content",
 			fixture: fstest.MapFS{
-				"alpha/SKILL.md":   &fstest.MapFile{Data: []byte("skill")},
+				"alpha/SKILL.md":   &fstest.MapFile{Data: skillDocument("alpha", "Skill")},
 				"alpha/binary.bin": &fstest.MapFile{Data: []byte{0xff, 0xfe}},
 			},
 		},
@@ -138,7 +194,7 @@ func TestCatalogEnforcesCanonicalTextInputs(t *testing.T) {
 
 func TestCatalogFutureSkillURIsRoundTrip(t *testing.T) {
 	fixture := fstest.MapFS{
-		"alpha~one/SKILL.md":                &fstest.MapFile{Data: []byte("skill")},
+		"alpha~one/SKILL.md":                &fstest.MapFile{Data: skillDocument("alpha~one", "Skill")},
 		"alpha~one/references/a_b-1.2~x.md": &fstest.MapFile{Data: []byte("reference")},
 	}
 	catalog, err := NewCatalog(fixture)
@@ -158,7 +214,7 @@ func TestCatalogFutureSkillURIsRoundTrip(t *testing.T) {
 
 func TestCatalogReadRejectsChangedNonUTF8Content(t *testing.T) {
 	fixture := fstest.MapFS{
-		"alpha/SKILL.md": &fstest.MapFile{Data: []byte("skill")},
+		"alpha/SKILL.md": &fstest.MapFile{Data: skillDocument("alpha", "Skill")},
 	}
 	catalog, err := NewCatalog(fixture)
 	if err != nil {
@@ -225,6 +281,15 @@ func TestCatalogRejectsInvalidPathsAndURIs(t *testing.T) {
 			}
 		})
 	}
+	for _, rawURI := range []string{
+		"skill-bundle://promptline/../LICENSE.txt", "skill-bundle://promptline/%2e%2e/LICENSE.txt",
+		"skill-bundle://promptline/LICENSE.txt?x=1", "skill-bundle://other/LICENSE.txt",
+		"skill-bundle://promptline/missing.txt", "https://promptline/LICENSE.txt",
+	} {
+		if _, err := catalog.ParseBundleURI(rawURI); err == nil {
+			t.Fatalf("ParseBundleURI(%q) unexpectedly succeeded", rawURI)
+		}
+	}
 	if _, err := catalog.ReadFile("missing", "SKILL.md"); !errors.Is(err, ErrUnknownSkill) {
 		t.Fatalf("unknown skill error = %v", err)
 	}
@@ -235,20 +300,39 @@ func TestCatalogRejectsInvalidPathsAndURIs(t *testing.T) {
 
 func TestEmbeddedFilesMatchSource(t *testing.T) {
 	catalog := testEmbeddedCatalog(t)
-	for _, file := range mustListFiles(t, catalog, debianSysadmin) {
-		t.Run(file, func(t *testing.T) {
-			got, err := catalog.ReadFile(debianSysadmin, file)
-			if err != nil {
-				t.Fatalf("ReadFile() error = %v", err)
-			}
-			want, err := os.ReadFile(filepath.Join(debianSysadmin, filepath.FromSlash(file)))
-			if err != nil {
-				t.Fatalf("read source %q: %v", file, err)
-			}
-			if !bytes.Equal(got, want) {
-				t.Fatalf("embedded bytes differ from source for %q", file)
-			}
-		})
+	for _, skill := range catalog.ListSkills() {
+		files := mustListFiles(t, catalog, skill)
+		if want := sourcePublicFiles(t, skill); !reflect.DeepEqual(files, want) {
+			t.Fatalf("ListFiles(%q) = %v, want complete source inventory %v", skill, files, want)
+		}
+		for _, file := range files {
+			t.Run(skill+"/"+file, func(t *testing.T) {
+				got, err := catalog.ReadFile(skill, file)
+				if err != nil {
+					t.Fatalf("ReadFile() error = %v", err)
+				}
+				want, err := os.ReadFile(filepath.Join(skill, filepath.FromSlash(file)))
+				if err != nil {
+					t.Fatalf("read source %q: %v", file, err)
+				}
+				if !bytes.Equal(got, want) {
+					t.Fatalf("embedded bytes differ from source for %q", file)
+				}
+			})
+		}
+	}
+	license, err := catalog.ReadBundleFile("LICENSE.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, notice := range []string{"MIT License", "Apache License", "security-ownership-map", "security-threat-model"} {
+		if !bytes.Contains(license, []byte(notice)) {
+			t.Fatalf("shared license omitted %q", notice)
+		}
+	}
+	sourceLicense, err := os.ReadFile("LICENSE.txt")
+	if err != nil || !bytes.Equal(license, sourceLicense) {
+		t.Fatalf("embedded shared license differs from source: %v", err)
 	}
 	for _, file := range []string{"SKILL.md", "references/caddy.md", "references/local-documentation.md", "references/systemd.md", "playbooks/disk-full.md"} {
 		if bytes, err := catalog.ReadFile(debianSysadmin, file); err != nil || len(bytes) == 0 {
@@ -287,8 +371,8 @@ func TestCatalogMaterializeReconstructsOnlyPublicFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := mustListFiles(t, catalog, debianSysadmin)
-	if len(files) != 35 {
-		t.Fatalf("public file count = %d, want 35", len(files))
+	if len(files) != 34 {
+		t.Fatalf("public Debian file count = %d, want 34", len(files))
 	}
 	for _, file := range files {
 		want, err := catalog.ReadFile(debianSysadmin, file)
@@ -305,13 +389,43 @@ func TestCatalogMaterializeReconstructsOnlyPublicFiles(t *testing.T) {
 			t.Fatalf("excluded materialized path %q: %v", excluded, err)
 		}
 	}
+	license, err := os.ReadFile(filepath.Join(destination, "LICENSE.txt"))
+	if err != nil {
+		t.Fatalf("read materialized shared license: %v", err)
+	}
+	wantLicense, err := catalog.ReadBundleFile("LICENSE.txt")
+	if err != nil || !bytes.Equal(license, wantLicense) {
+		t.Fatalf("materialized shared license mismatch: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(destination, debianSysadmin, "LICENSE.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("shared license was duplicated into a skill: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(destination, "security-ownership-map", "scripts", "query_ownership.py")); err != nil {
+		t.Fatalf("operational script was not materialized: %v", err)
+	}
+}
+
+func TestCatalogMaterializeRefusesExistingSharedLicense(t *testing.T) {
+	catalog := testEmbeddedCatalog(t)
+	destination := t.TempDir()
+	license := filepath.Join(destination, "LICENSE.txt")
+	if err := os.WriteFile(license, []byte("unrelated license"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Materialize(destination); err == nil {
+		t.Fatal("materialization overwrote an existing shared license")
+	}
+	content, err := os.ReadFile(license)
+	if err != nil || string(content) != "unrelated license" {
+		t.Fatalf("existing shared license changed: %q, %v", content, err)
+	}
 }
 
 func TestCatalogMaterializeSupportsNestedMultipleSkillsAndRefusesExistingTargets(t *testing.T) {
 	fixture := fstest.MapFS{
-		"alpha/SKILL.md":             &fstest.MapFile{Data: []byte("alpha")},
+		"alpha/SKILL.md":             &fstest.MapFile{Data: skillDocument("alpha", "Alpha")},
 		"alpha/references/nested.md": &fstest.MapFile{Data: []byte("nested")},
-		"beta/SKILL.md":              &fstest.MapFile{Data: []byte("beta")},
+		"beta/SKILL.md":              &fstest.MapFile{Data: skillDocument("beta", "Beta")},
 	}
 	catalog, err := NewCatalog(fixture)
 	if err != nil {
@@ -339,8 +453,8 @@ func TestCatalogMaterializePreservesUnrelatedDestinationData(t *testing.T) {
 	if err := os.WriteFile(unrelated, []byte("leave me"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := catalog.Materialize(destination); err != nil {
-		t.Fatal(err)
+	if err := catalog.Materialize(destination); err == nil {
+		t.Fatal("materialization accepted an existing destination")
 	}
 	if bytes, err := os.ReadFile(unrelated); err != nil || string(bytes) != "leave me" {
 		t.Fatalf("unrelated destination data = %q, %v", bytes, err)
@@ -385,14 +499,15 @@ func TestCatalogMaterializeRejectsNonDirectoryParent(t *testing.T) {
 
 func TestCatalogMaterializeCleansOwnedStagingAfterWriteFailure(t *testing.T) {
 	catalog := testEmbeddedCatalog(t)
-	destination := filepath.Join(t.TempDir(), "export")
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "export")
 	original := writeMaterializedFile
 	writeMaterializedFile = func(*os.Root, string, []byte) error { return errors.New("injected write failure") }
 	t.Cleanup(func() { writeMaterializedFile = original })
 	if err := catalog.Materialize(destination); err == nil {
 		t.Fatal("materialization succeeded despite injected failure")
 	}
-	entries, err := os.ReadDir(destination)
+	entries, err := os.ReadDir(parent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,19 +527,11 @@ func TestCatalogMaterializeRejectsDirectorySwapAfterValidation(t *testing.T) {
 	if err := os.Mkdir(outside, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	original := beforeOpenMaterializationDirectory
-	swapped := false
-	beforeOpenMaterializationDirectory = func(_ *os.Root, name string) error {
-		if swapped || name != "export" {
-			return nil
-		}
-		swapped = true
-		if err := os.Remove(destination); err != nil {
-			return err
-		}
+	original := beforeInstallMaterializedBundle
+	beforeInstallMaterializedBundle = func(_ *os.Root, _, _ string) error {
 		return os.Symlink("outside", destination)
 	}
-	t.Cleanup(func() { beforeOpenMaterializationDirectory = original })
+	t.Cleanup(func() { beforeInstallMaterializedBundle = original })
 	if err := catalog.Materialize(destination); err == nil {
 		t.Fatal("materialization followed a directory swapped to a symlink")
 	}
@@ -440,26 +547,25 @@ func TestCatalogMaterializeRejectsDirectorySwapAfterValidation(t *testing.T) {
 func TestCatalogMaterializeAtomicallyRefusesRacedTarget(t *testing.T) {
 	catalog := testEmbeddedCatalog(t)
 	destination := filepath.Join(t.TempDir(), "export")
-	original := beforeInstallMaterializedSkill
-	created := false
-	beforeInstallMaterializedSkill = func(root *os.Root, _, skill string) error {
-		if created {
-			return nil
-		}
-		created = true
-		return root.Mkdir(skill, 0o755)
+	original := beforeInstallMaterializedBundle
+	beforeInstallMaterializedBundle = func(root *os.Root, _, target string) error {
+		return root.Mkdir(target, 0o755)
 	}
-	t.Cleanup(func() { beforeInstallMaterializedSkill = original })
+	t.Cleanup(func() { beforeInstallMaterializedBundle = original })
 	if err := catalog.Materialize(destination); err == nil {
 		t.Fatal("materialization replaced a concurrently created target")
 	}
-	entries, err := os.ReadDir(filepath.Join(destination, debianSysadmin))
+	entries, err := os.ReadDir(destination)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 0 {
 		t.Fatalf("concurrent target was replaced: %v", entries)
 	}
+}
+
+func skillDocument(name, description string) []byte {
+	return []byte("---\nname: " + name + "\ndescription: " + description + "\n---\n")
 }
 
 func testEmbeddedCatalog(t *testing.T) *Catalog {
@@ -477,5 +583,34 @@ func mustListFiles(t *testing.T, catalog *Catalog, skill string) []string {
 	if err != nil {
 		t.Fatalf("ListFiles() error = %v", err)
 	}
+	return files
+}
+
+func sourcePublicFiles(t *testing.T, skill string) []string {
+	t.Helper()
+	var files []string
+	err := fs.WalkDir(os.DirFS("."), skill, func(name string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if name == skill {
+			return nil
+		}
+		rel := strings.TrimPrefix(name, skill+"/")
+		if excluded(skill, rel) {
+			if entry.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !entry.IsDir() {
+			files = append(files, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk source skill %q: %v", skill, err)
+	}
+	sort.Strings(files)
 	return files
 }

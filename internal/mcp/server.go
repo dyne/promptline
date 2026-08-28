@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 
@@ -86,7 +87,12 @@ func (s *Server) Serve(ctx context.Context) error {
 func (s *Server) handle(ctx context.Context, req request) error {
 	switch req.Method {
 	case "initialize":
-		return s.reply(req.ID, map[string]any{"protocolVersion": protocolVersion, "serverInfo": map[string]string{"name": "promptline-toolbox", "version": "v2"}, "capabilities": map[string]any{"tools": map[string]any{}, "resources": map[string]any{}}}, 0, "")
+		return s.reply(req.ID, map[string]any{
+			"protocolVersion": protocolVersion,
+			"serverInfo":      map[string]string{"name": "promptline-toolbox", "version": "v2"},
+			"capabilities":    map[string]any{"tools": map[string]any{}, "resources": map[string]any{}},
+			"instructions":    s.catalog.BootstrapInstructions(),
+		}, 0, "")
 	case "tools/list":
 		return s.reply(req.ID, map[string]any{"tools": s.definitions()}, 0, "")
 	case "resources/list":
@@ -139,6 +145,17 @@ func (s *Server) listResources(req request) error {
 			})
 		}
 	}
+	for _, file := range s.catalog.ListBundleFiles() {
+		uri, err := s.catalog.BundleURI(file)
+		if err != nil {
+			return fmt.Errorf("build embedded bundle URI: %w", err)
+		}
+		resources = append(resources, map[string]string{
+			"uri": uri, "name": "promptline-skill-bundle/" + file,
+			"title": "Promptline skill bundle: " + file, "mimeType": resourceMIMEType(file),
+		})
+	}
+	sort.Slice(resources, func(i, j int) bool { return resources[i]["uri"] < resources[j]["uri"] })
 	return s.reply(req.ID, map[string]any{"resources": resources}, 0, "")
 }
 
@@ -149,11 +166,7 @@ func (s *Server) readResource(req request) error {
 	if err := decodeParams(req.Params, &params); err != nil || params.URI == "" {
 		return s.reply(req.ID, nil, -32602, "invalid resources/read parameters")
 	}
-	skill, file, err := s.catalog.ParseURI(params.URI)
-	if err != nil {
-		return s.reply(req.ID, nil, -32602, "invalid embedded skill resource URI")
-	}
-	content, err := s.catalog.ReadFile(skill, file)
+	file, content, err := s.readResourceURI(params.URI)
 	if err != nil {
 		return s.reply(req.ID, nil, -32602, "invalid embedded skill resource URI")
 	}
@@ -164,6 +177,23 @@ func (s *Server) readResource(req request) error {
 		return s.reply(req.ID, nil, -32000, "resource response exceeds frame limit")
 	}
 	return s.reply(req.ID, result, 0, "")
+}
+
+func (s *Server) readResourceURI(uri string) (string, []byte, error) {
+	if strings.HasPrefix(uri, "skill-bundle:") {
+		file, err := s.catalog.ParseBundleURI(uri)
+		if err != nil {
+			return "", nil, err
+		}
+		content, err := s.catalog.ReadBundleFile(file)
+		return file, content, err
+	}
+	skill, file, err := s.catalog.ParseURI(uri)
+	if err != nil {
+		return "", nil, err
+	}
+	content, err := s.catalog.ReadFile(skill, file)
+	return file, content, err
 }
 
 func decodeParams(raw json.RawMessage, destination any) error {
