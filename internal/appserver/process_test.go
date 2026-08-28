@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -58,16 +59,94 @@ func TestStartWithUsesIsolatedSkillArguments(t *testing.T) {
 	}
 	fault := errors.New("stop after argv capture")
 	var arguments []string
+	var environment []string
 	_, err = StartWith(context.Background(), in, func(cmd *exec.Cmd) error {
 		arguments = append([]string(nil), cmd.Args...)
+		environment = append([]string(nil), cmd.Env...)
 		return fault
 	})
 	if !errors.Is(err, fault) {
 		t.Fatalf("StartWith error = %v", err)
 	}
-	want := []string{path, "app-server", "--stdio", "-c", "skills.include_instructions=false", "-c", "skills.bundled.enabled=false"}
+	want := []string{"/proc/self/fd/3", "app-server", "--stdio", "-c", "skills.include_instructions=false", "-c", "skills.bundled.enabled=false"}
 	if !slices.Equal(arguments, want) {
 		t.Fatalf("app-server argv = %q, want %q", arguments, want)
+	}
+	if !slices.Contains(environment, "CODEX_HOME="+in.CodexHome()) || !slices.Contains(environment, "CODEX_CONFIG="+in.CodexConfigPath()) {
+		t.Fatalf("app-server environment does not force private configuration: %q", environment)
+	}
+}
+
+func TestStartWithRejectsExecutableReplacementAfterProbe(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "codex")
+	fixture := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'codex-cli 0.149.0'; fi\n"
+	if err := os.WriteFile(path, []byte(fixture), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	in, err := instance.New(instance.Config{Name: "replacement", StateRoot: t.TempDir(), WorkingRoot: root, CodexExecutable: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(root, "replacement")
+	if err := os.WriteFile(replacement, []byte(fixture), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	launched := false
+	_, err = startWith(context.Background(), in, func(context.Context, Executable) (string, error) {
+		if err := os.Rename(replacement, path); err != nil {
+			return "", err
+		}
+		return "0.149.0", nil
+	}, nil, func(*exec.Cmd) error {
+		launched = true
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "identity changed") {
+		t.Fatalf("StartWith error = %v, want integrity failure", err)
+	}
+	if launched {
+		t.Fatal("replacement executable launched")
+	}
+}
+
+func TestStartWithBindsLaunchToRetainedExecutableAfterRevalidation(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("verified descriptor launch is Linux-specific")
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "codex")
+	marker := filepath.Join(root, "marker")
+	original := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'codex-cli 0.149.0'; else echo original > \"$MARKER\"; fi\n"
+	replacement := "#!/bin/sh\necho replacement > \"$MARKER\"\n"
+	if err := os.WriteFile(path, []byte(original), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	in, err := instance.New(instance.Config{Name: "bound-launch", StateRoot: t.TempDir(), WorkingRoot: root, CodexExecutable: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacementPath := filepath.Join(root, "replacement")
+	if err := os.WriteFile(replacementPath, []byte(replacement), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p, err := startWith(context.Background(), in, ProbeExecutable, func() {
+		if err := os.Rename(replacementPath, path); err != nil {
+			t.Fatal(err)
+		}
+	}, func(cmd *exec.Cmd) error {
+		cmd.Env = append(cmd.Env, "MARKER="+marker)
+		return cmd.Start()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil || string(data) != "original\n" {
+		t.Fatalf("launched marker = %q, err = %v", data, err)
 	}
 }
 

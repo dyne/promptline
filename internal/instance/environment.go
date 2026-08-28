@@ -16,7 +16,7 @@ type EnvironmentPolicy struct {
 
 var inheritedEnvironmentKeys = map[string]bool{
 	"ALL_PROXY": true, "COLORTERM": true, "CODEX_API_KEY": true, "CODEX_AUTH_TOKEN": true,
-	"CODEX_CONFIG": true, "CODEX_HOME": true, "HTTP_PROXY": true, "HTTPS_PROXY": true,
+	"HTTP_PROXY": true, "HTTPS_PROXY": true,
 	"LANG": true, "LC_ALL": true, "LC_CTYPE": true, "LC_MESSAGES": true, "NO_COLOR": true,
 	"NO_PROXY": true, "TERM": true,
 }
@@ -28,7 +28,7 @@ func ChildEnvironment(policy EnvironmentPolicy) []string {
 	values := make(map[string]string)
 	for _, entry := range policy.Parent {
 		key, value, ok := strings.Cut(entry, "=")
-		if !ok || !inheritedEnvironmentKeys[key] {
+		if !ok || isCodexConfigurationOverride(key) || !inheritedEnvironmentKeys[key] {
 			continue
 		}
 		values[key] = value
@@ -53,14 +53,30 @@ func ChildEnvironment(policy EnvironmentPolicy) []string {
 	return result
 }
 
-// EnvironmentForChild applies the instance's private CODEX_HOME.
+// EnvironmentForChild forces the complete, instance-owned Codex
+// configuration. Parent CODEX_HOME and configuration search overrides never
+// cross the process boundary, and callers cannot remove the forced values.
 func (i *Instance) EnvironmentForChild(parent []string, overrides map[string]string, remove []string) []string {
-	copyOverrides := make(map[string]string, len(overrides)+1)
+	copyOverrides := make(map[string]string, len(overrides)+2)
 	for key, value := range overrides {
+		if isCodexConfigurationOverride(key) {
+			continue
+		}
 		copyOverrides[key] = value
 	}
 	copyOverrides["CODEX_HOME"] = i.codexHome
-	return ChildEnvironment(EnvironmentPolicy{Parent: append([]string(nil), parent...), Overrides: copyOverrides, Remove: append([]string(nil), remove...)})
+	copyOverrides["CODEX_CONFIG"] = i.CodexConfigPath()
+	filteredRemove := make([]string, 0, len(remove))
+	for _, key := range remove {
+		if key != "CODEX_HOME" && key != "CODEX_CONFIG" {
+			filteredRemove = append(filteredRemove, key)
+		}
+	}
+	return ChildEnvironment(EnvironmentPolicy{Parent: append([]string(nil), parent...), Overrides: copyOverrides, Remove: filteredRemove})
+}
+
+func isCodexConfigurationOverride(key string) bool {
+	return key == "CODEX_HOME" || key == "CODEX_CONFIG" || strings.HasPrefix(key, "CODEX_CONFIG_")
 }
 
 func validEnvironmentKey(key string) bool {

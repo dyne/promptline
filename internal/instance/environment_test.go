@@ -20,8 +20,8 @@ func TestChildEnvironmentPolicy(t *testing.T) {
 
 func TestEnvironmentForChildUsesPrivateCodexHome(t *testing.T) {
 	i := testInstance(t)
-	got := i.EnvironmentForChild([]string{"CODEX_HOME=/shared", "LANG=C"}, map[string]string{}, nil)
-	want := []string{"CODEX_HOME=" + i.CodexHome(), "LANG=C"}
+	got := i.EnvironmentForChild([]string{"CODEX_HOME=/shared", "CODEX_CONFIG=/host/config.toml", "CODEX_CONFIG_DIR=/host/config", "LANG=C"}, map[string]string{"CODEX_CONFIG": "/override", "CODEX_HOME": "/override"}, []string{"CODEX_CONFIG", "CODEX_HOME"})
+	want := []string{"CODEX_CONFIG=" + i.CodexConfigPath(), "CODEX_HOME=" + i.CodexHome(), "LANG=C"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("environment = %#v, want %#v", got, want)
 	}

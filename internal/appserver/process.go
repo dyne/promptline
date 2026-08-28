@@ -33,21 +33,34 @@ func Start(ctx context.Context, in *instance.Instance) (*Process, error) {
 // StartWith is the injectable process-launch boundary; Start always supplies
 // the real exec.Cmd.Start production dependency.
 func StartWith(ctx context.Context, in *instance.Instance, launch func(*exec.Cmd) error) (*Process, error) {
+	return startWith(ctx, in, ProbeExecutable, nil, launch)
+}
+
+func startWith(ctx context.Context, in *instance.Instance, probe func(context.Context, Executable) (string, error), beforeLaunch func(), launch func(*exec.Cmd) error) (*Process, error) {
 	if launch == nil {
 		launch = func(cmd *exec.Cmd) error { return cmd.Start() }
 	}
 	startupCtx, cancel := context.WithTimeout(ctx, in.Timeouts().Startup)
 	defer cancel()
-	codexVersion, err := Probe(startupCtx, in.CodexExecutable())
+	executable, err := ResolveExecutable(in.CodexExecutable())
+	if err != nil {
+		return nil, err
+	}
+	defer executable.Close()
+	codexVersion, err := probe(startupCtx, executable)
 	if err != nil {
 		return nil, err
 	}
 	if err := startupCtx.Err(); err != nil {
 		return nil, fmt.Errorf("app-server startup: %w", err)
 	}
-	cmd := exec.CommandContext(
-		ctx,
-		in.CodexExecutable(),
+	if err := executable.Revalidate(); err != nil {
+		return nil, fmt.Errorf("app-server startup integrity: %w", err)
+	}
+	if beforeLaunch != nil {
+		beforeLaunch()
+	}
+	cmd, err := boundCommand(ctx, executable,
 		"app-server",
 		"--stdio",
 		"-c",
@@ -55,6 +68,9 @@ func StartWith(ctx context.Context, in *instance.Instance, launch func(*exec.Cmd
 		"-c",
 		"skills.bundled.enabled=false",
 	)
+	if err != nil {
+		return nil, fmt.Errorf("app-server startup integrity: %w", err)
+	}
 	cmd.Dir = in.WorkingDirectory()
 	cmd.Env = in.EnvironmentForChild(os.Environ(), nil, nil)
 	stdin, err := cmd.StdinPipe()

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -255,6 +256,21 @@ func TestAPI_ReplyRequestWriteFailureIsNotRetried(t *testing.T) {
 	}
 	if err := a.ReplyRequest(context.Background(), 42, map[string]bool{"allow": true}); err == nil {
 		t.Fatal("failed reply was retried")
+	}
+}
+
+func TestAPI_ReplyRequestBoundsRepliedIDs(t *testing.T) {
+	out, _ := io.Pipe()
+	c := New(pipeWriteCloser{io.Discard}, out, Config{Limits: Limits{MaxRepliedIDs: 2}})
+	defer c.Close()
+	a := NewAPI(c)
+	for _, id := range []uint64{1, 2} {
+		if err := a.ReplyRequest(context.Background(), id, map[string]bool{"allow": true}); err != nil {
+			t.Fatalf("reply %d: %v", id, err)
+		}
+	}
+	if err := a.ReplyRequest(context.Background(), 3, map[string]bool{"allow": true}); !errors.Is(err, ErrOverloaded) {
+		t.Fatalf("third reply error = %v, want overload", err)
 	}
 }
 

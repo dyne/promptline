@@ -11,9 +11,21 @@ import (
 )
 
 type call struct {
-	result json.RawMessage
-	err    error
-	done   chan struct{}
+	result  json.RawMessage
+	err     error
+	done    chan struct{}
+	bytes   int
+	release sync.Once
+}
+
+type queuedEvent struct {
+	event Event
+	bytes int
+}
+
+type queuedRequest struct {
+	request ServerRequest
+	bytes   int
 }
 
 // Client has exactly one stdout reader and serializes all stdin writes.
@@ -27,6 +39,11 @@ type Client struct {
 	pending   map[uint64]*call
 	events    chan Event
 	requests  chan ServerRequest
+	eventsQ   chan queuedEvent
+	requestsQ chan queuedRequest
+	inbound   int
+	eventN    int
+	requestN  int
 	done      chan struct{}
 	closeOnce sync.Once
 	fatal     error
@@ -34,7 +51,9 @@ type Client struct {
 
 func New(stdin io.WriteCloser, stdout io.Reader, cfg Config) *Client {
 	l := cfg.Limits.normalized()
-	c := &Client{in: stdin, limits: l, pending: make(map[uint64]*call), events: make(chan Event, l.MaxEvents), requests: make(chan ServerRequest, l.MaxServerRequests), done: make(chan struct{})}
+	c := &Client{in: stdin, limits: l, pending: make(map[uint64]*call), events: make(chan Event), requests: make(chan ServerRequest), eventsQ: make(chan queuedEvent, l.MaxEvents), requestsQ: make(chan queuedRequest, l.MaxServerRequests), done: make(chan struct{})}
+	go c.deliverEvents()
+	go c.deliverRequests()
 	go c.read(stdout)
 	return c
 }
@@ -78,6 +97,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, idempotent
 		c.remove(id, ErrClosed)
 		return nil, c.Err()
 	case <-p.done:
+		c.releaseCall(p)
 		return p.result, p.err
 	}
 }
@@ -143,22 +163,38 @@ func (c *Client) read(r io.Reader) {
 }
 func (c *Client) dispatch(e envelope) {
 	if e.ID != nil && e.Method != "" {
+		bytes := inboundSize(e.Method, e.Params)
+		if !c.reserveQueue(bytes, true) {
+			c.fail(fmt.Errorf("%w: server request queue full or inbound byte budget", ErrOverloaded))
+			return
+		}
 		select {
-		case c.requests <- ServerRequest{ID: *e.ID, Method: e.Method, Params: e.Params}:
+		case c.requestsQ <- queuedRequest{request: ServerRequest{ID: *e.ID, Method: e.Method, Params: e.Params}, bytes: bytes}:
 		default:
+			c.releaseQueue(bytes, true)
 			c.fail(fmt.Errorf("%w: server request queue full", ErrOverloaded))
 		}
 		return
 	}
 	if e.ID != nil {
+		bytes := inboundSize("", e.Result)
+		if e.Error != nil {
+			bytes += inboundSize(e.Error.Message, e.Error.Data)
+		}
+		if !c.reserveInbound(bytes) {
+			c.fail(fmt.Errorf("%w: inbound byte budget", ErrOverloaded))
+			return
+		}
 		c.mu.Lock()
 		p := c.pending[*e.ID]
 		delete(c.pending, *e.ID)
 		c.mu.Unlock()
 		if p == nil {
+			c.releaseInbound(bytes)
 			return
 		}
 		p.result = e.Result
+		p.bytes = bytes
 		if e.Error != nil {
 			p.err = e.Error
 		}
@@ -166,9 +202,15 @@ func (c *Client) dispatch(e envelope) {
 		return
 	}
 	if e.Method != "" {
+		bytes := inboundSize(e.Method, e.Params)
+		if !c.reserveQueue(bytes, false) {
+			c.fail(fmt.Errorf("%w: event queue full or inbound byte budget", ErrOverloaded))
+			return
+		}
 		select {
-		case c.events <- Event{Method: e.Method, Params: e.Params}:
+		case c.eventsQ <- queuedEvent{event: Event{Method: e.Method, Params: e.Params}, bytes: bytes}:
 		default:
+			c.releaseQueue(bytes, false)
 			c.fail(fmt.Errorf("%w: event queue full", ErrOverloaded))
 		}
 		return
@@ -181,8 +223,98 @@ func (c *Client) remove(id uint64, err error) {
 	delete(c.pending, id)
 	c.mu.Unlock()
 	if p != nil {
+		c.releaseCall(p)
 		p.err = err
 		close(p.done)
+	}
+}
+
+func (c *Client) releaseCall(p *call) { p.release.Do(func() { c.releaseInbound(p.bytes) }) }
+
+func inboundSize(method string, payload json.RawMessage) int { return len(method) + len(payload) }
+
+func (c *Client) reserveInbound(bytes int) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.fatal != nil || bytes > c.limits.MaxQueuedBytes-c.inbound {
+		return false
+	}
+	c.inbound += bytes
+	return true
+}
+
+func (c *Client) releaseInbound(bytes int) {
+	if bytes <= 0 {
+		return
+	}
+	c.mu.Lock()
+	c.inbound -= bytes
+	c.mu.Unlock()
+}
+
+func (c *Client) reserveQueue(bytes int, request bool) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.fatal != nil || bytes > c.limits.MaxQueuedBytes-c.inbound {
+		return false
+	}
+	if request {
+		if c.requestN >= c.limits.MaxServerRequests {
+			return false
+		}
+		c.requestN++
+	} else {
+		if c.eventN >= c.limits.MaxEvents {
+			return false
+		}
+		c.eventN++
+	}
+	c.inbound += bytes
+	return true
+}
+
+func (c *Client) releaseQueue(bytes int, request bool) {
+	c.mu.Lock()
+	c.inbound -= bytes
+	if request {
+		c.requestN--
+	} else {
+		c.eventN--
+	}
+	c.mu.Unlock()
+}
+
+func (c *Client) deliverEvents() {
+	for {
+		select {
+		case <-c.done:
+			return
+		case queued := <-c.eventsQ:
+			c.releaseInbound(queued.bytes)
+			select {
+			case <-c.done:
+				return
+			case c.events <- queued.event:
+				c.releaseQueue(0, false)
+			}
+		}
+	}
+}
+
+func (c *Client) deliverRequests() {
+	for {
+		select {
+		case <-c.done:
+			return
+		case queued := <-c.requestsQ:
+			c.releaseInbound(queued.bytes)
+			select {
+			case <-c.done:
+				return
+			case c.requests <- queued.request:
+				c.releaseQueue(0, true)
+			}
+		}
 	}
 }
 func (c *Client) fail(err error) {
@@ -193,6 +325,7 @@ func (c *Client) fail(err error) {
 		c.pending = make(map[uint64]*call)
 		c.mu.Unlock()
 		for _, p := range ps {
+			c.releaseCall(p)
 			p.err = err
 			close(p.done)
 		}

@@ -49,7 +49,9 @@ type ServerRequest struct {
 	Params json.RawMessage
 }
 
-type Limits struct{ MaxFrameBytes, MaxPending, MaxEvents, MaxServerRequests int }
+type Limits struct {
+	MaxFrameBytes, MaxPending, MaxEvents, MaxServerRequests, MaxQueuedBytes, MaxRepliedIDs int
+}
 
 func (l Limits) normalized() Limits {
 	if l.MaxFrameBytes <= 0 {
@@ -63,6 +65,12 @@ func (l Limits) normalized() Limits {
 	}
 	if l.MaxServerRequests <= 0 {
 		l.MaxServerRequests = 32
+	}
+	if l.MaxQueuedBytes <= 0 {
+		l.MaxQueuedBytes = 8 << 20
+	}
+	if l.MaxRepliedIDs <= 0 {
+		l.MaxRepliedIDs = 16 << 10
 	}
 	return l
 }
