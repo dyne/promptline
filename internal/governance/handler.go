@@ -2,7 +2,6 @@ package governance
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"strconv"
 
@@ -13,13 +12,10 @@ import (
 // request -> durable decision -> caller sends response -> caller records
 // completion. If journaling fails, the returned decision is decline.
 func HandleServerRequest(_ context.Context, policy Policy, prompt Prompt, journal *Journal, request appserver.ServerRequest) (map[string]string, error) {
-	effect := Effect{Kind: request.Method}
-	var wire struct {
-		CWD    string `json:"cwd"`
-		Reason string `json:"reason"`
+	effect, decodeErr := DecodeApproval(request, policy.Approval)
+	if decodeErr != nil {
+		effect = Effect{Kind: request.Method}
 	}
-	_ = json.Unmarshal(request.Params, &wire)
-	effect.CWD, effect.Operation = wire.CWD, wire.Reason
 	event := Event{Instance: "runtime", ActorUID: os.Getuid(), ActorGID: os.Getgid(), ProcessID: os.Getpid(), RequestID: requestID(request.ID), Kind: "effect-request", Metadata: map[string]any{"method": request.Method}}
 	if journal != nil {
 		if err := journal.Append(event, true); err != nil {
@@ -27,6 +23,9 @@ func HandleServerRequest(_ context.Context, policy Policy, prompt Prompt, journa
 		}
 	}
 	decision, err := Decide(policy, prompt, effect)
+	if decodeErr != nil {
+		decision, err = DecisionDecline, nil
+	}
 	if err != nil {
 		decision = DecisionDecline
 	}
