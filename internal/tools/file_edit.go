@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -176,18 +175,14 @@ func createFile(ctx context.Context, args map[string]interface{}) (string, error
 		return "", fmt.Errorf("content appears to be binary; create_file supports text only")
 	}
 
-	resolved, err := resolvePathWithinBaseAllowMissing(path, configFromContext(ctx).WorkingDirectory)
+	capability, err := capabilityPathFor(path, configFromContext(ctx))
 	if err != nil {
 		return "", err
 	}
-	if !pathAllowedByConfig(ctx, resolved) {
-		return "", fmt.Errorf("path is outside allowed tool base directories")
-	}
-
 	mode := os.FileMode(0o644)
-	if info, err := os.Stat(resolved); err == nil {
+	if info, err := capability.capability.root.Lstat(capability.name); err == nil {
 		if info.IsDir() {
-			return "", fmt.Errorf("path '%s' is a directory", resolved)
+			return "", fmt.Errorf("path '%s' is a directory", path)
 		}
 		if !overwrite {
 			return "", fmt.Errorf("file already exists; set overwrite to true to replace it")
@@ -197,20 +192,15 @@ func createFile(ctx context.Context, args map[string]interface{}) (string, error
 		return "", fmt.Errorf("failed to stat file: %v", err)
 	}
 
-	parent := filepath.Dir(resolved)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return "", fmt.Errorf("failed to create parent directories: %v", err)
-	}
-
 	if err := ensureContext(ctx); err != nil {
 		return "", err
 	}
 
-	if err := os.WriteFile(resolved, []byte(content), mode); err != nil {
+	if err := replaceCapabilityFile(capability, []byte(content), mode, overwrite); err != nil {
 		return "", fmt.Errorf("failed to write file: %v", err)
 	}
 
-	return fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), resolved), nil
+	return fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path), nil
 }
 
 func editFile(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -236,32 +226,15 @@ func editFile(ctx context.Context, args map[string]interface{}) (string, error) 
 		return "", err
 	}
 
-	resolved, err := resolvePathWithinBase(path, configFromContext(ctx).WorkingDirectory)
-	if err != nil {
-		return "", err
-	}
-	if !pathAllowedByConfig(ctx, resolved) {
-		return "", fmt.Errorf("path is outside allowed tool base directories")
-	}
-
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return "", fmt.Errorf("failed to read file: %v", err)
-	}
-	if info.IsDir() {
-		return "", fmt.Errorf("path '%s' is a directory", resolved)
-	}
-
 	limits := limitsFromContext(ctx)
-	if info.Size() > limits.MaxFileSizeBytes {
-		return "", fmt.Errorf("file exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
-	}
-
 	if err := ensureContext(ctx); err != nil {
 		return "", err
 	}
-
-	originalBytes, err := os.ReadFile(resolved)
+	capability, err := capabilityPathFor(path, configFromContext(ctx))
+	if err != nil {
+		return "", err
+	}
+	originalBytes, info, err := readCapabilityFile(capability, limits.MaxFileSizeBytes)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %v", err)
 	}
@@ -295,18 +268,18 @@ func editFile(ctx context.Context, args map[string]interface{}) (string, error) 
 	}
 
 	if updated == string(originalBytes) {
-		return fmt.Sprintf("No changes applied to %s", resolved), nil
+		return fmt.Sprintf("No changes applied to %s", path), nil
 	}
 
 	if int64(len(updated)) > limits.MaxFileSizeBytes {
 		return "", fmt.Errorf("updated file exceeds maximum size of %d bytes", limits.MaxFileSizeBytes)
 	}
 
-	if err := os.WriteFile(resolved, []byte(updated), info.Mode().Perm()); err != nil {
+	if err := replaceCapabilityFile(capability, []byte(updated), info.Mode().Perm(), true); err != nil {
 		return "", fmt.Errorf("failed to write file: %v", err)
 	}
 
-	return fmt.Sprintf("Applied %d edits to %s (%s)", len(matches), resolved, summarizeEditMatches(matches)), nil
+	return fmt.Sprintf("Applied %d edits to %s (%s)", len(matches), path, summarizeEditMatches(matches)), nil
 }
 
 func parseSearchReplaceEdits(input string) ([]searchReplaceEdit, error) {
