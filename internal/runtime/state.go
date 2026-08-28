@@ -1,6 +1,10 @@
 package runtime
 
-import "sync"
+import (
+	"sync"
+
+	"promptline/internal/appserver"
+)
 
 // runtimeState is the synchronized state machine for one interactive session.
 // Keeping it separate from protocol and console adapters makes the ownership of
@@ -17,10 +21,14 @@ type runtimeState struct {
 	turnHasOutput      bool
 	streamOpen         bool
 	turnErrorRendered  bool
+	pendingItems       map[string]appserver.Item
 }
 
 func newRuntimeState() runtimeState {
-	return runtimeState{streamedAgentItems: make(map[string]struct{})}
+	return runtimeState{
+		streamedAgentItems: make(map[string]struct{}),
+		pendingItems:       make(map[string]appserver.Item),
+	}
 }
 
 func (s *runtimeState) thread() string {
@@ -58,10 +66,23 @@ func (s *runtimeState) acceptTurn(id string) {
 	s.turnID = id
 	s.starting = false
 	s.streamedAgentItems = make(map[string]struct{})
+	s.pendingItems = make(map[string]appserver.Item)
 	s.turnHasOutput = false
 	s.streamOpen = false
 	s.turnErrorRendered = false
 	s.mu.Unlock()
+}
+
+func (s *runtimeState) rememberPending(item appserver.Item) {
+	s.mu.Lock()
+	s.pendingItems[item.ID] = item
+	s.mu.Unlock()
+}
+
+func (s *runtimeState) pendingItem(id string) appserver.Item {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pendingItems[id]
 }
 
 func (s *runtimeState) activeTurn() (threadID, turnID string) {
