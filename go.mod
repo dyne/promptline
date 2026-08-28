@@ -2,6 +2,10 @@ module promptline
 
 go 1.24.0
 
+// Keep source language semantics at Go 1.24 while building with a supported,
+// patched compiler. Update this only through the documented toolchain policy.
+toolchain go1.25.12
+
 require (
 	github.com/go-playground/validator/v10 v10.28.0
 	github.com/invopop/jsonschema v0.13.0
