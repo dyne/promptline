@@ -91,6 +91,10 @@ func TestFileApprovalUsesOnlyMatchingPendingItem(t *testing.T) {
 	if !errors.Is(err, ErrUnsupportedApproval) {
 		t.Fatalf("mismatch error=%v", err)
 	}
+	request.Params = []byte(`{"threadId":"t","turnId":"u","itemId":"i","changes":[{"path":"a","diff":"different"}]}`)
+	if _, err := DecodeApproval(request, ApprovalIdentity{ThreadID: "t", TurnID: "u", ItemID: "i", PendingItem: pending}); !errors.Is(err, ErrUnsupportedApproval) {
+		t.Fatalf("supplied change mismatch error=%v", err)
+	}
 }
 
 func TestAvailableDecisionsCannotPermitAbsentAccept(t *testing.T) {
