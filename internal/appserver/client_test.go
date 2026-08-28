@@ -105,6 +105,7 @@ func TestClient_TerminationAndQueueBounds(t *testing.T) {
 	}{
 		{name: "event queue", limits: Limits{MaxEvents: 1}, frames: []string{`{"method":"one"}`, `{"method":"two"}`}, want: ErrOverloaded},
 		{name: "request queue", limits: Limits{MaxServerRequests: 1}, frames: []string{`{"id":1,"method":"one"}`, `{"id":2,"method":"two"}`}, want: ErrOverloaded},
+		{name: "inbound byte budget", limits: Limits{MaxQueuedBytes: 5}, frames: []string{`{"method":"one","params":"1234567890"}`}, want: ErrOverloaded},
 		{name: "malformed envelope", frames: []string{`{"params":{}}`}, want: ErrProtocol},
 		{name: "oversized frame", limits: Limits{MaxFrameBytes: 16}, frames: []string{`{"method":"this-is-too-large"}`}, want: ErrProtocol},
 	}

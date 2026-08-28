@@ -60,6 +60,8 @@ func exitCode(args []string, input io.Reader, output, stderr io.Writer) int {
 }
 
 func run(args []string, input io.Reader, output, stderr io.Writer) error {
+	restoreUmask := instance.SetPrivateUmaskBeforeConcurrency()
+	defer restoreUmask()
 	cmd, err := pruntime.Parse(args, stderr)
 	if err != nil {
 		return err

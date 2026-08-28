@@ -64,7 +64,7 @@ func InstallCodexConfig(executable string, in *instance.Instance) error {
 	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("close Codex config: %w", err)
 	}
-	if err := os.Rename(temporaryPath, filepath.Join(directory, "config.toml")); err != nil {
+	if err := os.Rename(temporaryPath, in.CodexConfigPath()); err != nil {
 		return fmt.Errorf("install Codex config: %w", err)
 	}
 	dir, err := os.Open(directory)

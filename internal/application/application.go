@@ -101,6 +101,8 @@ func Run(ctx context.Context, cmd pruntime.Command, input io.Reader, output io.W
 // RunWithFactories composes a command invocation with explicitly injectable
 // construction seams. Production callers use Run.
 func RunWithFactories(ctx context.Context, cmd pruntime.Command, input io.Reader, output io.Writer, version string, factories Factories) error {
+	restoreUmask := instance.SetPrivateUmaskBeforeConcurrency()
+	defer restoreUmask()
 	if cmd.ToolboxServe {
 		registry, err := factories.toolbox(cmd.Instance.WorkingDirectory, cmd.Instance.WorkingRoot)
 		if err != nil {

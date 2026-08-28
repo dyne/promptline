@@ -238,6 +238,11 @@ func (a *API) ReplyRequest(ctx context.Context, id uint64, decision any) error {
 		a.mu.Unlock()
 		return errors.New("server request already answered")
 	}
+	if len(a.replied) >= a.c.limits.MaxRepliedIDs {
+		a.mu.Unlock()
+		a.c.fail(fmt.Errorf("%w: replied request ID budget", ErrOverloaded))
+		return ErrOverloaded
+	}
 	a.replied[id] = struct{}{}
 	a.mu.Unlock()
 	if err := a.c.Reply(ctx, id, decision, nil); err != nil {

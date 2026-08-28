@@ -80,6 +80,7 @@ func (i *Instance) WorkingRoot() string        { return i.workingRoot }
 func (i *Instance) WorkingDirectory() string   { return i.workingDirectory }
 func (i *Instance) CodexExecutable() string    { return i.codexExecutable }
 func (i *Instance) CodexHome() string          { return i.codexHome }
+func (i *Instance) CodexConfigPath() string    { return filepath.Join(i.codexHome, "config.toml") }
 func (i *Instance) Model() string              { return i.model }
 func (i *Instance) ReasoningEffort() string    { return i.reasoningEffort }
 func (i *Instance) ApprovalMode() ApprovalMode { return i.approvalMode }
