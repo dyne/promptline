@@ -236,7 +236,7 @@ func (c *Catalog) Materialize(destination string) error {
 	if err != nil {
 		return fmt.Errorf("create materialization staging: %w", err)
 	}
-	defer destinationRoot.RemoveAll(staging)
+	defer removeAllRoot(destinationRoot, staging)
 	stagingRoot, err := openDirectoryNoFollow(destinationRoot, staging, false, 0)
 	if err != nil {
 		return fmt.Errorf("open materialization staging: %w", err)
@@ -429,6 +429,52 @@ func mkdirTempRoot(root *os.Root, prefix string) (string, error) {
 		}
 	}
 	return "", errors.New("could not allocate a unique materialization staging directory")
+}
+
+// removeAllRoot removes a command-owned tree using only os.Root operations
+// available in Go 1.24. Every recursive directory is opened and identity-
+// checked before traversal, so cleanup cannot follow a swapped symlink.
+func removeAllRoot(root *os.Root, name string) error {
+	info, err := root.Lstat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return root.Remove(name)
+	}
+
+	directory, err := openDirectoryNoFollow(root, name, false, 0)
+	if err != nil {
+		return err
+	}
+	handle, err := directory.Open(".")
+	if err != nil {
+		directory.Close()
+		return err
+	}
+	entries, readErr := handle.ReadDir(-1)
+	closeHandleErr := handle.Close()
+	if readErr != nil {
+		directory.Close()
+		return readErr
+	}
+	if closeHandleErr != nil {
+		directory.Close()
+		return closeHandleErr
+	}
+	for _, entry := range entries {
+		if err := removeAllRoot(directory, entry.Name()); err != nil {
+			directory.Close()
+			return err
+		}
+	}
+	if err := directory.Close(); err != nil {
+		return err
+	}
+	return root.Remove(name)
 }
 
 func syncRootDirectory(root *os.Root, name string) error {
