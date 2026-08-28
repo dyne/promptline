@@ -19,7 +19,8 @@ required_files=(
     SKILL.md README.md LICENSE CHANGELOG.md agents/openai.yaml
     docs/DESIGN.md docs/PROVENANCE.md docs/UPSTREAM-REVIEW.md
     tests/scenarios.md tests/test_toolbox_catalog.py
-    references/principles.md references/toolbox.md references/apt-dpkg.md references/systemd.md references/caddy.md
+    references/principles.md references/toolbox.md references/local-documentation.md
+    references/apt-dpkg.md references/systemd.md references/caddy.md
     references/diagnostics.md references/networking.md references/nftables.md
     references/ssh.md references/storage.md references/boot-recovery.md
     references/users-permissions.md references/security.md references/performance.md

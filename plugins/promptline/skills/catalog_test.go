@@ -34,7 +34,8 @@ func TestEmbeddedCatalogInventory(t *testing.T) {
 		"playbooks/failed-upgrade.md", "playbooks/high-load.md", "playbooks/networking-failure.md",
 		"playbooks/package-failure.md", "playbooks/service-failure.md", "playbooks/ssh-failure.md",
 		"references/apt-dpkg.md", "references/backups.md", "references/boot-recovery.md",
-		"references/caddy.md", "references/diagnostics.md", "references/dns.md", "references/networking.md",
+		"references/caddy.md", "references/diagnostics.md", "references/dns.md", "references/local-documentation.md",
+		"references/networking.md",
 		"references/nftables.md", "references/performance.md", "references/principles.md",
 		"references/security.md", "references/shell-safety.md", "references/ssh.md",
 		"references/storage.md", "references/systemd.md", "references/toolbox.md",
@@ -249,7 +250,7 @@ func TestEmbeddedFilesMatchSource(t *testing.T) {
 			}
 		})
 	}
-	for _, file := range []string{"SKILL.md", "references/caddy.md", "references/systemd.md", "playbooks/disk-full.md"} {
+	for _, file := range []string{"SKILL.md", "references/caddy.md", "references/local-documentation.md", "references/systemd.md", "playbooks/disk-full.md"} {
 		if bytes, err := catalog.ReadFile(debianSysadmin, file); err != nil || len(bytes) == 0 {
 			t.Fatalf("explicit embedded read %q = %d bytes, %v", file, len(bytes), err)
 		}
@@ -286,8 +287,8 @@ func TestCatalogMaterializeReconstructsOnlyPublicFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := mustListFiles(t, catalog, debianSysadmin)
-	if len(files) != 34 {
-		t.Fatalf("public file count = %d, want 34", len(files))
+	if len(files) != 35 {
+		t.Fatalf("public file count = %d, want 35", len(files))
 	}
 	for _, file := range files {
 		want, err := catalog.ReadFile(debianSysadmin, file)
