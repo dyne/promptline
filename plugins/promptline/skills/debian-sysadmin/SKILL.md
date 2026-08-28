@@ -75,6 +75,7 @@ Read only the references and playbook needed for the active task.
 | Task | Reference | Incident playbook |
 |---|---|---|
 | Shared method, risk, change records | [principles](references/principles.md) | — |
+| Installed commands, configuration syntax, man and Info pages | [local documentation](references/local-documentation.md) | — |
 | Promptline MCP versus host-tool routing | [toolbox](references/toolbox.md) | — |
 | APT, dpkg, repositories, upgrades | [apt-dpkg](references/apt-dpkg.md) | [package failure](playbooks/package-failure.md), [failed upgrade](playbooks/failed-upgrade.md) |
 | Units, journals, timers, sockets, boot timing | [systemd](references/systemd.md) | [service failure](playbooks/service-failure.md) |

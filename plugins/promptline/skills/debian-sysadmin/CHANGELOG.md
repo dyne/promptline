@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Prioritize installed man pages, Info manuals, and Debian package documentation over remote sources.
 - Add Debian-focused Caddy reverse-proxy configuration, validation, reload, verification, and failure-isolation guidance.
 - Package the skill inside the installable `sysadmin` Codex plugin.
 - Add CI validation with ShellCheck and Skill Creator-compatible frontmatter checks.

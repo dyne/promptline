@@ -89,8 +89,8 @@ func TestSkillCommandsUseEmbeddedCatalogWithoutInstanceState(t *testing.T) {
 	if err := run([]string{"list-skill-files", "debian-sysadmin", "--state-root", stateRoot, "--mock-codex", "/must-not-run"}, nil, &output, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(strings.TrimSpace(output.String()), "\n") + 1; got != 34 {
-		t.Fatalf("list-skill-files count = %d, want 34", got)
+	if got := strings.Count(strings.TrimSpace(output.String()), "\n") + 1; got != 35 {
+		t.Fatalf("list-skill-files count = %d, want 35", got)
 	}
 	if _, err := os.Stat(stateRoot); !os.IsNotExist(err) {
 		t.Fatalf("skill discovery created instance state: %v", err)
