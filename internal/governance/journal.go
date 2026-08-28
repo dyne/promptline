@@ -452,9 +452,6 @@ func verifyJournalData(data []byte, anchor string) (string, error) {
 		}
 		var event Event
 		if err := json.Unmarshal(line, &event); err != nil {
-			if index == len(lines)-1 && !complete {
-				return previous, nil
-			}
 			return "", fmt.Errorf("audit record %d: %w", index+1, err)
 		}
 		if event.SchemaVersion != EventSchemaVersion || event.Instance == "" || event.Kind == "" || event.Hash == "" || event.Hash != eventHash(event) {
