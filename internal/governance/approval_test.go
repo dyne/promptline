@@ -2,6 +2,7 @@ package governance
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -96,6 +97,39 @@ func TestAvailableDecisionsCannotPermitAbsentAccept(t *testing.T) {
 	got, err := Decide(Policy{}, fixedPrompt(DecisionAccept), Effect{AllowedDecisions: []Decision{DecisionDecline, DecisionCancel}})
 	if err != nil || got != DecisionDecline {
 		t.Fatalf("decision=%q err=%v", got, err)
+	}
+}
+
+func TestCommandApprovalValidationRejectsIdentityAndDecisionDrift(t *testing.T) {
+	identity := ApprovalIdentity{ThreadID: "t", TurnID: "u", ItemID: "i", EnvironmentID: "e", ApprovalID: "a"}
+	valid := commandApproval{ThreadID: "t", TurnID: "u", ItemID: "i", EnvironmentID: "e", ApprovalID: "a", Command: "pwd", CWD: "/tmp", CommandActions: json.RawMessage(`[]`), AvailableDecisions: []string{"accept", "decline"}}
+	if !valid.valid(identity) {
+		t.Fatal("valid command rejected")
+	}
+	for _, mutate := range []func(*commandApproval){func(v *commandApproval) { v.ItemID = "other" }, func(v *commandApproval) { v.EnvironmentID = "other" }, func(v *commandApproval) { v.ApprovalID = "other" }, func(v *commandApproval) { v.AvailableDecisions = []string{"grant"} }, func(v *commandApproval) { v.CommandActions = json.RawMessage("bad") }} {
+		candidate := valid
+		mutate(&candidate)
+		if candidate.valid(identity) {
+			t.Fatal("drift accepted")
+		}
+	}
+}
+
+func TestFileAndPermissionApprovalValidationRejectsMalformedFields(t *testing.T) {
+	identity := ApprovalIdentity{ThreadID: "t", TurnID: "u", ItemID: "i", EnvironmentID: "e"}
+	if !(fileApproval{ThreadID: "t", TurnID: "u", ItemID: "i"}).valid(identity) {
+		t.Fatal("valid file approval rejected")
+	}
+	if (fileApproval{ThreadID: "t", TurnID: "u", ItemID: "other"}).valid(identity) {
+		t.Fatal("wrong file item accepted")
+	}
+	valid := permissionApproval{ThreadID: "t", TurnID: "u", ItemID: "i", EnvironmentID: "e", CWD: "/tmp", Permissions: json.RawMessage(`[]`)}
+	if !valid.valid(identity) {
+		t.Fatal("valid permission rejected")
+	}
+	valid.Permissions = json.RawMessage("bad")
+	if valid.valid(identity) {
+		t.Fatal("malformed permission accepted")
 	}
 }
 

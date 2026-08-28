@@ -18,6 +18,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -25,8 +26,10 @@ import (
 	"strings"
 	"testing"
 
+	"promptline/internal/application"
 	"promptline/internal/governance"
 	"promptline/internal/instance"
+	pruntime "promptline/internal/runtime"
 )
 
 func TestVersionVariable(t *testing.T) {
@@ -170,11 +173,34 @@ func TestVerifyAuditCommandReportsLocalAndAnchoredEvidence(t *testing.T) {
 	}
 }
 
+func TestRunDelegatesOperationalCommandsToApplication(t *testing.T) {
+	original := runApplication
+	t.Cleanup(func() { runApplication = original })
+	var got pruntime.Command
+	runApplication = func(ctx context.Context, cmd pruntime.Command, input io.Reader, output io.Writer, version string) error {
+		if ctx.Err() != nil {
+			t.Fatalf("application context was already cancelled: %v", ctx.Err())
+		}
+		got = cmd
+		if version != Version {
+			t.Fatalf("version = %q, want %q", version, Version)
+		}
+		return nil
+	}
+
+	if err := run([]string{"mcp-server", "--cwd", t.TempDir()}, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !got.ToolboxServe {
+		t.Fatal("standalone MCP command bypassed application composition root")
+	}
+}
+
 func TestApprovalPromptHonorsMode(t *testing.T) {
-	if prompt := approvalPrompt(instance.ApprovalDeny, nil, io.Discard); prompt != nil {
+	if prompt := application.ApprovalPrompt(instance.ApprovalDeny, nil, io.Discard); prompt != nil {
 		t.Fatal("deny mode created an interactive prompt")
 	}
-	prompt := approvalPrompt(instance.ApprovalAsk, nil, io.Discard)
+	prompt := application.ApprovalPrompt(instance.ApprovalAsk, nil, io.Discard)
 	if _, ok := prompt.(governance.TerminalPrompt); !ok {
 		t.Fatalf("ask mode prompt = %T, want TerminalPrompt", prompt)
 	}

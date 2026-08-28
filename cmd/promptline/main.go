@@ -24,7 +24,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -34,7 +33,6 @@ import (
 	"promptline/internal/appserver"
 	"promptline/internal/governance"
 	"promptline/internal/instance"
-	"promptline/internal/mcp"
 	pruntime "promptline/internal/runtime"
 	"promptline/plugins/promptline/skills"
 )
@@ -43,6 +41,10 @@ import (
 var Version = "dev"
 
 const uRootModulePath = "github.com/u-root/u-root"
+
+// runApplication is a command-level seam. Its production value is the sole
+// composition root for interactive and standalone MCP invocations.
+var runApplication = application.Run
 
 func main() {
 	os.Exit(exitCode(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
@@ -105,106 +107,9 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 		}
 		return catalog.Materialize(cmd.Materialize)
 	}
-	if cmd.ToolboxServe {
-		registry, err := application.Toolbox(cmd.Instance.WorkingDirectory, cmd.Instance.WorkingRoot)
-		if err != nil {
-			return err
-		}
-		defer registry.Close()
-		server, err := mcp.NewServer(registry, input, output, 4<<20)
-		if err != nil {
-			return err
-		}
-		return server.Serve(context.Background())
-	}
-	in, err := instance.New(cmd.Instance)
-	if err != nil {
-		return err
-	}
-	lock, err := in.AcquireLock()
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	var dynamicTools []appserver.DynamicToolNamespace
-	if in.ToolboxEnabled() {
-		registry, registryErr := application.Toolbox(in.WorkingDirectory(), in.WorkingRoot())
-		if registryErr != nil {
-			_ = lock.Close()
-			return fmt.Errorf("describe toolbox tools: %w", registryErr)
-		}
-		dynamicTools = []appserver.DynamicToolNamespace{mcp.DynamicToolbox(registry)}
-		_ = registry.Close()
-		executable, err := os.Executable()
-		if err != nil {
-			_ = lock.Close()
-			return fmt.Errorf("resolve Promptline executable: %w", err)
-		}
-		executable, err = filepath.EvalSymlinks(executable)
-		if err != nil {
-			_ = lock.Close()
-			return fmt.Errorf("resolve Promptline executable symlinks: %w", err)
-		}
-		if err := mcp.InstallCodexConfig(executable, in); err != nil {
-			_ = lock.Close()
-			return err
-		}
-	}
-	process, err := appserver.Start(ctx, in)
-	if err != nil {
-		_ = lock.Close()
-		return err
-	}
-	client := pruntime.AppServer{API: appserver.NewAPI(process.Client), Client: process.Client}
-	r, err := pruntime.New(in, client, process, lock)
-	if err != nil {
-		_ = process.Close(context.Background())
-		_ = lock.Close()
-		return err
-	}
-	journal, err := governance.OpenJournal(governance.JournalConfig{Root: in.StateRootHandle(), Directory: "audit"})
-	if err != nil {
-		_ = r.Close(context.Background())
-		return fmt.Errorf("open audit journal: %w", err)
-	}
-	defer journal.Close()
-	r.SetRequestHandler(func(requestCtx context.Context, request appserver.ServerRequest, approvalInput io.Reader) error {
-		prompt := approvalPrompt(in.ApprovalMode(), approvalInput, output)
-		policy := governance.Policy{Instance: in.Name(), Roots: []string{in.WorkingRoot()}, Approval: r.ApprovalIdentity(request)}
-		decision, decisionErr := governance.HandleServerRequest(requestCtx, policy, prompt, journal, request)
-		if decisionErr != nil {
-			decision = map[string]string{"decision": string(governance.DecisionDecline)}
-		}
-		replyErr := client.ReplyRequest(requestCtx, request.ID, decision)
-		if auditErr := governance.RecordReplyOutcome(journal, policy, request, decision, replyErr); auditErr != nil && replyErr == nil {
-			return auditErr
-		}
-		if replyErr != nil {
-			return replyErr
-		}
-		return decisionErr
-	})
-	if err := r.Start(ctx, pruntime.Options{
-		Resume: !cmd.New, ResumeID: cmd.ResumeID, DynamicTools: dynamicTools,
-	}, Version); err != nil {
-		_ = r.Close(context.Background())
-		return err
-	}
-	signals := make(chan os.Signal, 2)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signals)
-	go func() {
-		for sig := range signals {
-			if sig == os.Interrupt && r.HasActiveTurn() {
-				_ = r.Interrupt(context.Background())
-				continue
-			}
-			cancel()
-			return
-		}
-	}()
-	return r.Run(ctx, input, pruntime.Terminal{Out: output})
+	return runApplication(ctx, cmd, input, output, Version)
 }
 
 func printVersionReport(output io.Writer, codexExecutable string) error {
@@ -243,11 +148,4 @@ func dependencyVersion(modulePath string) string {
 		return "unknown"
 	}
 	return "unknown"
-}
-
-func approvalPrompt(mode instance.ApprovalMode, input io.Reader, output io.Writer) governance.Prompt {
-	if mode != instance.ApprovalAsk {
-		return nil
-	}
-	return governance.TerminalPrompt{Input: input, Output: output}
 }

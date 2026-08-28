@@ -295,6 +295,15 @@ func TestJournalUsesProvidedRootForRelativeArtifacts(t *testing.T) {
 	if _, err := root.Lstat("audit/events.jsonl"); err != nil {
 		t.Fatalf("rooted journal missing: %v", err)
 	}
+	if _, err := VerifyJournalRoot(root, "audit/events.jsonl", ""); err != nil {
+		t.Fatalf("verify rooted journal: %v", err)
+	}
+	if _, err := VerifyJournalRoot(root, "other/events.jsonl", ""); err == nil {
+		t.Fatal("arbitrary rooted artifact accepted")
+	}
+	if _, err := VerifyJournalRoot(nil, "audit/events.jsonl", ""); err == nil {
+		t.Fatal("nil root accepted")
+	}
 	if _, err := OpenJournal(JournalConfig{Root: root, Directory: "../escape"}); err == nil {
 		t.Fatal("rooted traversal accepted")
 	}
@@ -331,6 +340,197 @@ func TestJournalRedactsSensitiveValuesUnderBenignKeys(t *testing.T) {
 		if bytes.Contains(data, []byte(secret)) {
 			t.Fatalf("secret leaked: %s", secret)
 		}
+	}
+}
+
+func TestVerifyJournalDataRejectsBrokenLifecycleShapes(t *testing.T) {
+	event := Event{SchemaVersion: EventSchemaVersion, Instance: "test", Kind: "effect", Sequence: 1}
+	event.Hash = eventHash(event)
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifyJournalData(append(encoded, '\n'), event.Hash); err != nil {
+		t.Fatal(err)
+	}
+	for _, data := range [][]byte{nil, []byte("\n"), []byte("not-json\n")} {
+		if _, err := verifyJournalData(data, ""); err == nil {
+			t.Fatalf("invalid data accepted: %q", data)
+		}
+	}
+	if _, err := verifyJournalData(append(encoded, '\n'), "wrong"); err == nil {
+		t.Fatal("wrong anchor accepted")
+	}
+}
+
+func TestAuditMetadataSanitizesNestedTypesAndControls(t *testing.T) {
+	metadata := sanitizeMetadata(map[string]any{
+		"token": "visible", "unknown": "drop", "message": []any{"ok\x00", map[string]any{"password": "nope"}}, "paths": 7,
+	})
+	if metadata["token"] != nil || metadata["paths"] != 7 || metadata["unknown"] != nil {
+		t.Fatalf("metadata policy = %#v", metadata)
+	}
+	values := metadata["message"].([]any)
+	if values[0] != "ok" || len(values[1].(map[string]any)) != 0 {
+		t.Fatalf("nested metadata = %#v", values)
+	}
+}
+
+func TestRootedAuditOperationsRejectTraversalAndSupportRename(t *testing.T) {
+	root, err := os.OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if _, err := rootedOpenJournalDir(root, "audit"); err != nil {
+		t.Fatal(err)
+	}
+	file, err := rootedOpenJournalFile(root, "audit/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rootedRename(root, "audit/one", "audit/two"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rootedOpenJournalFile(root, "../escape"); err == nil {
+		t.Fatal("traversal accepted")
+	}
+	if err := rootedRename(root, "audit/two", "../escape"); err == nil {
+		t.Fatal("rename traversal accepted")
+	}
+}
+
+func TestJournalRotationAndAnchorVerification(t *testing.T) {
+	dir := t.TempDir()
+	j, err := OpenJournal(JournalConfig{Directory: dir, MaxJournalBytes: 220, Retention: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		if err := j.Append(Event{Instance: "test", Kind: "effect", Metadata: map[string]any{"message": "rotation payload"}}, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "events.jsonl")
+	hash, err := VerifyJournalWithAnchor(path, "")
+	if err != nil || hash == "" {
+		t.Fatalf("verify rotation: %q %v", hash, err)
+	}
+	if _, err := VerifyJournalWithAnchor(path, hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyJournalWithAnchor(path, "wrong"); err == nil {
+		t.Fatal("wrong rotated anchor accepted")
+	}
+}
+
+func TestJournalRejectsInvalidConfigurationAndAppendBoundaries(t *testing.T) {
+	if _, err := OpenJournal(JournalConfig{}); err == nil {
+		t.Fatal("empty journal config accepted")
+	}
+	if _, err := OpenJournal(JournalConfig{Directory: "relative"}); err == nil {
+		t.Fatal("relative journal accepted")
+	}
+	j, err := OpenJournal(JournalConfig{Directory: t.TempDir(), MaxRecordBytes: 16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Append(Event{}, false); err == nil {
+		t.Fatal("invalid event accepted")
+	}
+	if err := j.Append(Event{Instance: "x", Kind: "x", Metadata: map[string]any{"message": "too long"}}, false); err == nil {
+		t.Fatal("oversized record accepted")
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Append(Event{Instance: "x", Kind: "x"}, false); err == nil {
+		t.Fatal("closed journal accepted append")
+	}
+}
+
+func TestRecoverJournalHandlesMissingCrashTailAndCorruption(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := RecoverJournal(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"bad":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecoverJournal(path); err != nil {
+		t.Fatalf("crash tail: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("not-json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecoverJournal(path); err == nil {
+		t.Fatal("complete corruption accepted")
+	}
+}
+
+func TestVerifyJournalRootRejectsUnsafeAndIncompleteArtifacts(t *testing.T) {
+	base := t.TempDir()
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := root.Mkdir("audit", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "audit", "events.jsonl"), []byte("not-json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyJournalRoot(root, "audit/events.jsonl", ""); err == nil {
+		t.Fatal("corrupt rooted journal accepted")
+	}
+	if err := os.WriteFile(filepath.Join(base, "audit", "events.jsonl.1"), []byte("tail"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyJournalRoot(root, "audit/events.jsonl", ""); err == nil {
+		t.Fatal("incomplete rotated segment accepted")
+	}
+	if err := os.Remove(filepath.Join(base, "audit", "events.jsonl.1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(base, "audit", "events.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../outside", filepath.Join(base, "audit", "events.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyJournalRoot(root, "audit/events.jsonl", ""); err == nil {
+		t.Fatal("symlink journal accepted")
+	}
+}
+
+func TestOpenJournalRejectsInvalidPersistedHead(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+	if err := os.WriteFile(path, []byte("not-json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenJournal(JournalConfig{Directory: dir}); err == nil {
+		t.Fatal("corrupt journal head accepted")
+	}
+	if err := os.WriteFile(path, []byte(`{"schemaVersion":1,"instance":"x","kind":"effect","sequence":2,"hash":"bad"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	j, err := OpenJournal(JournalConfig{Directory: dir})
+	if err != nil {
+		t.Fatalf("recoverable single persisted head rejected: %v", err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -373,4 +573,80 @@ func TestJournalConcurrentAppendAndClose(t *testing.T) {
 	if err := j.Append(Event{Instance: "test", Kind: "effect"}, true); err == nil {
 		t.Fatal("Append after Close unexpectedly succeeded")
 	}
+}
+
+func TestRecordReplyOutcomeRecordsSentAndFailed(t *testing.T) {
+	j, err := OpenJournal(JournalConfig{Directory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	request := appserver.ServerRequest{ID: 7}
+	if err := RecordReplyOutcome(j, Policy{}, request, map[string]string{"decision": "accept"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordReplyOutcome(j, Policy{Instance: "test"}, request, map[string]string{"decision": "decline"}, errors.New("reply")); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordReplyOutcome(nil, Policy{}, request, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerifyJournalWithAnchorRejectsMissingAndBrokenRotation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if _, err := VerifyJournalWithAnchor(path, ""); err == nil {
+		t.Fatal("missing journal accepted")
+	}
+	if err := os.WriteFile(path+".1", []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyJournalWithAnchor(path, ""); err == nil {
+		t.Fatal("partial rotation accepted")
+	}
+}
+
+func TestRootedLoadHeadRecoversRetainedRotation(t *testing.T) {
+	base := t.TempDir()
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := root.Mkdir("audit", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	event := Event{SchemaVersion: EventSchemaVersion, Instance: "test", Kind: "effect", Sequence: 1}
+	event.Hash = eventHash(event)
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "audit", "events.jsonl.1"), append(data, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := root.OpenFile("audit/events.jsonl", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := &Journal{root: root, path: "audit/events.jsonl", file: file, cfg: JournalConfig{MaxJournalBytes: 1024, Retention: 2}}
+	if err := j.loadHead(); err != nil {
+		t.Fatal(err)
+	}
+	if j.sequence != 1 || j.lastHash != event.Hash {
+		t.Fatalf("head=%d %q", j.sequence, j.lastHash)
+	}
+	_ = file.Close()
+	oversized, err := os.OpenFile(filepath.Join(base, "audit", "events.jsonl.1"), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limited := &Journal{file: oversized, cfg: JournalConfig{MaxJournalBytes: 1}}
+	if err := limited.loadHead(); err == nil {
+		t.Fatal("oversized journal accepted")
+	}
+	_ = oversized.Close()
 }

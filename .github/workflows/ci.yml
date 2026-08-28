@@ -47,6 +47,7 @@ jobs:
         with: {go-version-file: .go-version}
       - run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
       - run: make check-go-policy && make check-workflow-policy && python3 scripts/check-workflow-policy.py --self-test
+      - run: make security-gates
       - run: make vulncheck
 
   integration:
