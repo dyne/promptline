@@ -34,11 +34,8 @@ func DecodeApproval(request appserver.ServerRequest, active ApprovalIdentity) (E
 		if err := strictDecode(request.Params, &w); err != nil || !w.valid(active) {
 			return Effect{}, ErrUnsupportedApproval
 		}
-		changes := w.Changes
-		if len(changes) == 0 {
-			changes = pendingFileChanges(active, w)
-		}
-		if len(changes) == 0 {
+		changes := pendingFileChanges(active, w)
+		if len(changes) == 0 || (len(w.Changes) != 0 && !sameChanges(w.Changes, changes)) {
 			return Effect{}, ErrUnsupportedApproval
 		}
 		return Effect{Kind: "fileChange", Operation: w.Reason, ThreadID: w.ThreadID, TurnID: w.TurnID, ItemID: w.ItemID, Changes: changes, AllowedDecisions: decisions(w.AvailableDecisions)}, nil
@@ -157,6 +154,18 @@ func pendingFileChanges(a ApprovalIdentity, request fileApproval) []FileChange {
 		return nil
 	}
 	return item.Item.Changes
+}
+
+func sameChanges(left, right []FileChange) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (w fileApproval) valid(a ApprovalIdentity) bool {
