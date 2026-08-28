@@ -1,10 +1,13 @@
 package runtime
 
 import (
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"promptline/internal/appserver"
 )
 
 func TestRuntimeStateTurnLifecycle(t *testing.T) {
@@ -107,5 +110,25 @@ func TestRuntimeStateEventReduction(t *testing.T) {
 	}
 	if !state.completeTurn(turnID) || state.hasActiveTurn() {
 		t.Fatal("matching completion must end the active turn")
+	}
+}
+
+func TestRuntimeStatePendingItems(t *testing.T) {
+	state := newRuntimeState()
+	state.rememberPending(appserver.Item{
+		ID:  "item-1",
+		Raw: json.RawMessage(`{"id":"item-1"}`),
+	})
+
+	if got := state.pendingItem("item-1"); got.ID != "item-1" || string(got.Raw) != `{"id":"item-1"}` {
+		t.Fatalf("pendingItem() = %#v", got)
+	}
+	if got := state.pendingItem("missing"); got.ID != "" || got.Raw != nil {
+		t.Fatalf("missing pendingItem() = %#v", got)
+	}
+
+	state.acceptTurn("turn-2")
+	if got := state.pendingItem("item-1"); got.ID != "" || got.Raw != nil {
+		t.Fatalf("pending item survived turn reset: %#v", got)
 	}
 }
