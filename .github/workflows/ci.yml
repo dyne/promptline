@@ -3,6 +3,12 @@ name: Promptline CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -11,29 +17,19 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    permissions: {contents: read}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Install dependencies
-        run: go mod download
-      - name: Build
-        run: make build
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with: {go-version-file: .go-version}
+      - run: go mod download
+      - run: make build
       - name: Format and vet
-        shell: bash
         run: |
           test -z "$(gofmt -l .)"
           make vet
-      - name: Unit and protocol contracts
-        run: |
-          make test-unit
-          make test-protocol
-          make check-coverage
+      - run: make test-unit && make test-protocol && make check-coverage
       - name: Verify dependency and protocol surface
-        shell: bash
         run: |
           go mod tidy -diff
           ! go list -deps ./... | grep -E 'go-openai|readline|promptline/internal/chat'
@@ -42,14 +38,25 @@ jobs:
           ./promptline --version
           ./promptline --help
 
+  security-policy:
+    runs-on: ubuntu-latest
+    permissions: {contents: read}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with: {go-version-file: .go-version}
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+      - run: make check-go-policy && make check-workflow-policy && python3 scripts/check-workflow-policy.py --self-test
+      - run: make vulncheck
+
   integration:
     runs-on: ubuntu-latest
+    permissions: {contents: read}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - uses: actions/cache@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with: {go-version-file: .go-version}
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: .gocache
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
@@ -57,12 +64,12 @@ jobs:
 
   race-integration:
     runs-on: ubuntu-latest
+    permissions: {contents: read}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - uses: actions/cache@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with: {go-version-file: .go-version}
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: .gocache
           key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
@@ -71,164 +78,108 @@ jobs:
 
   fuzz-smoke:
     runs-on: ubuntu-latest
+    permissions: {contents: read}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with: {go-version-file: .go-version}
       - run: make test-fuzz-smoke
 
   sysadmin-plugin:
-    name: Sysadmin plugin and Debian skill
     runs-on: ubuntu-latest
+    permissions: {contents: read}
     env:
       GOCACHE: ${{ github.workspace }}/.gocache
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Install validation dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends python3-yaml shellcheck
-      - name: Run skill validator
-        shell: bash
-        run: |
-          bash -n plugins/promptline/skills/debian-sysadmin/scripts/validate-skill.sh
-          plugins/promptline/skills/debian-sysadmin/scripts/validate-skill.sh
-      - name: Run Skill Creator validation
-        run: python3 plugins/promptline/skills/debian-sysadmin/scripts/skill_creator_validate.py plugins/promptline/skills/debian-sysadmin
-      - name: Run plugin package validation
-        shell: bash
-        run: |
-          go build -trimpath -o "${RUNNER_TEMP}/promptline-plugin-check" ./cmd/promptline
-          python3 plugins/promptline/scripts/validate_package.py \
-            --promptline "${RUNNER_TEMP}/promptline-plugin-check"
-      - name: Run ShellCheck
-        run: |
-          shellcheck install.sh scripts/test-install.sh
-          shellcheck plugins/promptline/skills/debian-sysadmin/scripts/validate-skill.sh
-      - name: Test installer contract
-        run: scripts/test-install.sh
-      - name: Compare toolbox catalog with live MCP schema
-        shell: bash
-        run: |
-          python3 -B plugins/promptline/skills/debian-sysadmin/tests/test_toolbox_catalog.py
-          python3 plugins/promptline/skills/debian-sysadmin/scripts/check_toolbox_catalog.py \
-            --promptline "${RUNNER_TEMP}/promptline-plugin-check"
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with: {go-version-file: .go-version}
+      - run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends python3-yaml shellcheck
+      - run: bash -n plugins/promptline/skills/debian-sysadmin/scripts/validate-skill.sh && plugins/promptline/skills/debian-sysadmin/scripts/validate-skill.sh
+      - run: python3 plugins/promptline/skills/debian-sysadmin/scripts/skill_creator_validate.py plugins/promptline/skills/debian-sysadmin
+      - run: go build -trimpath -o "${RUNNER_TEMP}/promptline-plugin-check" ./cmd/promptline && python3 plugins/promptline/scripts/validate_package.py --promptline "${RUNNER_TEMP}/promptline-plugin-check"
+      - run: shellcheck install.sh scripts/test-install.sh scripts/check-go-policy.sh scripts/release-dry-run.sh scripts/release-metadata.sh plugins/promptline/skills/debian-sysadmin/scripts/validate-skill.sh
+      - run: scripts/test-install.sh
+      - run: python3 -B plugins/promptline/skills/debian-sysadmin/tests/test_toolbox_catalog.py && python3 plugins/promptline/skills/debian-sysadmin/scripts/check_toolbox_catalog.py --promptline "${RUNNER_TEMP}/promptline-plugin-check"
 
   compile:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target: [linux, darwin, windows]
+    permissions: {contents: read}
+    strategy: {matrix: {target: [linux, darwin, windows]}}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with: {go-version-file: .go-version}
       - run: make build-${{ matrix.target }}
 
   semantic-versioning:
-    name: 🤖 Semantic versioning
-    needs: [build-and-test, integration, race-integration, fuzz-smoke, sysadmin-plugin, compile]
+    needs: [build-and-test, security-policy, integration, race-integration, fuzz-smoke, sysadmin-plugin, compile]
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+    permissions: {contents: write}
     outputs:
       new_release_published: ${{ steps.semantic-release.outputs.new_release_published }}
       new_release_version: ${{ steps.semantic-release.outputs.new_release_version }}
-    if: ${{ github.ref_name == 'main' && github.event_name == 'push' }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Semantic Release
-        uses: cycjimmy/semantic-release-action@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: cycjimmy/semantic-release-action@c4a2fa890676fc2db25ad0aacd8ab4a0f1f4c024 # v4.2.1
         id: semantic-release
-        with:
-          extra_plugins: |
-            @semantic-release/changelog
+        with: {extra_plugins: "@semantic-release/changelog@6.0.3\n@semantic-release/github@11.0.6"}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   binary-releases:
-    name: Build binary releases
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    strategy: {matrix: {os: [ubuntu-latest, macos-latest]}}
     runs-on: ${{ matrix.os }}
     needs: [semantic-versioning]
-    if: ${{ needs.semantic-versioning.outputs.new_release_published == 'true' }}
+    if: ${{ github.event_name == 'push' && needs.semantic-versioning.outputs.new_release_published == 'true' }}
+    permissions: {contents: read, attestations: write, id-token: write}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Capture Go env
-        id: goenv
-        shell: bash
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with: {go-version-file: .go-version}
+      - id: metadata
         run: |
-          GOOS=$(go env GOOS)
-          GOARCH=$(go env GOARCH)
-          GOEXE=$(go env GOEXE)
-          echo "GOOS=$GOOS" >> "$GITHUB_ENV"
-          echo "GOARCH=$GOARCH" >> "$GITHUB_ENV"
-          echo "GOEXE=$GOEXE" >> "$GITHUB_ENV"
-          echo "goos=$GOOS" >> "$GITHUB_OUTPUT"
-          echo "goarch=$GOARCH" >> "$GITHUB_OUTPUT"
-          echo "goexe=$GOEXE" >> "$GITHUB_OUTPUT"
-      - name: Install go deps
-        run: go mod download
-      - name: Build release
-        shell: bash
-        run: |
-          OUTPUT="promptline-${GOOS}-${GOARCH}${GOEXE}"
-          go build -ldflags="-s -w -X main.Version=${{ needs.semantic-versioning.outputs.new_release_version }}" -trimpath -o "$OUTPUT" ./cmd/promptline
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+          os=$(go env GOOS); arch=$(go env GOARCH); suffix=$(go env GOEXE); binary="promptline-${os}-${arch}${suffix}"
+          go build -trimpath -ldflags="-s -w -X main.Version=${{ needs.semantic-versioning.outputs.new_release_version }}" -o "$binary" ./cmd/promptline
+          scripts/release-metadata.sh release "$binary" "${{ needs.semantic-versioning.outputs.new_release_version }}"
+          (cd release && shasum -a 256 --check "$(basename "$binary").sha256")
+          cp "$binary" release/; echo "binary=release/$binary" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
         with:
-          name: release-${{ steps.goenv.outputs.goos }}-${{ steps.goenv.outputs.goarch }}
-          path: ./promptline-${{ steps.goenv.outputs.goos }}-${{ steps.goenv.outputs.goarch }}${{ steps.goenv.outputs.goexe }}
+          subject-path: ${{ steps.metadata.outputs.binary }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-${{ matrix.os }}
+          path: release/
+          if-no-files-found: error
 
   remove-tag-on-fail:
-    name: Remove tag on fail
-    needs: [semantic-versioning]
+    needs: [semantic-versioning, binary-releases]
     runs-on: ubuntu-latest
-    if: ${{ (failure() || cancelled()) && needs.semantic-versioning.outputs.new_release_published == 'true' }}
+    if: ${{ github.event_name == 'push' && (failure() || cancelled()) && needs.semantic-versioning.outputs.new_release_published == 'true' }}
+    permissions: {contents: write}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - name: Remove tag
-        uses: dev-drprasad/delete-tag-and-release@v1.1
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with: {fetch-depth: 0}
+      - uses: dev-drprasad/delete-tag-and-release@82600feb9527126eca69833f07bafe53279bd9b4 # v1.1
         with:
           tag_name: ${{ needs.semantic-versioning.outputs.new_release_version }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          delete_release: false
+          delete_release: true
           repo: dyne/promptline
 
   upload-releases:
-    name: Upload releases
     needs: [semantic-versioning, binary-releases]
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' && needs.semantic-versioning.outputs.new_release_published == 'true' }}
+    permissions: {contents: write}
     steps:
-      - name: download binary artifacts
-        uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with: {pattern: release-*, path: promptline-bin, merge-multiple: true}
+      - run: cd promptline-bin && for checksum in *.sha256; do shasum -a 256 --check "$checksum"; done
+      - uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2.3.2
         with:
-          path: |
-            promptline-bin
-      - name: show directory structure
-        run: tree -dL 3
-      - name: relase all binary artifacts
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            promptline-bin/release*/*
+          files: promptline-bin/*
           tag_name: ${{ needs.semantic-versioning.outputs.new_release_version }}
-          draft: false
-          prerelease: false
           fail_on_unmatched_files: true
-          generate_release_notes: true
