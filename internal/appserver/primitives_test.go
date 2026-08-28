@@ -79,6 +79,10 @@ func TestAPI_Lifecycle(t *testing.T) {
 	if err != nil || !account.Authenticated() || account.Type != "chatgpt" {
 		t.Fatalf("account=%+v err=%v", account, err)
 	}
+	readThread, err := a.ReadThread(ctx, "thr_1")
+	if err != nil || readThread.ID != "thr_1" {
+		t.Fatalf("read thread=%+v err=%v", readThread, err)
+	}
 	dynamicTools := []DynamicToolNamespace{{Type: "namespace", Name: "toolbox", Description: "tools", Tools: []DynamicTool{{Type: "function", Name: "pwd", Description: "pwd", InputSchema: map[string]any{"type": "object"}}}}}
 	thread, err := a.StartThread(ctx, "/tmp", "gpt-5.6-terra", "prefer toolbox", dynamicTools)
 	if err != nil || thread.ID != "thr_1" {
@@ -124,6 +128,13 @@ func TestAPI_Lifecycle(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for %s parameters", method)
 		}
+	}
+}
+
+func TestAPIReadThreadRequiresInitialization(t *testing.T) {
+	api := NewAPI(New(pipeWriteCloser{io.Discard}, &emptyReader{}, Config{}))
+	if _, err := api.ReadThread(context.Background(), "thread"); err == nil {
+		t.Fatal("uninitialized API accepted thread read")
 	}
 }
 

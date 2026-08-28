@@ -1,6 +1,6 @@
 # Makefile for promptline
 
-.PHONY: build install clean test test-unit test-protocol test-integration test-race test-race-integration test-stress test-fuzz-smoke coverage check-coverage help release fmt vet benchmarks build-linux build-darwin build-windows test-all check-go-policy vulncheck check-workflow-policy release-dry-run
+.PHONY: build install clean test test-unit test-protocol test-integration test-race test-race-integration test-stress test-fuzz-smoke coverage check-coverage help release fmt vet security-gates benchmarks build-linux build-darwin build-windows test-all check-go-policy vulncheck check-workflow-policy release-dry-run
 
 # Use the Go executable supplied by the environment (including GitHub Actions).
 # Local contributors may override this, for example GO=/usr/local/go/bin/go.
@@ -15,6 +15,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 # deliberately excludes user-owned untracked trees such as plugins/upstream/.
 GOVULNCHECK_PACKAGES := ./cmd/promptline ./internal/... ./plugins/promptline/skills
 GOVULNCHECK ?= $(CURDIR)/.bin/govulncheck
+GOSEC ?= $(CURDIR)/.bin/gosec
 # Do not let untracked third-party material under plugins/upstream influence
 # local verification of this module. CI starts from a clean checkout, while
 # contributor worktrees may intentionally retain upstream reference trees.
@@ -59,6 +60,15 @@ vulncheck:
 
 check-workflow-policy:
 	python3 ./scripts/check-workflow-policy.py .github/workflows/ci.yml .releaserc
+
+security-gates:
+	python3 ./scripts/security-gates.py
+	python3 ./scripts/security-gates.py --self-test
+	python3 ./scripts/check-gosec-policy.py
+	python3 ./scripts/check-gosec-policy.py --self-test
+	GOCACHE="$(GOCACHE)" $(GO) test ./plugins/promptline/skills -run '^TestEmbeddedCatalog'
+	GOBIN="$(dir $(GOSEC))" $(GO) install github.com/securego/gosec/v2/cmd/gosec@v2.22.4
+	PATH="$(dir $(GO)):$$PATH" python3 ./scripts/run-gosec.py $(GOSEC) ./cmd/promptline ./internal/... ./plugins/promptline/skills
 
 release-dry-run: check-go-policy
 	GO="$(GO)" ./scripts/release-dry-run.sh
@@ -127,4 +137,4 @@ build-darwin:
 build-windows:
 	GOCACHE="$(GOCACHE)" GOOS=windows GOARCH=amd64 $(GO) build -o /tmp/promptline-windows-amd64.exe ./cmd/promptline
 
-test-all: check-go-policy vulncheck check-workflow-policy test-unit test-protocol test-integration test-race-integration test-stress test-fuzz-smoke check-coverage vet benchmarks build-linux build-darwin build-windows release-dry-run
+test-all: check-go-policy vulncheck check-workflow-policy security-gates test-unit test-protocol test-integration test-race-integration test-stress test-fuzz-smoke check-coverage vet benchmarks build-linux build-darwin build-windows release-dry-run
