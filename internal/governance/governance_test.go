@@ -84,6 +84,41 @@ func TestHandleServerRequestAuditsAndDeclinesWithoutTerminal(t *testing.T) {
 	}
 }
 
+func TestAuditLifecycleIncludesIdentityAndReplyOutcome(t *testing.T) {
+	dir := t.TempDir()
+	journal, err := OpenJournal(JournalConfig{Directory: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	request := appserver.ServerRequest{ID: 9, Method: "item/commandExecution/requestApproval"}
+	policy := Policy{Instance: "instance-a"}
+	decision, err := HandleServerRequest(context.Background(), policy, nil, journal, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordReplyOutcome(journal, policy, request, decision, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte(`"instance":"instance-a"`)) || !bytes.Contains(data, []byte(`"kind":"effect-reply"`)) || !bytes.Contains(data, []byte(`"outcome":"sent"`)) {
+		t.Fatalf("incomplete audit lifecycle: %s", data)
+	}
+	if err := RecordReplyOutcome(journal, policy, request, decision, errors.New("write failed")); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(filepath.Join(dir, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte(`"outcome":"failed"`)) {
+		t.Fatalf("reply failure was not durably recorded: %s", data)
+	}
+}
+
 func TestJournalRedactsRotatesAndUsesPrivateModes(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "journal")
 	journal, err := OpenJournal(JournalConfig{Directory: dir, MaxJournalBytes: 180, Retention: 2})
@@ -107,8 +142,8 @@ func TestJournalRedactsRotatesAndUsesPrivateModes(t *testing.T) {
 	if string(data) == "" || string(data) == "secret" {
 		t.Fatalf("journal did not write/redact: %q", data)
 	}
-	if string(data) != "" && !contains(string(data), "[REDACTED]") {
-		t.Fatalf("secret was not redacted: %s", data)
+	if contains(string(data), "secret") {
+		t.Fatalf("secret was retained: %s", data)
 	}
 	info, err := os.Stat(filepath.Join(dir, "events.jsonl"))
 	if err != nil {
@@ -169,6 +204,9 @@ func TestJournalRecoveryAndNestedRedaction(t *testing.T) {
 			}
 		})
 	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
 	j, err := OpenJournal(JournalConfig{Directory: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -181,13 +219,136 @@ func TestJournalRecoveryAndNestedRedaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if contains(string(data), "secret") || !contains(string(data), "[REDACTED]") {
+	if contains(string(data), "secret") {
 		t.Fatalf("nested sensitive metadata leaked: %s", data)
 	}
 	lines := bytes.Split(bytes.TrimSpace(data), []byte{'\n'})
 	var event Event
 	if err := json.Unmarshal(lines[len(lines)-1], &event); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestJournalRejectsSymlinkArtifactsAndDetectsTampering(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "sentinel")
+	if err := os.WriteFile(outside, []byte("unchanged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "events.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenJournal(JournalConfig{Directory: dir}); err == nil {
+		t.Fatal("journal symlink accepted")
+	}
+	if got, err := os.ReadFile(outside); err != nil || string(got) != "unchanged" {
+		t.Fatalf("outside sentinel = %q, %v", got, err)
+	}
+	if err := os.Remove(filepath.Join(dir, "events.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	j, err := OpenJournal(JournalConfig{Directory: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Append(Event{Instance: "test", Kind: "effect"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Append(Event{Instance: "test", Kind: "reply"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "events.jsonl")
+	if err := VerifyJournal(path); err != nil {
+		t.Fatalf("verify intact journal: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = bytes.Replace(data, []byte(`"kind":"reply"`), []byte(`"kind":"alter"`), 1)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyJournal(path); err == nil {
+		t.Fatal("tampered journal verified")
+	}
+}
+
+func TestJournalUsesProvidedRootForRelativeArtifacts(t *testing.T) {
+	base := t.TempDir()
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	j, err := OpenJournal(JournalConfig{Root: root, Directory: "audit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	if err := j.Append(Event{Instance: "test", Kind: "effect"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := root.Lstat("audit/events.jsonl"); err != nil {
+		t.Fatalf("rooted journal missing: %v", err)
+	}
+	if _, err := OpenJournal(JournalConfig{Root: root, Directory: "../escape"}); err == nil {
+		t.Fatal("rooted traversal accepted")
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Remove("audit/events.jsonl"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../outside", filepath.Join(base, "audit", "events.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenJournal(JournalConfig{Root: root, Directory: "audit"}); err == nil {
+		t.Fatal("rooted leaf symlink accepted")
+	}
+}
+
+func TestJournalRedactsSensitiveValuesUnderBenignKeys(t *testing.T) {
+	j, err := OpenJournal(JournalConfig{Directory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	for _, secret := range []string{"Bearer abcdefghijkl", "https://alice:abcdefgh@example.test", "API_KEY=abcdefghijk"} {
+		if err := j.Append(Event{Instance: "test", Kind: "effect", Metadata: map[string]any{"note": secret}}, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(j.cfg.Directory, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"abcdefghijkl", "alice:"} {
+		if bytes.Contains(data, []byte(secret)) {
+			t.Fatalf("secret leaked: %s", secret)
+		}
+	}
+}
+
+func TestJournalDropsUnapprovedMetadata(t *testing.T) {
+	j, err := OpenJournal(JournalConfig{Directory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	if err := j.Append(Event{Instance: "test", Kind: "effect", Metadata: map[string]any{"modelOutput": "do not retain", "itemId": "safe"}}, true); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(j.cfg.Directory, "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("modelOutput")) || !bytes.Contains(data, []byte("itemId")) {
+		t.Fatalf("metadata allow-list violated: %s", data)
 	}
 }
 

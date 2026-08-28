@@ -71,6 +71,7 @@ type Instance struct {
 	timeouts         Timeouts
 	outputCaps       OutputCaps
 	stateRename      func(string, string) error
+	stateRootHandle  *os.Root
 }
 
 func (i *Instance) Name() string               { return i.name }
@@ -87,6 +88,11 @@ func (i *Instance) ApprovalMode() ApprovalMode { return i.approvalMode }
 func (i *Instance) ToolboxEnabled() bool       { return i.toolboxEnabled }
 func (i *Instance) Timeouts() Timeouts         { return i.timeouts }
 func (i *Instance) OutputCaps() OutputCaps     { return i.outputCaps }
+
+// StateRootHandle is the descriptor-rooted capability for Promptline-owned
+// artifacts. Callers must use relative names and never turn them back into
+// host paths for I/O.
+func (i *Instance) StateRootHandle() *os.Root { return i.stateRootHandle }
 
 // New validates cfg and prepares an isolated private instance directory.
 func New(cfg Config) (*Instance, error) {
@@ -117,6 +123,10 @@ func New(cfg Config) (*Instance, error) {
 	}
 	if err := ensurePrivateDirectory(stateDir); err != nil {
 		return nil, fmt.Errorf("instance state directory: %w", err)
+	}
+	stateRootHandle, err := os.OpenRoot(stateDir)
+	if err != nil {
+		return nil, fmt.Errorf("open instance state root: %w", err)
 	}
 	codexHome := filepath.Join(stateDir, "codex-home")
 	if err := ensurePrivateDirectory(codexHome); err != nil {
@@ -173,7 +183,7 @@ func New(cfg Config) (*Instance, error) {
 	if renameState == nil {
 		renameState = os.Rename
 	}
-	return &Instance{name: cfg.Name, stateRoot: root, stateDir: stateDir, workingRoot: workingRoot,
+	return &Instance{name: cfg.Name, stateRoot: root, stateDir: stateDir, stateRootHandle: stateRootHandle, workingRoot: workingRoot,
 		workingDirectory: workingDirectory, codexExecutable: executable, codexHome: codexHome,
 		model: model, reasoningEffort: cfg.ReasoningEffort, approvalMode: mode,
 		toolboxEnabled: cfg.ToolboxEnabled,

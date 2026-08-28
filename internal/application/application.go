@@ -165,19 +165,24 @@ func RunWithFactories(ctx context.Context, cmd pruntime.Command, input io.Reader
 		return err
 	}
 	locked = false
-	journal, err := factories.openJournal(governance.JournalConfig{Directory: filepath.Join(in.StateDir(), "audit")})
+	journal, err := factories.openJournal(governance.JournalConfig{Root: in.StateRootHandle(), Directory: "audit"})
 	if err != nil {
 		_ = r.Close(context.Background())
 		return fmt.Errorf("open audit journal: %w", err)
 	}
 	defer journal.Close()
 	r.SetRequestHandler(func(requestCtx context.Context, request appserver.ServerRequest, approvalInput io.Reader) error {
-		decision, decisionErr := governance.HandleServerRequest(requestCtx, governance.Policy{Roots: []string{in.WorkingRoot()}}, ApprovalPrompt(in.ApprovalMode(), approvalInput, output), journal, request)
+		policy := governance.Policy{Instance: in.Name(), Roots: []string{in.WorkingRoot()}, Approval: r.ApprovalIdentity(request)}
+		decision, decisionErr := governance.HandleServerRequest(requestCtx, policy, ApprovalPrompt(in.ApprovalMode(), approvalInput, output), journal, request)
 		if decisionErr != nil {
 			decision = map[string]string{"decision": string(governance.DecisionDecline)}
 		}
-		if err := client.ReplyRequest(requestCtx, request.ID, decision); err != nil {
-			return err
+		replyErr := client.ReplyRequest(requestCtx, request.ID, decision)
+		if auditErr := governance.RecordReplyOutcome(journal, policy, request, decision, replyErr); auditErr != nil && replyErr == nil {
+			return auditErr
+		}
+		if replyErr != nil {
+			return replyErr
 		}
 		return decisionErr
 	})

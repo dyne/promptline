@@ -34,6 +34,7 @@ type Effect struct {
 // Policy defaults to ask for all effects. Read effects can be automatically
 // accepted only when they remain beneath an explicitly configured root.
 type Policy struct {
+	Instance       string
 	Roots          []string
 	AutoAllowReads bool
 	ActiveThreadID string

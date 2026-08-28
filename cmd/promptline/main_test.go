@@ -18,6 +18,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -119,6 +120,53 @@ func TestMaterializeSkillCommandDoesNotCreateInstanceState(t *testing.T) {
 	}
 	if _, err := os.Stat(stateRoot); !os.IsNotExist(err) {
 		t.Fatalf("materialization created instance state: %v", err)
+	}
+}
+
+func TestVerifyAuditCommandReportsLocalAndAnchoredEvidence(t *testing.T) {
+	stateDir := t.TempDir()
+	dir := filepath.Join(stateDir, "audit")
+	j, err := governance.OpenJournal(governance.JournalConfig{Directory: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Append(governance.Event{Instance: "test", Kind: "effect"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "events.jsonl")
+	var output bytes.Buffer
+	if err := run([]string{"verify-audit", stateDir}, nil, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "local chain only") {
+		t.Fatalf("local trust status = %q", output.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record governance.Event
+	if err := json.Unmarshal(bytes.TrimSpace(data), &record); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err := run([]string{"verify-audit", stateDir, "--audit-anchor", record.Hash}, nil, &output, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "external anchor matches") {
+		t.Fatalf("anchor status = %q", output.String())
+	}
+	if err := run([]string{"verify-audit", stateDir, "--audit-anchor", "wrong"}, nil, io.Discard, io.Discard); err == nil {
+		t.Fatal("wrong anchor accepted")
+	}
+	if err := os.WriteFile(path, bytes.Replace(data, []byte(`"kind":"effect"`), []byte(`"kind":"alter"`), 1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"verify-audit", stateDir}, nil, io.Discard, io.Discard); err == nil {
+		t.Fatal("tampered journal accepted")
 	}
 }
 

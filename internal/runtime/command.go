@@ -22,6 +22,8 @@ type Command struct {
 	ListSkills   bool
 	SkillFiles   string
 	Materialize  string
+	VerifyAudit  string
+	AuditAnchor  string
 	MockCodex    bool
 }
 
@@ -60,6 +62,7 @@ func Parse(args []string, stderr io.Writer) (Command, error) {
 	fs.BoolVar(&c.Debug, "debug", false, "enable terminal diagnostics")
 	fs.BoolVar(&c.Version, "version", false, "print version")
 	fs.BoolVar(&c.Version, "V", false, "print version (alias for --version)")
+	fs.StringVar(&c.AuditAnchor, "audit-anchor", "", "expected externally stored final audit hash")
 	if err := fs.Parse(remaining); err != nil {
 		return Command{}, err
 	}
@@ -79,7 +82,10 @@ func Parse(args []string, stderr io.Writer) (Command, error) {
 	if command == "materialize-skill" {
 		c.Materialize = commandArgument
 	}
-	if (command == "list-skill-files" || command == "materialize-skill") && commandArgument == "" {
+	if command == "verify-audit" {
+		c.VerifyAudit = commandArgument
+	}
+	if (command == "list-skill-files" || command == "materialize-skill" || command == "verify-audit") && commandArgument == "" {
 		return Command{}, fmt.Errorf("%s requires an argument", command)
 	}
 	if c.ToolboxServe && (command == "resume" || command == "new") {
@@ -99,7 +105,7 @@ func Parse(args []string, stderr io.Writer) (Command, error) {
 	if c.Version {
 		return c, nil
 	}
-	if c.ListSkills || c.SkillFiles != "" || c.Materialize != "" {
+	if c.ListSkills || c.SkillFiles != "" || c.Materialize != "" || c.VerifyAudit != "" {
 		return c, nil
 	}
 	if c.Instance.WorkingDirectory == "" {
@@ -127,7 +133,7 @@ func splitCommand(args []string) (command, argument string, remaining []string, 
 	switch args[0] {
 	case "new", "mcp-server", "help", "list-skills":
 		return args[0], "", args[1:], nil
-	case "resume", "list-skill-files", "materialize-skill":
+	case "resume", "list-skill-files", "materialize-skill", "verify-audit":
 		remaining = args[1:]
 		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
 			argument = remaining[0]
@@ -149,6 +155,7 @@ func printUsage(fs *flag.FlagSet, output io.Writer) {
 	fmt.Fprintln(output, "       promptline list-skills")
 	fmt.Fprintln(output, "       promptline list-skill-files SKILL")
 	fmt.Fprintln(output, "       promptline materialize-skill DIRECTORY")
+	fmt.Fprintln(output, "       promptline verify-audit JOURNAL [--audit-anchor HASH]")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Commands:")
 	fmt.Fprintln(output, "  new         Start a new interactive thread (default)")
@@ -157,6 +164,7 @@ func printUsage(fs *flag.FlagSet, output io.Writer) {
 	fmt.Fprintln(output, "  list-skills List embedded skills")
 	fmt.Fprintln(output, "  list-skill-files List public files in an embedded skill")
 	fmt.Fprintln(output, "  materialize-skill Export embedded skills without overwriting")
+	fmt.Fprintln(output, "  verify-audit Verify a read-only audit journal and optional external anchor")
 	fmt.Fprintln(output, "  help        Print this help")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Options:")

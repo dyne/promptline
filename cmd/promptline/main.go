@@ -69,6 +69,23 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 	if cmd.Version {
 		return printVersionReport(output, cmd.Instance.CodexExecutable)
 	}
+	if cmd.VerifyAudit != "" {
+		root, err := os.OpenRoot(cmd.VerifyAudit)
+		if err != nil {
+			return fmt.Errorf("open audit state root: %w", err)
+		}
+		defer root.Close()
+		hash, err := governance.VerifyJournalRoot(root, "audit/events.jsonl", cmd.AuditAnchor)
+		if err != nil {
+			return err
+		}
+		if cmd.AuditAnchor == "" {
+			_, err = fmt.Fprintf(output, "audit verified: local chain only (final hash %s); this does not defeat a same-user rewrite\n", hash)
+		} else {
+			_, err = fmt.Fprintf(output, "audit verified: external anchor matches (final hash %s)\n", hash)
+		}
+		return err
+	}
 	if cmd.ListSkills || cmd.SkillFiles != "" || cmd.Materialize != "" {
 		catalog, err := skills.EmbeddedCatalog()
 		if err != nil {
@@ -146,7 +163,7 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 		_ = lock.Close()
 		return err
 	}
-	journal, err := governance.OpenJournal(governance.JournalConfig{Directory: filepath.Join(in.StateDir(), "audit")})
+	journal, err := governance.OpenJournal(governance.JournalConfig{Root: in.StateRootHandle(), Directory: "audit"})
 	if err != nil {
 		_ = r.Close(context.Background())
 		return fmt.Errorf("open audit journal: %w", err)
@@ -154,12 +171,17 @@ func run(args []string, input io.Reader, output, stderr io.Writer) error {
 	defer journal.Close()
 	r.SetRequestHandler(func(requestCtx context.Context, request appserver.ServerRequest, approvalInput io.Reader) error {
 		prompt := approvalPrompt(in.ApprovalMode(), approvalInput, output)
-		decision, decisionErr := governance.HandleServerRequest(requestCtx, governance.Policy{Roots: []string{in.WorkingRoot()}}, prompt, journal, request)
+		policy := governance.Policy{Instance: in.Name(), Roots: []string{in.WorkingRoot()}, Approval: r.ApprovalIdentity(request)}
+		decision, decisionErr := governance.HandleServerRequest(requestCtx, policy, prompt, journal, request)
 		if decisionErr != nil {
 			decision = map[string]string{"decision": string(governance.DecisionDecline)}
 		}
-		if err := client.ReplyRequest(requestCtx, request.ID, decision); err != nil {
-			return err
+		replyErr := client.ReplyRequest(requestCtx, request.ID, decision)
+		if auditErr := governance.RecordReplyOutcome(journal, policy, request, decision, replyErr); auditErr != nil && replyErr == nil {
+			return auditErr
+		}
+		if replyErr != nil {
+			return replyErr
 		}
 		return decisionErr
 	})
