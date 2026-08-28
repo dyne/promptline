@@ -137,6 +137,22 @@ func TestFileAndPermissionApprovalValidationRejectsMalformedFields(t *testing.T)
 	}
 }
 
+func TestApprovalDecisionAndChangeComparisons(t *testing.T) {
+	if got := decisions([]string{"accept", "decline"}); len(got) != 2 || got[0] != DecisionAccept {
+		t.Fatalf("decisions=%v", got)
+	}
+	changes := []FileChange{{Path: "a", Diff: "x"}}
+	if !sameChanges(changes, changes) {
+		t.Fatal("same changes differ")
+	}
+	if sameChanges(changes, []FileChange{{Path: "a", Diff: "y"}}) || sameChanges(changes, nil) {
+		t.Fatal("different changes match")
+	}
+	if pendingFileChanges(ApprovalIdentity{PendingItem: []byte("bad")}, fileApproval{}) != nil {
+		t.Fatal("malformed pending item accepted")
+	}
+}
+
 func TestCommandApprovalRequiresMatchingRenderedPendingItem(t *testing.T) {
 	params := []byte(`{"threadId":"t","turnId":"u","itemId":"i","command":"go test","cwd":"/work","commandActions":[]}`)
 	pending := []byte(`{"item":{"id":"i","threadId":"t","turnId":"u","type":"commandExecution","command":"go test","cwd":"/work","commandActions":[]}}`)

@@ -593,6 +593,13 @@ func TestRecordReplyOutcomeRecordsSentAndFailed(t *testing.T) {
 	}
 }
 
+func TestAuditEffectIncludesOptionalAuthorityFields(t *testing.T) {
+	metadata := auditEffect(Effect{Kind: "write", Operation: "edit", CWD: "/work", Paths: []string{"a"}, EnvironmentID: "env", ItemID: "item", ApprovalID: "approval", RequestsNetwork: true}, "method")
+	if metadata["cwd"] != "/work" || metadata["network"] != true || len(metadata["paths"].([]string)) != 1 {
+		t.Fatalf("audit metadata=%#v", metadata)
+	}
+}
+
 func TestVerifyJournalWithAnchorRejectsMissingAndBrokenRotation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	if _, err := VerifyJournalWithAnchor(path, ""); err == nil {
@@ -683,4 +690,77 @@ func TestRootedLoadHeadRecoversRetainedRotation(t *testing.T) {
 		t.Fatal("oversized journal accepted")
 	}
 	_ = oversized.Close()
+}
+
+type failingAuditWriter struct{}
+
+func (failingAuditWriter) Write([]byte) (int, error) { return 0, errors.New("terminal write failed") }
+
+func TestTerminalPromptAndJournalArtifactErrorsFailClosed(t *testing.T) {
+	if decision, err := (TerminalPrompt{Input: bytes.NewBufferString("yes\n"), Output: failingAuditWriter{}}).Decide(Effect{Kind: "write"}); err == nil || decision != DecisionDecline {
+		t.Fatalf("terminal write failure = %q, %v", decision, err)
+	}
+	j, err := OpenJournal(JournalConfig{Directory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	if _, err := j.lstatArtifact(filepath.Join(j.cfg.Directory, "missing")); err == nil {
+		t.Fatal("missing artifact accepted")
+	}
+	if err := j.renameArtifact(filepath.Join(j.cfg.Directory, "missing"), filepath.Join(j.cfg.Directory, "next")); err == nil {
+		t.Fatal("missing rename accepted")
+	}
+}
+
+func TestLoadHeadRestoresSequenceFromMultiplePersistedEvents(t *testing.T) {
+	dir := t.TempDir()
+	j, err := OpenJournal(JournalConfig{Directory: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Append(Event{Instance: "test", Kind: "effect"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Append(Event{Instance: "test", Kind: "reply"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenJournal(JournalConfig{Directory: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if reopened.sequence != 2 || reopened.lastHash == "" {
+		t.Fatalf("head=%d %q", reopened.sequence, reopened.lastHash)
+	}
+}
+
+func TestRootedJournalOpenRejectsUnsafeDirectoryAndLeaf(t *testing.T) {
+	base := t.TempDir()
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := os.WriteFile(filepath.Join(base, "audit"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rootedOpenJournalDir(root, "audit"); err == nil {
+		t.Fatal("regular audit path accepted")
+	}
+	if err := os.Remove(filepath.Join(base, "audit")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rootedOpenJournalDir(root, "audit"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../outside", filepath.Join(base, "audit", "events.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rootedOpenJournalFile(root, "audit/events.jsonl"); err == nil {
+		t.Fatal("symlink leaf accepted")
+	}
 }
